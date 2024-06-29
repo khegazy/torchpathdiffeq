@@ -141,11 +141,16 @@ def _remove_idxs_to_ranges(idxs_cut):
 def _find_sparse_y(t, p, error_ratios):
     #print("SPARSE ERROR RATIO", error_ratios)
     ratio_idxs_cut = torch.where(error_ratios > 1.)[0]
+    #print("ratio idxs", ratio_idxs_cut[-10:])
+    #ratio_idxs_cut = p*ratio_idxs_cut + 1
     ratio_idxs_cut = p*ratio_idxs_cut + 1
     idxs_add = torch.flatten(
-        ratio_idxs_cut.unsqueeze(1) + 2*torch.arange(p).unsqueeze(0)
+        ratio_idxs_cut.unsqueeze(1) + torch.arange(p).unsqueeze(0)
+        #ratio_idxs_cut.unsqueeze(1) + 2*torch.arange(p).unsqueeze(0)
     )
 
+    #print(ratio_idxs_cut.unsqueeze(1) + 2*torch.arange(p).unsqueeze(0))
+    #print(len(error_ratios), len(t), idxs_add[-10:])
     t_add = (t[idxs_add-1] + t[idxs_add])/2
     idxs_add += torch.arange(len(idxs_add)) # Account for previosly added points
     

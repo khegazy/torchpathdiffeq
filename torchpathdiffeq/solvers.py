@@ -19,7 +19,8 @@ class degree(Enum):
 
 ADAPTIVE_SOLVER_P = {
     'euler' : 1,
-    'heun' : 2
+    'heun' : 1,
+    'generic3' : 2
 }
 
 @dataclass
@@ -139,7 +140,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             if self.previous_t is None\
                 or self.previous_ode_fxn != ode_fxn.__name__:
                 t_add = torch.unsqueeze(
-                    torch.linspace(t_init, t_final, 7), 1
+                    torch.linspace(t_init, t_final, 1+self.p*13), 1
                 )
             else:
                 mask = (self.previous_t[:,0] <= t_final)\
