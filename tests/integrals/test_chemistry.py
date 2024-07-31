@@ -35,3 +35,4 @@ def test_chemistry():
     assert error/serial_integral.integral < 0.01
 
 
+test_chemistry()

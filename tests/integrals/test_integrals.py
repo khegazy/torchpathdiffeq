@@ -62,6 +62,7 @@ def test_integrals():
     t_init = 0.
     t_final = 1.
     for solver in ADAPTIVE_SOLVER_P.keys():
+        print("SOLVER", solver)
         integrator = RKParallelAdaptiveStepsizeSolver(
             solver=solver, atol=1e-7, rtol=1e-7, remove_cut=0.105
         )
