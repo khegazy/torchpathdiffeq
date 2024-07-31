@@ -1,7 +1,124 @@
 import torch
+#from einops import rearrange
+
+def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
+    #t_steps = t_spacing_fxn(t[:-1], t[1:])
+    t_steps = t_step_fxn(t)
+    print("INIT T", t_steps)
+    n_intervals = int(t_steps.shape[1])
+
+    t_add = torch.concatenate(
+        [t_steps[0], torch.flatten(t_steps[1:,1:])]
+    ).unsqueeze(1)
+    
+    # Calculate new geometries
+    print("T ADD", t_add)
+    y_add = ode_fxn(t_add)
+    print("Y add", y_add)
+
+    y_steps = torch.reshape(y_add[1:], (-1, n_intervals-1))
+    y_steps = torch.concatenate(
+        [
+            torch.concatenate(
+                [torch.tensor([y_add[0]]), y_steps[:-1,-1]]
+            ).unsqueeze(1),
+            y_steps
+        ],
+        dim=1
+    )
+
+    print("OUT T", t_steps)
+    print("OUT T Y", t_steps.shape, y_steps.shape)
+    return y_steps, t_steps
 
 
-def _adaptively_add_y(ode_fxn, y, t, t_add, idxs_add):
+def _adaptively_add_y(
+        ode_fxn, y, t, error_ratios, t_step_fxn, t_y_fusion, t_init, t_final
+    ):
+    """
+    t : [t-1, p1]
+    y : [t-1, p1]
+    t_add : [ta] time between t[idx-1] and t[idx]
+    idxs_add : [ta] index where it should be given current t
+    """
+
+
+    if y is None:
+        return _add_initial_y(ode_fxn=ode_fxn, t=t, t_step_fxn=t_step_fxn, t_init=t_init, t_final=t_final)
+
+    print("ADAPTIVE ADD INP SHAPES", y.shape, t.shape)
+    if len(torch.where(error_ratios > 1.)[0]) == 0:
+        return t, y, error_ratios
+         
+    # Get new time steps for merged steps
+    if idxs_remove_pair is not None:
+        t_steps_remove = t_step_fxn(t, idx_remove_pair)
+        #    t[idxs_remove_pair,0], t[idxs_remove_pair+1,-1] 
+        #)
+        t_steps_remove = t_steps_remove[:,1:-1]
+    
+    idxs_add = torch.where(error_ratios > 1.)[0]
+    t_steps_add = t_step_fxn(t, idxs_add)
+    t_steps_add = t_steps_add[:,:-1]
+
+    """
+    t_bisect = (t[idxs_add,0] + t[idxs_add,-1])/2.
+    t_left = torch.concatenate(
+        [t[idxs_add,0].unsqueeze(1), t_bisect.unsqueeze(1)], dim=1
+    )
+    t_right = torch.concatenate(
+        [t_bisect.unsqueeze(1), t[idxs_add,-1].unsqueeze(1)], dim=1
+    )
+    t_steps_add = t_spacing_fxn(t_left.flatten(), t_right.flatten())
+    t_steps_add = t_steps_add[:,:-1]
+    """ 
+
+    # Calculate new geometries
+    y_add = ode_fxn(t_steps_add)
+
+    t_add, y_add = t_y_fusion(idxs_add, t, t_add, y, y_add)
+    y_add = rearrange(y_add, '(a b) p -> a b p', b=2)
+    t_steps_add = rearrange(t_steps_add, '(a b) p -> a b p', b=2)
+
+    """
+    y_steps = torch.reshape(y_add[1:], (-1, n_intervals-1))
+    y_steps = torch.concatenate(
+        [
+            torch.concatenate(
+                [torch.tensor([y_add[0]]), y_steps[:-1,-1]]
+            ).unsqueeze(1),
+            y_steps
+        ],
+        dim=1
+    )
+    """
+
+    
+    y_combined = torch.zeros(
+        (len(y)+len(y_add), y_add.shape[-1]),
+        requires_grad=False
+    ).detach()
+    t_combined = torch.zeros_like(y_combined, requires_grad=False).detach()
+    
+    idx_offset = torch.zeros(len(y))
+    idx_offset[idxs_add] = 1
+    idx_offset = torch.cumsum(idx_offset)
+    idx_input = torch.arange(len(y)) + idx_offset
+    y_combined[idx_input,:] = y
+    t_combined[idx_input,:] = t
+
+    idx_add = idx_add + torch.arange(len(idx_add))
+    y_combined[idx_add,:-1] = y_add[:,0]
+    y_combined[idx_add+1,:-1] = y_add[:,1]
+    t_combined[idx_add,:-1] = t_steps_add[:,0]
+    t_combined[idx_add+1,:-1] = t_steps_add[:,1]
+
+    y_combined[:-1,-1] = y_combined[1:,0]
+    t_combined[:-1,-1] = t_combined[1:,0]
+
+    return y_combined, t_combined
+
+
     if len(t_add) == 0:
         RuntimeWarning("Do not expect empty points to add.")
         return y, t
@@ -40,7 +157,74 @@ def _adaptively_add_y(ode_fxn, y, t, t_add, idxs_add):
     return y_combined, t_combined
 
 
-def _find_excess_y(p, error_ratios, remove_cut):
+def __adaptively_add_y(ode_fxn, y, t, error_ratios=None, t_add=None, idxs_add=None):
+    """
+    t : [t]
+    y : [t-1, p1]
+    t_add : [ta] time between t[idx-1] and t[idx]
+    idxs_add : [ta] index where it should be given current t
+    """
+
+    # Check inputs, either error_ratios, or t_add and idx_add
+
+    if error_ratios is not None:
+        raise NotImplementedError
+    #else:
+
+    if len(t_add) == 0:
+        RuntimeWarning("Do not expect empty points to add.")
+        return y, t
+    if y is None:
+        y = torch.tensor([])
+    if t is None:
+        y = torch.tensor([])
+    
+    # Calculate new geometries
+    y_add = ode_fxn(t_add)
+    
+    # Place new geometries between existing 
+    y_combined = torch.zeros(
+        (len(y)+len(y_add), y_add.shape[-1]),
+        requires_grad=False
+    ).detach()
+    y_idxs = None
+    if y is not None and len(y):
+        y_idxs = torch.arange(len(y), dtype=torch.int)
+        bisected_idxs = idxs_add - torch.arange(len(idxs_add))
+        for i, idx in enumerate(bisected_idxs[:-1]):
+            y_idxs[idx:bisected_idxs[i+1]] += i + 1
+        y_idxs[bisected_idxs[-1]:] += len(bisected_idxs)
+        y_combined[y_idxs] = y
+    assert(torch.all(y_combined[idxs_add] == 0))
+    y_combined[idxs_add] = y_add
+
+    # Place new times between existing 
+    t_combined = torch.zeros(
+        (len(y)+len(t_add), 1), requires_grad=False
+    )
+    if y_idxs is not None:
+        t_combined[y_idxs] = t
+    t_combined[idxs_add] = t_add
+
+    return y_combined, t_combined
+
+
+def _find_excess_y(error_ratios_2steps, remove_cut):
+        
+    #ratio_idxs_cut = torch.where(error_ratios < remove_cut)[0]
+    ratio_mask_cut = error_ratios_2steps < remove_cut
+    if len(error_ratios_2steps) == 0:
+        return torch.empty()
+    # Since error ratios encompasses 2 RK steps each neighboring element shares
+    # a step, we cannot remove that same step twice and therefore remove the 
+    # first in pair of steps that it appears in
+    #print("RC1", ratio_mask_cut)
+    ratio_mask_cut = _rec_remove(error_ratios_2steps < remove_cut)
+    ratio_idxs_cut = torch.where(ratio_mask_cut)[0] # Index for first interval of 2
+
+    return ratio_idxs_cut
+
+def __find_excess_y(p, error_ratios, remove_cut):
         
     #ratio_idxs_cut = torch.where(error_ratios < remove_cut)[0]
     ratio_mask_cut = error_ratios < remove_cut
@@ -158,9 +342,11 @@ def _find_sparse_y(t, p, error_ratios):
 
 
 def _compute_error_ratios(y_p, y_p1, rtol, atol, norm):
+    print("COMP INP", y_p.shape, y_p1.shape)
     error_estimate = torch.abs(y_p1 - y_p)
     error_tol = atol + rtol*torch.max(y_p.abs(), y_p1.abs())
-    error_ratio = norm(error_estimate/error_tol).abs() 
+    error_ratio = norm(error_estimate/error_tol).abs()
+    print("COMP1", error_ratio.shape)
 
     error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
     error_tol_2steps = atol + rtol*torch.max(
