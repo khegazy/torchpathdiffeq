@@ -6,7 +6,7 @@ from torchdiffeq import odeint
 from dataclasses import dataclass
 from enum import Enum
 
-from .adaptivity import _adaptively_add_y, _find_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
+from .adaptivity import _adaptively_add_y, _remove_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
 
 
 class steps(Enum):
@@ -27,12 +27,13 @@ ADAPTIVE_SOLVER_P = {
 @dataclass
 class IntegralOutput():
     integral: torch.Tensor
-    t: torch.Tensor
-    h: torch.Tensor
-    y: torch.Tensor
-    errors: torch.Tensor
-    error_ratios: torch.Tensor
-    remove_mask: torch.Tensor
+    t_pruned: torch.Tensor = None
+    t: torch.Tensor = None
+    h: torch.Tensor = None
+    y: torch.Tensor = None
+    sum_steps: torch.Tensor = None
+    errors: torch.Tensor = None
+    error_ratios: torch.Tensor = None
     
 
 class SolverBase():
@@ -91,12 +92,9 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
         return IntegralOutput(
             integral=integral[-1],
             t=t,
-            h=None,
-            y=None,
-            errors=None,
-            error_ratios=None,
-            remove_mask=None
         )
+
+
 
 
 class ParallelAdaptiveStepsizeSolver(SolverBase):
@@ -136,16 +134,18 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             self._initial_t_steps = self._initial_t_steps_uniform
             self._adaptive_t_steps = self._adaptive_t_steps_uniform
             self._t_y_fusion = self._t_y_fusion_uniform
+            self._remove_excess_t = self._remove_excess_t_uniform
         elif solver_enum == steps.ADAPTIVE_VARIABLE:
             self._initial_t_steps = self._initial_t_steps_variable
             self._adaptive_t_steps = self._adaptive_t_steps_variable
             self._t_y_fusion = self._t_y_fusion_variable
+            self._remove_excess_t = self._remove_excess_t_variable
         else:
             raise NotImplementedError
             
     def _initial_t_steps_uniform(self, t, t_init=0., t_final=1.):
         if t is None:
-            t = torch.linspace(t_init, t_final, 7)
+            t = torch.linspace(t_init, t_final, 7).unsqueeze(1)
         assert (len(t) - 1) % self.p == 0
         _t = torch.reshape(t[:-1], (-1, self.p))
         return self._t_step_interpolate(_t[:-1], _t[1:])
@@ -177,14 +177,18 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
     def _initial_t_steps_variable(self, t, t_init=0., t_final=1.):
         if t is None:
-            t = torch.linspace(t_init, t_final, 7*self.p+1)
+            t = torch.linspace(t_init, t_final, 7*self.p+1).unsqueeze(1)
         assert (len(t) - 1) % self.p == 0
-        _t = torch.reshape(t[:-1], (-1, self.p))
-        _t_ends = torch.concatenate([_t[1:,0], torch.tensor([t[-1]])])
-        return torch.concatenate([_t, _t_ends.unsqueeze(1)], dim=-1)
+        _t = torch.reshape(t[:-1], (-1, self.p, 1))
+        print("INIT T", _t.shape, _t[1:,0].shape, t[None,-1].shape)
+        _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
+        return torch.concatenate([_t, _t_ends], dim=1)
     
     def _adaptive_t_steps_variable(self, t, idxs_add):
-        return t[idxs_add,1:] -  t[idxs_add,:-1]
+        """
+        Add points between current points to double the sampling
+        """
+        return (t[idxs_add,1:] +  t[idxs_add,:-1])/2
     
     def _t_y_fusion_variable(self, idxs_add, t, t_add, y, y_add):
         t_add = torch.concatenate(
@@ -201,6 +205,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         y_add = torch.reshape(y_add, (2*len(y_add), -1))
         
         return t_add, y_add
+    
+    def _remove_excess_t_variable(self, t, remove_mask):
+        keep_idxs = torch.arange(t.shape[1]//2 + 1, dtype=torch.long)*2
+        combined_steps = torch.concatenate(
+            t[remove_mask,:], t[1:,1:][remove_mask[:-1]], dim=-1
+        )
+        t[remove_mask,:] = combined_steps[:,keep_idxs]
+        return t[~remove_mask]
+
 
 
     def integrate(
@@ -279,27 +292,23 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 t_final
             )
             if speed_verbose: print("\t add time", time.time() - t0)
-            if verbose:
-                print("NEW T", t.shape, t)
-                print("NEW Y", y.shape, y)
+            if verbose or True:
+                print("NEW T", t.shape, t[:,:,0])
+                print("NEW Y", y.shape, y[:,:,0])
 
             # Evaluate integral
             t0 = time.time()
-            print("INPUT INTO INTEGRAL")
-            print("\tT", t)
-            print("\ty", y)
-            print("\ty0", y0)
-            integral_p, y_p, _ = self._calculate_integral(t, y, y0=y0, degr=degree.P)
-            integral_p1, y_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
+            integral_p, sum_steps_p, _ = self._calculate_integral(t, y, y0=y0, degr=degree.P)
+            integral_p1, sum_steps_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
             if speed_verbose: print("\t calc integrals 1", time.time() - t0)
             
             # Calculate error
             t0 = time.time()
-            print("YP SHAPES", y_p.shape, y_p1.shape)
+            #print("YP SHAPES", y_p.shape, y_p1.shape)
             error_ratios, error_ratios_2steps = _compute_error_ratios(
-                y_p, y_p1, self.rtol, self.atol, self._error_norm
+                sum_steps_p, sum_steps_p1, self.rtol, self.atol, self._error_norm
             )
-            print(error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
+            print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
             if speed_verbose: print("\t calculate errors", time.time() - t0)
             assert len(y) == len(error_ratios)
             assert len(y) - 1 == len(error_ratios_2steps)
@@ -311,16 +320,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             
             # Create mask for remove points that are too close
             t0 = time.time()
-            remove_mask = _find_excess_y(self.p, error_ratios_2steps, self.remove_cut)
+            t_pruned = _remove_excess_y(
+                t, error_ratios_2steps, self.remove_cut, self._remove_excess_t
+            )
             if speed_verbose: print("\t removal mask", time.time() - t0)
-            assert (len(remove_mask) == len(t))
-            if verbose:
-                print("RCF", remove_mask)
 
-            y_pruned = y[~remove_mask]
-            t_pruned = t[~remove_mask]
+            #y_pruned = y[~remove_mask]
+            #t_pruned = t[~remove_mask]
 
-            asdf
+            """
             # Find indices where error is too large to add new points
             # Evaluate integral
             t0 = time.time()
@@ -340,6 +348,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_add, idxs_add = _find_sparse_y(
                 t_pruned, self.p, error_ratios_pruned
             )
+            """
 
             if speed_verbose: print("\tLOOP TIME", time.time() - tl0)
 
@@ -347,12 +356,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.t_previous = t
         return IntegralOutput(
             integral=integral_p1,
+            t_pruned=t_pruned,
             t=t,
             h=h,
-            y=y_p1,
-            errors=torch.abs(y_p - y_p1),
+            y=y,
+            sum_steps=sum_steps_p1,
+            errors=torch.abs(sum_steps_p - sum_steps_p1),
             error_ratios=error_ratios,
-            remove_mask=remove_mask
         )
 
 

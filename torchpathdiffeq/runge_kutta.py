@@ -28,12 +28,13 @@ class RKParallelAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         _t_p = t[0::self.p]
         h = _t_p[1:] - _t_p[:-1]
         """
-        h = t[:,-1] - t[:, 0]
+        h = t[:,-1] - t[:,0]
         if verbose:
             print("H", h.shape, h)
         
         tableau_b = self._calculate_tableau_b(t, degr=degr)
-        assert(tableau_b.shape[-1] == max(2, self.p+1))
+        print("IN CALC INT H / TB", h.shape, tableau_b.shape)
+        assert(tableau_b.shape[1] == max(2, self.p+1))
         #assert(torch.all(torch.sum(tableau_b, dim=-1) == 1))
         
         # The last point in the h-1 RK step is the first point in the h RK step
@@ -67,7 +68,7 @@ class RKParallelAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         # tableau_b: [dt/p x p+1] check
         # y_steps: [dt/p x p+1] check
         print("TABLEAU / YSTEPS / H", tableau_b.shape, y_steps.shape, h.shape)
-        RK_steps = h*torch.sum(tableau_b*y_steps, dim=-1)   # Sum over k evaluations weighted by c
+        RK_steps = h*torch.sum(tableau_b*y_steps, dim=1)   # Sum over k evaluations weighted by c
         print("RK1", RK_steps.shape)
         if verbose:
             print("RK STEPS", RK_steps.shape, RK_steps)
@@ -82,10 +83,10 @@ class RKParallelAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         elif degr == degree.P1:
             tableau_b_fxn = self.tableau_b_p1
         
-        norm_dt = t - t[:,0].unsqueeze(1)
-        norm_dt = norm_dt/norm_dt[:,-1].unsqueeze(1)
-        b = tableau_b_fxn(norm_dt, degr)
-        assert np.all(np.abs(torch.sum(b, dim=-1).numpy() - 1.) < 1e-5)
+        norm_dt = t - t[:,0,None]
+        norm_dt = norm_dt/norm_dt[:,-1,None]
+        b = tableau_b_fxn(norm_dt, degr).unsqueeze(-1)
+        assert np.all(np.abs(torch.sum(b, dim=1).numpy() - 1.) < 1e-5)
         #assert_allclose(torch.sum(b, dim=-1).numpy(), 1.)
 
         return b
