@@ -59,7 +59,7 @@ class generic3_tableau_b():
     def _b1(self, a):
         return (2. - 3*a)/(6*(1. - a))
     
-    def __call__(self, dt, degr):
+    def __call__(self, c, degr):
         """
         Generic third order method by Sanderse and Veldman
               degr=P1                 degr=P
@@ -70,12 +70,12 @@ class generic3_tableau_b():
         a | 1/(6a(1-a))          a | 1/(6a(1-a))
         1 | (2-3a)/(6(1-a))      z | 0
                                  1 | (2-3a)/(6(1-a))   
+        
+        c: [n, p or p1, d]
         """
 
+        a = c[:,1,0]
         if degr == degree.P:
-            mask = torch.arange(len(dt)) % 3 == 0
-            a = dt[mask]/h[:]
-
             b = torch.concatenate(
                 [
                     self._b0(a),
@@ -86,12 +86,9 @@ class generic3_tableau_b():
                 dim=1
             )
         else:
-            mask = torch.arange(len(dt)) % 2 == 0
-            a = dt[mask]/h[:]
-            
-            b = torch.concatenate(
-                [self._b0(a), self._ba(a), self._b1(a)], dim=1
-            )
+            b = torch.stack(
+                [self._b0(a), self._ba(a), self._b1(a)]
+            ).transpose(0,1)
         
         return b
 
