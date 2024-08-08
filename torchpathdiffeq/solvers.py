@@ -109,7 +109,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ode_fxn=None,
             t_init=0,
             t_final=1.,
-            solver_enum=steps.ADAPTIVE_VARIABLE
+            solver_enum=steps.ADAPTIVE_UNIFORM
         ):
         super().__init__(
             solver=solver,
@@ -124,6 +124,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert solver in ADAPTIVE_SOLVER_P,\
             f"Do not recognize solver {self.solver}, choose from: {list(ADAPTIVE_SOLVER_P.keys())}"
         self.p = ADAPTIVE_SOLVER_P[self.solver]
+        self.p1 = self.p + 1
         self.atol = atol
         self.rtol = rtol
         self.remove_cut = remove_cut
@@ -147,13 +148,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         if t is None:
             t = torch.linspace(t_init, t_final, 7).unsqueeze(1)
         assert (len(t) - 1) % self.p == 0
-        _t = torch.reshape(t[:-1], (-1, self.p))
-        return self._t_step_interpolate(_t[:-1], _t[1:])
+        #_t = torch.reshape(t[:-1], (-1, self.p))
+        print("in init time ", t.shape)
+        return self._t_step_interpolate_uniform(t[:-1], t[1:])
  
     def _t_step_interpolate_uniform(self, t_left, t_right):
+        print("INPUT", t_left.shape, t_right.shape)
         dt = (t_right - t_left).unsqueeze(1)
-        steps = (dt*torch.arange(self.p1).unsqueeze(0))/self.p
-        print("Check if steps are correctly spaced", dt[0], steps[0])
+        steps = torch.arange(self.p1).unsqueeze(-1)
+        steps = steps*dt/self.p
         return t_left.unsqueeze(1) + steps
     
     def _adaptive_t_steps_uniform(self, t, idxs_add):
@@ -164,16 +167,21 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         t_right = torch.concatenate(
             [t_bisect.unsqueeze(1), t[idxs_add,-1].unsqueeze(1)], dim=1
         )
-        return self._t_step_interpolate(t_left.flatten(), t_right.flatten())
+        return self._t_step_interpolate_uniform(t_left.flatten(), t_right.flatten())
 
-    def _t_step_interpolate_uniform(self, t_left, t_right):
-        dt = (t_right - t_left).unsqueeze(1)
-        steps = (dt*torch.arange(self.p1).unsqueeze(0))/self.p
-        print("Check if steps are correctly spaced", dt[0], steps[0])
-        return t_left.unsqueeze(1) + steps
-    
     def _t_y_fusion_uniform(self, idxs_add, t, t_add, y, y_add):
         return t_add, y_add
+    
+    def _remove_excess_t_uniform(self, t, remove_idxs):
+        if len(remove_idxs) == 0:
+            return t
+        t_replace = self._t_step_interpolate_uniform(
+            t[remove_idxs,0], t[remove_idxs+1,-1]
+        )
+        t[remove_idxs+1] = t_replace
+        remove_mask = torch.ones(len(t), dtype=torch.bool)
+        remove_mask[remove_idxs] = False
+        return t[remove_mask]
 
     def _initial_t_steps_variable(self, t, t_init=0., t_final=1.):
         if t is None:
@@ -206,13 +214,17 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         
         return t_add, y_add
     
-    def _remove_excess_t_variable(self, t, remove_mask):
-        keep_idxs = torch.arange(t.shape[1]//2 + 1, dtype=torch.long)*2
+    def _remove_excess_t_variable(self, t, remove_idxs):
+        if len(remove_idxs) == 0:
+            return t
         combined_steps = torch.concatenate(
-            t[remove_mask,:], t[1:,1:][remove_mask[:-1]], dim=-1
+            t[remove_idxs,:], t[remove_idxs+1,1:], dim=1
         )
-        t[remove_mask,:] = combined_steps[:,keep_idxs]
-        return t[~remove_mask]
+        keep_idxs = torch.arange(self.p1//2+1, dtype=torch.long)*2
+        t[remove_idxs+1,:] = combined_steps[:,keep_idxs]
+        remove_mask = torch.ones(len(t), dtype=torch.bool)
+        remove_mask[remove_idxs] = False
+        return t[remove_mask]
 
 
 
@@ -320,9 +332,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             
             # Create mask for remove points that are too close
             t0 = time.time()
-            t_pruned = _remove_excess_y(
-                t, error_ratios_2steps, self.remove_cut, self._remove_excess_t
-            )
+            if torch.all(error_ratios <= 1.):
+                t_pruned = _remove_excess_y(
+                    t, error_ratios_2steps, self.remove_cut, self._remove_excess_t
+                )
             if speed_verbose: print("\t removal mask", time.time() - t0)
 
             #y_pruned = y[~remove_mask]
@@ -351,6 +364,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             """
 
             if speed_verbose: print("\tLOOP TIME", time.time() - tl0)
+
+        print("SUM T", t.shape, torch.sum(t), torch.all(t[:-1,1]==t[1:,0]))
 
         self.previous_ode_fxn = ode_fxn.__name__
         self.t_previous = t

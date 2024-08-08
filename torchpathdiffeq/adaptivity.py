@@ -5,8 +5,9 @@ def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
     #t_steps = t_spacing_fxn(t[:-1], t[1:])
     t_steps = t_step_fxn(t)
     print("INIT T", t_steps.shape)
-    n_intervals = int(t_steps.shape[1])
+    n, p1, d = t_steps.shape
 
+    print("INIT T", t_steps[:,:,0])
     t_add = torch.concatenate(
         [t_steps[0], t_steps[1:,1:].reshape((-1, *(t_steps.shape[2:])))],
         dim=0
@@ -17,7 +18,7 @@ def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
     y_add = ode_fxn(t_add)
     print("Y add", y_add.shape)
 
-    y_steps = torch.reshape(y_add[1:], (len(y_add)-1, n_intervals-1, -1))
+    y_steps = torch.reshape(y_add[1:], (n, p1-1, -1))
     y_steps = torch.concatenate(
         [
             torch.concatenate(
@@ -63,7 +64,7 @@ def _adaptively_add_y(
     idxs_add = torch.where(error_ratios > 1.)[0]
     print("idxs add", t.shape, idxs_add.shape, idxs_add)
     t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, p, 1]
-    print("t add", t_steps_add.shape)
+    print("T and add in adpative", t.shape, t_steps_add.shape, '\n', t[:,:,0], '\n', t_steps_add[:,:,0])
     #t_steps_add = t_step_fxn(t, idxs_add)
     ##t_steps_add = t_steps_add[:,:-1]
 
@@ -145,6 +146,7 @@ def _adaptively_add_y(
     #y_combined[:-1,-1] = y_combined[1:,0]
     #t_combined[:-1,-1] = t_combined[1:,0]
 
+    assert torch.all(t_combined[:-1,-1] == t_combined[1:,0])
     return y_combined, t_combined
 
 
@@ -248,21 +250,22 @@ def _remove_excess_y(t, error_ratios_2steps, remove_cut, remove_fxn):
     # a step, we cannot remove that same step twice and therefore remove the 
     # first in pair of steps that it appears in
     #print("RC1", ratio_mask_cut)
-    ratio_mask_cut = torch.concatenate(
-        [_rec_remove(error_ratios_2steps < remove_cut), torch.tensor([False])]
-    ).to(torch.bool)
-    print("RATIO MASK CuT", ratio_mask_cut.shape, t.shape)
-    #ratio_idxs_cut = torch.where(ratio_mask_cut)[0] # Index for first interval of 2
-    print(ratio_mask_cut, ratio_mask_cut[:-1]*ratio_mask_cut[1:])
-    assert not torch.any(ratio_mask_cut[:-1]*ratio_mask_cut[1:])
+    #ratio_mask_cut = torch.concatenate(
+    #    [_rec_remove(error_ratios_2steps < remove_cut), torch.tensor([False])]
+    #).to(torch.bool)
+    #print("RATIO MASK CuT", ratio_mask_cut.shape, t.shape)
+    ratio_idxs_cut = torch.where(_rec_remove(error_ratios_2steps < remove_cut))[0] # Index for first interval of 2
+    #print(ratio_mask_cut, ratio_mask_cut[:-1]*ratio_mask_cut[1:])
+    print("RATIO idxs cut", ratio_idxs_cut)
+    assert not torch.any(ratio_idxs_cut[:-1] + 1 == ratio_idxs_cut[1:])
 
-    if not any(ratio_mask_cut):
+    if len(ratio_idxs_cut) == 0:
         return t
     
     #ratio_idxs_cut = torch.concatenate(
     #    [ratio_idxs_cut.unsqueeze(1), 1+ratio_idxs_cut.unsqueeze(1)], dim=1
     #)
-    t_pruned = remove_fxn(t, ratio_mask_cut)
+    t_pruned = remove_fxn(t, ratio_idxs_cut)
 
     return t_pruned
 

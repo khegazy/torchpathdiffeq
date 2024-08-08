@@ -59,7 +59,7 @@ class generic3_tableau_b():
     def _b1(self, a):
         return (2. - 3*a)/(6*(1. - a))
     
-    def __call__(self, dt, h, degr):
+    def __call__(self, dt, degr):
         """
         Generic third order method by Sanderse and Veldman
               degr=P1                 degr=P
