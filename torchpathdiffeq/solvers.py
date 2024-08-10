@@ -6,6 +6,7 @@ from torchdiffeq import odeint
 from dataclasses import dataclass
 from enum import Enum
 
+from .methods import UNIFORM_METHODS, VARIABLE_METHODS
 from .adaptivity import _adaptively_add_y, _remove_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
 
 
@@ -14,14 +15,8 @@ class steps(Enum):
     ADAPTIVE_UNIFORM = 1
     ADAPTIVE_VARIABLE = 2
 
-class degree(Enum):
-    P = 0
-    P1 = 1
-
-ADAPTIVE_SOLVER_P = {
-    'euler' : 1,
-    'heun' : 1,
-    'generic3' : 2
+ADAPTIVE_METHOD_P = {
+    'heun' : 2
 }
 
 @dataclass
@@ -32,14 +27,24 @@ class IntegralOutput():
     h: torch.Tensor = None
     y: torch.Tensor = None
     sum_steps: torch.Tensor = None
+    integral_error: torch.Tensor = None
     errors: torch.Tensor = None
     error_ratios: torch.Tensor = None
+
+@dataclass
+class MethodOutput():
+    integral: torch.Tensor
+    integral_error: torch.Tensor
+    sum_steps: torch.Tensor
+    sum_step_errors: torch.Tensor
+    h: torch.Tensor
+
     
 
 class SolverBase():
-    def __init__(self, solver, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0., t_final=1.) -> None:
+    def __init__(self, method, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0., t_final=1.) -> None:
 
-        self.solver = solver.lower()
+        self.method_name = method.lower()
         self.atol = atol
         self.rtol = rtol
         self.ode_fxn = ode_fxn
@@ -47,7 +52,7 @@ class SolverBase():
         self.t_init = t_init
         self.t_final = t_final
 
-    def _calculate_integral(self, t, y, y0=0, degr=degree.P1):
+    def _calculate_integral(self, t, y, y0=0):
         raise NotImplementedError
     
     def integrate(self, ode_fxn, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
@@ -59,9 +64,9 @@ class SolverBase():
 
 
 class SerialAdaptiveStepsizeSolver(SolverBase):
-    def __init__(self, solver, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0, t_final=1.) -> None:
+    def __init__(self, method, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0, t_final=1.) -> None:
         super().__init__(
-            solver=solver,
+            method=method,
             atol=atol,
             rtol=rtol,
             ode_fxn=ode_fxn,
@@ -84,7 +89,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
             func=ode_fxn,
             y0=y0,
             t=t,
-            method=self.solver,
+            method=self.method_name,
             rtol=self.rtol,
             atol=self.atol
         )
@@ -101,7 +106,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
     
     def __init__(
             self,
-            solver,
+            method,
             atol,
             rtol,
             remove_cut=0.1,
@@ -109,10 +114,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ode_fxn=None,
             t_init=0,
             t_final=1.,
-            solver_enum=steps.ADAPTIVE_UNIFORM
         ):
         super().__init__(
-            solver=solver,
+            method=method,
             atol=atol,
             rtol=rtol,
             ode_fxn=ode_fxn,
@@ -121,111 +125,30 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_final=t_final
         )
 
-        assert solver in ADAPTIVE_SOLVER_P,\
-            f"Do not recognize solver {self.solver}, choose from: {list(ADAPTIVE_SOLVER_P.keys())}"
-        self.p = ADAPTIVE_SOLVER_P[self.solver]
-        self.p1 = self.p + 1
+        self.method = None
+        self.p1 = None
+        self.p = None
         self.atol = atol
         self.rtol = rtol
         self.remove_cut = remove_cut
         self.previous_t = None
         self.previous_ode_fxn = None
 
-        if solver_enum == steps.ADAPTIVE_UNIFORM:
-            self._initial_t_steps = self._initial_t_steps_uniform
-            self._adaptive_t_steps = self._adaptive_t_steps_uniform
-            self._t_y_fusion = self._t_y_fusion_uniform
-            self._remove_excess_t = self._remove_excess_t_uniform
-        elif solver_enum == steps.ADAPTIVE_VARIABLE:
-            self._initial_t_steps = self._initial_t_steps_variable
-            self._adaptive_t_steps = self._adaptive_t_steps_variable
-            self._t_y_fusion = self._t_y_fusion_variable
-            self._remove_excess_t = self._remove_excess_t_variable
-        else:
-            raise NotImplementedError
-            
-    def _initial_t_steps_uniform(self, t, t_init=0., t_final=1.):
-        if t is None:
-            t = torch.linspace(t_init, t_final, 7).unsqueeze(1)
-        assert (len(t) - 1) % self.p == 0
-        #_t = torch.reshape(t[:-1], (-1, self.p))
-        print("in init time ", t.shape)
-        return self._t_step_interpolate_uniform(t[:-1], t[1:])
- 
-    def _t_step_interpolate_uniform(self, t_left, t_right):
-        print("INPUT", t_left.shape, t_right.shape)
-        dt = (t_right - t_left).unsqueeze(1)
-        steps = torch.arange(self.p1).unsqueeze(-1)
-        steps = steps*dt/self.p
-        return t_left.unsqueeze(1) + steps
     
-    def _adaptive_t_steps_uniform(self, t, idxs_add):
-        t_bisect = (t[idxs_add,0] + t[idxs_add,-1])/2.
-        t_left = torch.concatenate(
-            [t[idxs_add,0].unsqueeze(1), t_bisect.unsqueeze(1)], dim=1
-        )
-        t_right = torch.concatenate(
-            [t_bisect.unsqueeze(1), t[idxs_add,-1].unsqueeze(1)], dim=1
-        )
-        return self._t_step_interpolate_uniform(t_left.flatten(), t_right.flatten())
+    def _initial_t_steps(self, t, t_init=0., t_final=1.):
+        raise NotImplementedError
 
-    def _t_y_fusion_uniform(self, idxs_add, t, t_add, y, y_add):
-        return t_add, y_add
-    
-    def _remove_excess_t_uniform(self, t, remove_idxs):
-        if len(remove_idxs) == 0:
-            return t
-        t_replace = self._t_step_interpolate_uniform(
-            t[remove_idxs,0], t[remove_idxs+1,-1]
-        )
-        t[remove_idxs+1] = t_replace
-        remove_mask = torch.ones(len(t), dtype=torch.bool)
-        remove_mask[remove_idxs] = False
-        return t[remove_mask]
 
-    def _initial_t_steps_variable(self, t, t_init=0., t_final=1.):
-        if t is None:
-            t = torch.linspace(t_init, t_final, 7*self.p+1).unsqueeze(1)
-        assert (len(t) - 1) % self.p == 0
-        _t = torch.reshape(t[:-1], (-1, self.p, 1))
-        print("INIT T", _t.shape, _t[1:,0].shape, t[None,-1].shape)
-        _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
-        return torch.concatenate([_t, _t_ends], dim=1)
-    
-    def _adaptive_t_steps_variable(self, t, idxs_add):
-        """
-        Add points between current points to double the sampling
-        """
-        return (t[idxs_add,1:] +  t[idxs_add,:-1])/2
-    
-    def _t_y_fusion_variable(self, idxs_add, t, t_add, y, y_add):
-        t_add = torch.concatenate(
-            [t[idxs_add].unsqueeze(-1), t_add.unsqueeze(-1)],
-            dim=-1
-        )
-        t_add = torch.reshape(t_add, (len(t_add), -1))
-        t_add = torch.reshape(t_add, (2*len(t_add), -1))
-        y_add = torch.concatenate(
-            [y[idxs_add].unsqueeze(-1), y_add.unsqueeze(-1)],
-            dim=-1
-        )
-        y_add = torch.reshape(y_add, (len(y_add), -1))
-        y_add = torch.reshape(y_add, (2*len(y_add), -1))
-        
-        return t_add, y_add
-    
-    def _remove_excess_t_variable(self, t, remove_idxs):
-        if len(remove_idxs) == 0:
-            return t
-        combined_steps = torch.concatenate(
-            t[remove_idxs,:], t[remove_idxs+1,1:], dim=1
-        )
-        keep_idxs = torch.arange(self.p1//2+1, dtype=torch.long)*2
-        t[remove_idxs+1,:] = combined_steps[:,keep_idxs]
-        remove_mask = torch.ones(len(t), dtype=torch.bool)
-        remove_mask[remove_idxs] = False
-        return t[remove_mask]
+    def _adaptive_t_steps(self, t, idxs_add):
+        raise NotImplementedError
 
+
+    def _remove_excess_t(self, t, remove_idxs):
+        raise NotImplementedError
+
+
+    def _get_tableau_b(self, t):
+        raise NotImplementedError
 
 
     def integrate(
@@ -278,10 +201,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         """ 
 
         y = None
-        integral_p1 = None
         error_ratios=None
         loop_cnt = 0
-        while integral_p1 is None or torch.any(error_ratios > 1.):
+        while y is None or torch.any(error_ratios > 1.):
             # check remove
             # remove idxs
             # check and add
@@ -299,7 +221,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             y, t = _adaptively_add_y(
                 ode_fxn, y, t, error_ratios,
                 self._adaptive_t_steps if y is not None else self._initial_t_steps,
-                self._t_y_fusion,
                 t_init,
                 t_final
             )
@@ -310,15 +231,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
             # Evaluate integral
             t0 = time.time()
-            integral_p, sum_steps_p, _ = self._calculate_integral(t, y, y0=y0, degr=degree.P)
-            integral_p1, sum_steps_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
+            method_output = self._calculate_integral(t, y, y0=y0)
+            #integral_p1, sum_steps_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
             if speed_verbose: print("\t calc integrals 1", time.time() - t0)
             
             # Calculate error
             t0 = time.time()
             #print("YP SHAPES", y_p.shape, y_p1.shape)
             error_ratios, error_ratios_2steps = _compute_error_ratios(
-                sum_steps_p, sum_steps_p1, self.rtol, self.atol, self._error_norm
+                method_output.sum_steps, method_output.sum_step_errors, self.rtol, self.atol, self._error_norm
             )
             print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
             if speed_verbose: print("\t calculate errors", time.time() - t0)
@@ -370,13 +291,14 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.previous_ode_fxn = ode_fxn.__name__
         self.t_previous = t
         return IntegralOutput(
-            integral=integral_p1,
+            integral=method_output.integral,
             t_pruned=t_pruned,
             t=t,
-            h=h,
+            h=method_output.h,
             y=y,
-            sum_steps=sum_steps_p1,
-            errors=torch.abs(sum_steps_p - sum_steps_p1),
+            sum_steps=method_output.sum_steps,
+            integral_error=method_output.integral_error,
+            errors=torch.abs(method_output.sum_step_errors),
             error_ratios=error_ratios,
         )
 
@@ -523,3 +445,111 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             error_ratios=error_ratios,
             remove_mask=remove_mask
         )
+    
+    
+class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        assert self.method_name in UNIFORM_METHODS
+        self.method = UNIFORM_METHODS[self.method_name]
+        self.p1 = self.method.order
+        self.p = self.p1 - 1
+    
+
+    def _initial_t_steps(self, t, t_init=0., t_final=1.):
+        if t is None:
+            t = torch.linspace(t_init, t_final, 7).unsqueeze(1)
+        assert (len(t) - 1) % (self._get_num_tableau_c() - 1) == 0
+        #_t = torch.reshape(t[:-1], (-1, self.p))
+        print("in init time ", t.shape, t)
+        return self._t_step_interpolate(t[:-1], t[1:])
+ 
+
+    def _t_step_interpolate(self, t_left, t_right):
+        dt = (t_right - t_left).unsqueeze(1)
+        #steps = torch.arange(self.p1).unsqueeze(-1)
+        steps = self.method.tableau.c.unsqueeze(-1)*dt
+        #print(dt.shape, self.method.tableau.c.unsqueeze(-1).shape, steps.shape, t_left.shape)
+        #steps = steps*dt/self.p
+        return t_left.unsqueeze(1) + steps
+
+
+    def _adaptive_t_steps(self, t, idxs_add):
+        asdfas
+        t_bisect = (t[idxs_add,0] + t[idxs_add,-1])/2.
+        t_left = torch.concatenate(
+            [t[idxs_add,0].unsqueeze(1), t_bisect.unsqueeze(1)], dim=1
+        )
+        t_right = torch.concatenate(
+            [t_bisect.unsqueeze(1), t[idxs_add,-1].unsqueeze(1)], dim=1
+        )
+        return self._t_step_interpolate_uniform(t_left.flatten(), t_right.flatten())
+
+
+    def _remove_excess_t(self, t, remove_idxs):
+        if len(remove_idxs) == 0:
+            return t
+        t_replace = self._t_step_interpolate(
+            t[remove_idxs,0], t[remove_idxs+1,-1]
+        )
+        t[remove_idxs+1] = t_replace
+        remove_mask = torch.ones(len(t), dtype=torch.bool)
+        remove_mask[remove_idxs] = False
+        return t[remove_mask]
+    
+    def _get_tableau_b(self, t):
+        return self.method.tableau.b.unsqueeze(-1),\
+            self.method.tableau.b_error.unsqueeze(-1)
+    
+    def _get_num_tableau_c(self):
+        return len(self.method.tableau.c)
+
+
+
+class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        print("METHOD", self.method_name)
+        assert self.method_name in VARIABLE_METHODS
+        self.method = VARIABLE_METHODS[self.method_name]()
+        self.p1 = self.method.order 
+        self.p = self.p1 - 1
+    
+    def _initial_t_steps(self, t, t_init=0., t_final=1.):
+        if t is None:
+            t = torch.linspace(t_init, t_final, 7*self.p+1).unsqueeze(1)
+        assert (len(t) - 1) % self.p == 0
+        _t = torch.reshape(t[:-1], (-1, self.p, 1))
+        print("INIT T", _t.shape, _t[1:,0].shape, t[None,-1].shape)
+        _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
+        return torch.concatenate([_t, _t_ends], dim=1)
+    
+    def _adaptive_t_steps(self, t, idxs_add):
+        """
+        Add points between current points to double the sampling
+        """
+        return (t[idxs_add,1:] +  t[idxs_add,:-1])/2
+    
+    def _remove_excess_t(self, t, remove_idxs):
+        if len(remove_idxs) == 0:
+            return t
+        combined_steps = torch.concatenate(
+            t[remove_idxs,:], t[remove_idxs+1,1:], dim=1
+        )
+        keep_idxs = torch.arange(self.p1//2+1, dtype=torch.long)*2
+        t[remove_idxs+1,:] = combined_steps[:,keep_idxs]
+        remove_mask = torch.ones(len(t), dtype=torch.bool)
+        remove_mask[remove_idxs] = False
+        return t[remove_mask]
+    
+    def _get_tableau_b(self, t):
+        norm_dt = t - t[:,0,None]
+        norm_dt = norm_dt/norm_dt[:,-1,None]
+        b, b_error = self.method.tableau_b(norm_dt)
+        return b.unsqueeze(-1), b_error.unsqueeze(-1)
+    
+    def _get_num_tableau_c(self):
+        return self.method.n_tableau_c
+

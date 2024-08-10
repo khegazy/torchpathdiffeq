@@ -3,9 +3,9 @@ from einops import rearrange
 
 def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
     #t_steps = t_spacing_fxn(t[:-1], t[1:])
-    t_steps = t_step_fxn(t)
+    t_steps = t_step_fxn(t).to(torch.float64)
     print("INIT T", t_steps.shape)
-    n, p1, d = t_steps.shape
+    n, n_c, d = t_steps.shape
 
     print("INIT T", t_steps[:,:,0])
     t_add = torch.concatenate(
@@ -15,10 +15,10 @@ def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
     
     # Calculate new geometries
     print("T ADD", t_add.shape)
-    y_add = ode_fxn(t_add)
+    y_add = ode_fxn(t_add).to(torch.float64)
     print("Y add", y_add.shape)
 
-    y_steps = torch.reshape(y_add[1:], (n, p1-1, -1))
+    y_steps = torch.reshape(y_add[1:], (n, n_c-1, -1))
     y_steps = torch.concatenate(
         [
             torch.concatenate(
@@ -35,7 +35,7 @@ def _add_initial_y(ode_fxn, t, t_step_fxn, t_init=0., t_final=1.):
 
 
 def _adaptively_add_y(
-        ode_fxn, y, t, error_ratios, t_step_fxn, t_y_fusion, t_init, t_final
+        ode_fxn, y, t, error_ratios, t_step_fxn, t_init, t_final
     ):
     """
     t : [t-1, p1]
@@ -49,8 +49,8 @@ def _adaptively_add_y(
         return _add_initial_y(ode_fxn=ode_fxn, t=t, t_step_fxn=t_step_fxn, t_init=t_init, t_final=t_final)
 
     print("ADAPTIVE ADD INP SHAPES", y.shape, t.shape)
-    if len(torch.where(error_ratios > 1.)[0]) == 0:
-        return t, y, error_ratios
+    if torch.all(error_ratios <= 1.):
+        return y, t
          
     # Get new time steps for merged steps
     """
@@ -81,12 +81,12 @@ def _adaptively_add_y(
     """ 
 
     # Calculate new geometries
-    n_add, p, d = t_steps_add.shape
+    n_add, nm1_c, d = t_steps_add.shape
     # ode_fxn input is 2 dims, t_steps_add has 3 dims, combine first two
     t_steps_add = rearrange(t_steps_add, 'n p d -> (n p) d')
-    y_add = ode_fxn(t_steps_add)
-    t_steps_add = rearrange(t_steps_add, '(n p) d -> n p d', n=n_add, p=p) 
-    y_add = rearrange(y_add, '(n p) d -> n p d', n=n_add, p=p) 
+    y_add = ode_fxn(t_steps_add).to(torch.float64)
+    t_steps_add = rearrange(t_steps_add, '(n c) d -> n c d', n=n_add, c=nm1_c) 
+    y_add = rearrange(y_add, '(n c) d -> n c d', n=n_add, c=nm1_c) 
 
     """
     t_add, y_add = t_y_fusion(idxs_add, t, t_add, y, y_add)
@@ -109,10 +109,13 @@ def _adaptively_add_y(
 
     # Create new vector to fill with old and new values
     y_combined = torch.zeros(
-        (len(y)+len(y_add), p+1, y_add.shape[-1]),
+        (len(y)+len(y_add), nm1_c+1, y_add.shape[-1]),
+        dtype=torch.float64,
         requires_grad=False
     ).detach()
-    t_combined = torch.zeros_like(y_combined, requires_grad=False).detach() - 1
+    t_combined = torch.zeros_like(
+        y_combined, dtype=torch.float64, requires_grad=False
+    ).detach()
     
     # Add old t and y values, skipping regions with new points
     idx_offset = torch.zeros(len(y), dtype=torch.long)
@@ -125,18 +128,22 @@ def _adaptively_add_y(
     # Add new t and y values to added rows
     print("BEGINING COMB", y.shape, t.shape, y_combined.shape)
     idxs_add_offset = idxs_add + torch.arange(len(idxs_add))
-    t_add_combined = torch.ones((len(idxs_add), (p+1)*2-1, d))*torch.nan
-    t_add_combined[:,torch.arange(p+1)*2] = t[idxs_add]
-    t_add_combined[:,torch.arange(p)*2+1] = t_steps_add
-    t_combined[idxs_add_offset,:,:] = t_add_combined[:,:p+1]
-    t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,p:]
+    t_add_combined = torch.nan*torch.ones(
+        (len(idxs_add), (nm1_c+1)*2-1, d), dtype=torch.float64
+    )
+    t_add_combined[:,torch.arange(nm1_c+1)*2] = t[idxs_add]
+    t_add_combined[:,torch.arange(nm1_c)*2+1] = t_steps_add
+    t_combined[idxs_add_offset,:,:] = t_add_combined[:,:nm1_c+1]
+    t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,nm1_c:]
 
     print("TESTING T COMBINED", t[:,:,0], '\n',t_combined[:,:,0])
-    y_add_combined = torch.ones((len(idxs_add), (p+1)*2-1, d))*torch.nan
-    y_add_combined[:,torch.arange(p+1)*2] = y[idxs_add]
-    y_add_combined[:,torch.arange(p)*2+1] = y_add
-    y_combined[idxs_add_offset,:,:] = y_add_combined[:,:p+1]
-    y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,p:]
+    y_add_combined = torch.nan*torch.ones(
+        (len(idxs_add), (nm1_c+1)*2-1, d), dtype=torch.float64
+    )
+    y_add_combined[:,torch.arange(nm1_c+1)*2] = y[idxs_add]
+    y_add_combined[:,torch.arange(nm1_c)*2+1] = y_add
+    y_combined[idxs_add_offset,:,:] = y_add_combined[:,:nm1_c+1]
+    y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,nm1_c:]
 
     #y_combined[idx_add,:-1] = y_add[:,0]
     #y_combined[idx_add+1,:-1] = y_add[:,1]
@@ -386,7 +393,25 @@ def _find_sparse_y(t, p, error_ratios):
     return t_add, idxs_add
 
 
-def _compute_error_ratios(sum_step_p, sum_step_p1, rtol, atol, norm):
+def _compute_error_ratios(sum_steps, sum_step_errors, rtol, atol, norm):
+    print("TODO: Removed max in error_tol, check against torchdiffeq")
+    error_estimate = torch.abs(sum_step_errors)
+    error_tol = atol + rtol*torch.abs(sum_steps)
+    error_ratio = norm(error_estimate/error_tol).abs()
+    print("COMP1", error_ratio.shape)
+
+    error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
+    error_tol_2steps = atol + rtol*torch.max(
+        torch.stack(
+            [sum_steps[:-1].abs(), sum_steps[1:].abs()]
+        ),
+        dim=0
+    )[0]
+    error_ratio_2steps= norm(error_estimate_2steps/error_tol_2steps).abs() 
+    
+    return error_ratio, error_ratio_2steps
+
+def __compute_error_ratios(sum_step_p, sum_step_p1, rtol, atol, norm):
     error_estimate = torch.abs(sum_step_p1 - sum_step_p)
     error_tol = atol + rtol*torch.max(sum_step_p.abs(), sum_step_p1.abs())
     error_ratio = norm(error_estimate/error_tol).abs()

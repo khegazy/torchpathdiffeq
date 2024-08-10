@@ -1,6 +1,11 @@
 import torch
 
-from torchpathdiffeq import RKParallelAdaptiveStepsizeSolver, SerialAdaptiveStepsizeSolver
+from torchpathdiffeq import\
+    steps,\
+    get_parallel_RK_solver,\
+    SerialAdaptiveStepsizeSolver,\
+    UNIFORM_METHODS,\
+    VARIABLE_METHODS\
 
 WS_min_init = torch.tensor([1.133, -1.486])
 WS_min_final = torch.tensor([-1.166, 1.477])
@@ -20,19 +25,32 @@ def wolf_schlegel(t, y=None):
 def test_chemistry():
     atol = 1e-5
     rtol = 1e-5
-    parallel_integrator = RKParallelAdaptiveStepsizeSolver(
-        'euler', atol, rtol, remove_cut=0.1, ode_fxn=wolf_schlegel
+    loop_items = zip(
+        ['Uniform', 'Variable'],
+        [UNIFORM_METHODS, VARIABLE_METHODS],
+        [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
     )
-    serial_integrator = SerialAdaptiveStepsizeSolver(
-        "adaptive_heun", atol, rtol, ode_fxn=wolf_schlegel
-    )
+    for sampling_name, sampling, sampling_type in loop_items:
+        for method in sampling.keys():
+            print("TESTING METHOD", method)
+            #parallel_integrator = RKParallelAdaptiveStepsizeSolver(
+            parallel_integrator = get_parallel_RK_solver(
+                sampling_type, method, atol, rtol, remove_cut=0.1, ode_fxn=wolf_schlegel
+            )
+            if method == 'generic3':
+                serial_method = 'bosh3'
+            else:
+                serial_method = method
+            serial_integrator = SerialAdaptiveStepsizeSolver(
+                serial_method, atol, rtol, ode_fxn=wolf_schlegel
+            )
 
-    parallel_integral = parallel_integrator.integrate()
-    serial_integral = serial_integrator.integrate()
+            parallel_integral = parallel_integrator.integrate()
+            serial_integral = serial_integrator.integrate()
 
-    print("INTEGRALS", parallel_integral.integral, serial_integral.integral)
-    error = torch.abs(parallel_integral.integral - serial_integral.integral)
-    assert error/serial_integral.integral < 0.01
+            print("INTEGRALS", parallel_integral.integral, serial_integral.integral)
+            error = torch.abs(parallel_integral.integral - serial_integral.integral)
+            assert error/serial_integral.integral < atol/10, f"Failed with {sampling_name} ingegration method {method}"
 
 
 test_chemistry()

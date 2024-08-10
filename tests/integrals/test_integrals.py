@@ -1,9 +1,11 @@
 import torch
 
-from torchpathdiffeq import RKParallelAdaptiveStepsizeSolver
-from torchpathdiffeq.solvers import ADAPTIVE_SOLVER_P
-
-integrator_list = [RKParallelAdaptiveStepsizeSolver]
+from torchpathdiffeq import\
+    steps,\
+    get_parallel_RK_solver,\
+    SerialAdaptiveStepsizeSolver,\
+    UNIFORM_METHODS,\
+    VARIABLE_METHODS\
 
 def identity(t):
     return 1
@@ -59,19 +61,30 @@ ODE_dict = {
 
 def test_integrals():
     cutoff = 0.05
+    atol = 1e-5
+    rtol=1e-5
     t_init = 0.
     t_final = 1.
-    for solver in ADAPTIVE_SOLVER_P.keys():
-        print("SOLVER", solver)
-        integrator = RKParallelAdaptiveStepsizeSolver(
-            solver=solver, atol=1e-7, rtol=1e-7, remove_cut=0.105
-        )
-        for name, (ode, solution) in ODE_dict.items():
-            integral_output = integrator.integrate(ode, t_init=t_init, t_final=t_final)
-            correct = solution(t_init=t_init, t_final=t_final)
-            error_string = f"{solver} failed to properly integrate {name}, calculated {integral_output.integral} but expected {correct}"
+    loop_items = zip(
+        ['Uniform', 'Variable'],
+        [UNIFORM_METHODS, VARIABLE_METHODS],
+        [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
+    )
+    for sampling_name, sampling, sampling_type in loop_items:
+        for method in sampling.keys():
+            print("SOLVER", sampling_name, method)
+            parallel_integrator = get_parallel_RK_solver(
+                sampling_type, 'adaptive_heun', atol, rtol, remove_cut=0.1
+            )
+            #integrator = RKParallelAdaptiveStepsizeSolver(
+            #    solver=solver, atol=1e-7, rtol=1e-7, remove_cut=0.105
+            #)
+            for name, (ode, solution) in ODE_dict.items():
+                integral_output = parallel_integrator.integrate(ode, t_init=t_init, t_final=t_final)
+                correct = solution(t_init=t_init, t_final=t_final)
+                error_string = f"{method} failed to properly integrate {name}, calculated {integral_output.integral} but expected {correct}"
 
-            assert torch.abs(integral_output.integral - correct)/correct < cutoff, error_string
-            #print(name, integral_output.h.shape)
-
+                assert torch.abs(integral_output.integral - correct)/correct < cutoff, error_string
+                #print(name, integral_output.h.shape)
+            
 test_integrals()

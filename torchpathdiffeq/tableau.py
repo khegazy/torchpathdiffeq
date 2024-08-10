@@ -1,6 +1,10 @@
-from typing import Any
 import torch
-from .solvers import degree
+import numpy as np
+from typing import Any
+
+from .methods import UNIFORM_METHODS, VARIABLE_METHODS
+from .solvers import steps
+
 
 class euler_tableau_b():
     def __init__(self, device=None):
@@ -20,8 +24,67 @@ class euler_tableau_b():
             dim=-1,
         )
 
-
 class heun_tableau_b():
+    def __init__(self, device=None):
+        self.device=device
+
+    def __call__(self, c):
+        """
+        Heun's Method, aka Trapazoidal Rule
+        degr=P1             degr=P
+
+        c |  b              c |  b
+        -------             -------
+        0 | 0.5             0 | 0.5
+        1 | 0.5             a | 0
+                            1 | 0.5
+        """
+        
+        b = torch.tensor([[0.5, 0.5]])
+        b_error = torch.tensor([[0.5, -0.5]])
+        
+        return b, b_error
+
+
+class bogacki_shampine_tableau_b():
+    def __init__(self, device=None):
+        self.device=device
+
+    def __call__(self, c):
+        b = torch.tensor([2 / 9, 1 / 3, 4 / 9, 0.], dtype=torch.float64)
+        b_error = torch.tensor([2 / 9 - 7 / 24, 1 / 3 - 1 / 4, 4 / 9 - 1 / 3, -1 / 8], dtype=torch.float64)
+        return b, b_error
+
+
+class fehlberg2_tableau_b():
+    def __init__(self, device=None):
+        self.device=device
+
+    def __call__(self, c):
+        b = torch.tensor([1 / 512, 255 / 256, 1 / 512], dtype=torch.float64)
+        b_error = torch.tensor([-1 / 512, 0, 1 / 512], dtype=torch.float64)
+        return b, b_error
+
+
+class dormand_prince_shampine_tableau_b():
+    def __init__(self, device=None):
+        self.device=device
+
+    def __call__(self, c):
+        b = torch.tensor([35 / 384, 0, 500 / 1113, 125 / 192, -2187 / 6784, 11 / 84, 0], dtype=torch.float64)
+        b_error = torch.tensor([
+            35 / 384 - 1951 / 21600,
+            0,
+            500 / 1113 - 22642 / 50085,
+            125 / 192 - 451 / 720,
+            -2187 / 6784 - -12231 / 42400,
+            11 / 84 - 649 / 6300,
+            -1. / 60.,
+        ], dtype=torch.float64)
+        return b, b_error
+
+
+class _heun_tableau_b():
     def __init__(self, device=None):
         self.device=device
 
@@ -119,4 +182,26 @@ class threeEigth_tableau_b():
         return b
 
 
-   
+"""
+class TableauUniform():
+    def __init__(self, method):
+        self.method = method
+        self.tableau = UNIFORM_METHODS[self.method].tableau
+    
+    def get_tableau_b(self):
+        return self.tableau.b[None,:,None], self.tableau.b_error[None,:,None]
+
+class TableauVariable():
+    def __init__(self, method):
+        self.method = method
+        self.tableau = VARIABLE_METHODS[self.method].tableau
+    
+    def calculate_tableau_b(self, t):
+        norm_dt = t - t[:,0,None]
+        norm_dt = norm_dt/norm_dt[:,-1,None]
+        b, b_error = self.tableau_b(norm_dt)
+        return b.unsqueeze(-1), b_error.unsqueeze(-1)
+
+"""
+
+  
