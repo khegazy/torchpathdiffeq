@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
-from .adaptivity import _adaptively_add_y, _remove_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
+from .adaptivity import IntegralAdaptivity
+#_adaptively_add_y, _remove_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
 
 
 class steps(Enum):
@@ -58,8 +59,6 @@ class SolverBase():
     def integrate(self, ode_fxn, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
         raise NotImplementedError
 
-    def _error_norm(self, error):
-        return torch.sqrt(torch.mean(error**2, -1))
 
 
 
@@ -102,7 +101,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
 
 
 
-class ParallelAdaptiveStepsizeSolver(SolverBase):
+class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
     
     def __init__(
             self,
@@ -110,10 +109,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             atol,
             rtol,
             remove_cut=0.1,
-            y0=torch.tensor([0], dtype=torch.float),
+            y0=torch.tensor([0], dtype=torch.float64),
             ode_fxn=None,
-            t_init=0,
-            t_final=1.,
+            t_init=torch.tensor([0], dtype=torch.float64),
+            t_final=torch.tensor([1], dtype=torch.float64),
         ):
         super().__init__(
             method=method,
@@ -135,22 +134,14 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.previous_ode_fxn = None
 
     
-    def _initial_t_steps(self, t, t_init=0., t_final=1.):
-        raise NotImplementedError
-
-
-    def _adaptive_t_steps(self, t, idxs_add):
-        raise NotImplementedError
-
-
-    def _remove_excess_t(self, t, remove_idxs):
-        raise NotImplementedError
-
-
     def _get_tableau_b(self, t):
         raise NotImplementedError
 
 
+    def _error_norm(self, error):
+        return torch.sqrt(torch.mean(error**2, -1))
+    
+    
     def integrate(
             self,
             ode_fxn=None,
@@ -218,11 +209,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
             # Evaluate new points and add new evals and points to arrays
             t0 = time.time()
-            y, t = _adaptively_add_y(
-                ode_fxn, y, t, error_ratios,
-                self._adaptive_t_steps if y is not None else self._initial_t_steps,
-                t_init,
-                t_final
+            y, t = self.adaptively_add_y(
+                ode_fxn, y, t, error_ratios, t_init, t_final
             )
             if speed_verbose: print("\t add time", time.time() - t0)
             if verbose or True:
@@ -238,8 +226,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             # Calculate error
             t0 = time.time()
             #print("YP SHAPES", y_p.shape, y_p1.shape)
-            error_ratios, error_ratios_2steps = _compute_error_ratios(
-                method_output.sum_steps, method_output.sum_step_errors, self.rtol, self.atol, self._error_norm
+            error_ratios, error_ratios_2steps = self.compute_error_ratios(
+                method_output.sum_steps, method_output.sum_step_errors
             )
             print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
             if speed_verbose: print("\t calculate errors", time.time() - t0)
@@ -254,8 +242,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             # Create mask for remove points that are too close
             t0 = time.time()
             if torch.all(error_ratios <= 1.):
-                t_pruned = _remove_excess_y(
-                    t, error_ratios_2steps, self.remove_cut, self._remove_excess_t
+                t_pruned = self.remove_excess_y(
+                    t, error_ratios_2steps, self._remove_excess_t
                 )
             if speed_verbose: print("\t removal mask", time.time() - t0)
 
@@ -455,25 +443,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.method = UNIFORM_METHODS[self.method_name]
         self.p1 = self.method.order
         self.p = self.p1 - 1
-    
-
-    def _initial_t_steps(self, t, t_init=0., t_final=1.):
-        if t is None:
-            t = torch.linspace(t_init, t_final, 7).unsqueeze(1)
-        assert (len(t) - 1) % (self._get_num_tableau_c() - 1) == 0
-        #_t = torch.reshape(t[:-1], (-1, self.p))
-        print("in init time ", t.shape, t)
-        return self._t_step_interpolate(t[:-1], t[1:])
  
-
-    def _t_step_interpolate(self, t_left, t_right):
-        dt = (t_right - t_left).unsqueeze(1)
-        #steps = torch.arange(self.p1).unsqueeze(-1)
-        steps = self.method.tableau.c.unsqueeze(-1)*dt
-        #print(dt.shape, self.method.tableau.c.unsqueeze(-1).shape, steps.shape, t_left.shape)
-        #steps = steps*dt/self.p
-        return t_left.unsqueeze(1) + steps
-
 
     def _adaptive_t_steps(self, t, idxs_add):
         asdfas
@@ -487,7 +457,59 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return self._t_step_interpolate_uniform(t_left.flatten(), t_right.flatten())
 
 
+    def _initial_t_steps(self,
+            t,
+            t_init=torch.tensor([0.], dtype=torch.float64),
+            t_final=torch.tensor([1.], dtype=torch.float64)
+        ):
+        """
+        Creates an initial time sampling tensor either from scratch or from a
+        tensor of time points with dimension d.
+
+        Args:
+            t (Tensor): Input time, either None or tensor starting and
+                ending at the integration bounds
+            t_init (Tensor, optional) [D]: Minimum of integral range
+            t_final (Tensor, optional) [D]: Maximum of integral range
+        
+        Shapes:
+            t : [N, D] will populate intermediate evaluations according to
+                integration method, [N, C, D] will retun t
+            t_init: [D]
+            t_final: [D]
+        """
+        
+        if t is None:
+            t = torch.linspace(0, 1., 7).unsqueeze(-1)
+            t = t_init + t*(t_final - t_init)
+        elif len(t.shape) == 3:
+            return t
+        return self._t_step_interpolate(t[:-1], t[1:])
+ 
+
+    def _t_step_interpolate(self, t_left, t_right):
+        dt = (t_right - t_left).unsqueeze(1)
+        #steps = torch.arange(self.p1).unsqueeze(-1)
+        steps = self.method.tableau.c.unsqueeze(-1)*dt
+        #print(dt.shape, self.method.tableau.c.unsqueeze(-1).shape, steps.shape, t_left.shape)
+        #steps = steps*dt/self.p
+        return t_left.unsqueeze(1) + steps
+
+
+
     def _remove_excess_t(self, t, remove_idxs):
+        """
+        Merge two integration steps together through the time tensor
+
+        Args:
+            t (Tensor): Time points previously evaluated and will be pruned
+            remove_idxs (Tensor): Index corresponding to the first time step
+                in the contiguous pair to remove
+        
+        Shapes:
+            t: [N, C, D]
+            remove_idxs: [R]
+        """
         if len(remove_idxs) == 0:
             return t
         t_replace = self._t_step_interpolate(
@@ -517,10 +539,37 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.p1 = self.method.order 
         self.p = self.p1 - 1
     
-    def _initial_t_steps(self, t, t_init=0., t_final=1.):
+    def _initial_t_steps(
+            self,
+            t,             
+            t_init=torch.tensor([0.], dtype=torch.float64),
+            t_final=torch.tensor([1.], dtype=torch.float64)
+        ):
+        """
+        Creates an initial time sampling tensor either from scratch or from a
+        tensor of time points with dimension d.
+
+        Args:
+            t (Tensor): Input time, either None or tensor starting and
+                ending at the integration bounds
+            t_init (Tensor, optional) [D]: Minimum of integral range
+            t_final (Tensor, optional) [D]: Maximum of integral range
+        
+        Shapes:
+            t : [N, D] will populate intermediate evaluations according to
+                integration method, [N, C, D] will retun t
+            t_init: [D]
+            t_final: [D]
+        """
+ 
         if t is None:
-            t = torch.linspace(t_init, t_final, 7*self.p+1).unsqueeze(1)
-        assert (len(t) - 1) % self.p == 0
+            t = torch.linspace(0, 1., 7*self.p+1).unsqueeze(-1)
+            t = t_init + t*(t_final - t_init)
+        elif len(t.shape) == 3:
+            return t
+        else:
+            error_message = f"Input time must be of length N*({self.method.order-1}) + 1, instead got {t.shape}"
+            assert (len(t) - 1) % self.p == 0, error_message
         _t = torch.reshape(t[:-1], (-1, self.p, 1))
         print("INIT T", _t.shape, _t[1:,0].shape, t[None,-1].shape)
         _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
@@ -530,16 +579,29 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         """
         Add points between current points to double the sampling
         """
+        asdfsdfasdfd
         return (t[idxs_add,1:] +  t[idxs_add,:-1])/2
     
     def _remove_excess_t(self, t, remove_idxs):
+        """
+        Merge two integration steps together through the time tensor
+
+        Args:
+            t (Tensor): Time points previously evaluated and will be pruned
+            remove_idxs (Tensor): Index corresponding to the first time step
+                in the contiguous pair to remove
+        
+        Shapes:
+            t: [N, C, D]
+            remove_idxs: [R]
+        """
         if len(remove_idxs) == 0:
             return t
         combined_steps = torch.concatenate(
-            t[remove_idxs,:], t[remove_idxs+1,1:], dim=1
+            [t[remove_idxs,:], t[remove_idxs+1,1:]], dim=1
         )
-        keep_idxs = torch.arange(self.p1//2+1, dtype=torch.long)*2
-        t[remove_idxs+1,:] = combined_steps[:,keep_idxs]
+        keep_idxs = torch.arange(self.p1, dtype=torch.long)*2
+        t[remove_idxs+1] = combined_steps[:,keep_idxs]
         remove_mask = torch.ones(len(t), dtype=torch.bool)
         remove_mask[remove_idxs] = False
         return t[remove_mask]

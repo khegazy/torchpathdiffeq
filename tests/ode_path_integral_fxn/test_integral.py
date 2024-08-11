@@ -1,7 +1,6 @@
 import torch
 from numpy.testing import assert_allclose, assert_array_equal
 from torchpathdiffeq import ode_path_integral, UNIFORM_METHODS, RKParallelUniformAdaptiveStepsizeSolver, RKParallelVariableAdaptiveStepsizeSolver
-#from ..integrals.test_chemistry import wolf_schlegel
 
 def integrand(t):
     return torch.exp(-5*(t-0.5)**2)*4*torch.cos(3*t**2)

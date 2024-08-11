@@ -5,8 +5,7 @@ from .solvers import steps, MethodOutput, ParallelVariableAdaptiveStepsizeSolver
 
 
 
-def _RK_integral(t, y, tableau_b, y0=0):
-    verbose = False
+def _RK_integral(t, y, tableau_b, y0=0, verbose=False):
     """
     dt = t[1:] - t[:-1]
     _t_p = t[0::self.p]
