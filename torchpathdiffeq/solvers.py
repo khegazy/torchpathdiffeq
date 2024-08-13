@@ -16,10 +16,6 @@ class steps(Enum):
     ADAPTIVE_UNIFORM = 1
     ADAPTIVE_VARIABLE = 2
 
-ADAPTIVE_METHOD_P = {
-    'heun' : 2
-}
-
 @dataclass
 class IntegralOutput():
     integral: torch.Tensor
@@ -43,7 +39,16 @@ class MethodOutput():
     
 
 class SolverBase():
-    def __init__(self, method, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0., t_final=1.) -> None:
+    def __init__(
+            self,
+            method,
+            atol,
+            rtol,
+            y0=torch.tensor([0], dtype=torch.float64),
+            ode_fxn=None,
+            t_init=torch.tensor([0], dtype=torch.float64),
+            t_final=torch.tensor([1], dtype=torch.float64),
+        ) -> None:
 
         self.method_name = method.lower()
         self.atol = atol
@@ -53,10 +58,56 @@ class SolverBase():
         self.t_init = t_init
         self.t_final = t_final
 
-    def _calculate_integral(self, t, y, y0=0):
+    def _calculate_integral(self, t, y, y0=torch.tensor([0], dtype=torch.float64)):
+        """
+        Internal integration method of a specific numerical integration scheme,
+        e.g. Runge-Kutta, that carries out the method on the given time (t) and
+        ode_fxn evaluation points (y).
+
+        Args:
+            t (Tensor): Evaluation time steps for the RK integral
+            y (Tensor): Evalutions of the integrad at time steps t
+            y0 (Tensor): Initial values of the integral
+        
+        Shapes:
+            t: [N, C, T]
+            y: [N, C, D]
+            y0: [D]
+        """
         raise NotImplementedError
     
-    def integrate(self, ode_fxn, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
+    def integrate(
+            self,
+            ode_fxn,
+            y0=torch.tensor([0], dtype=torch.float64),
+            t_init=torch.tensor([0], dtype=torch.float64),
+            t_final=torch.tensor([1], dtype=torch.float64),
+            t=None,
+            ode_args=()
+        ):
+        """
+        Perform the numerical path integral on ode_fxn over a path
+        parameterized by time (t), which ranges from t_init to t_final.
+
+        Args:
+            ode_fxn (Callable): The function to integrate over along the path
+                parameterized by t
+            y0 (Tensor): Initial value of the integral
+            t (Tensor): Initial time points to evaluate ode_fxn and perform the
+                numerical integration over
+            t_init (Tensor): Initial integration time points
+            t_final (Tensor): Final integration time points
+            ode_args (Tuple): Extra arguments provided to ode_fxn
+            verbose (bool): Print derscriptive messages about the evaluation
+            verbose_speed (bool): Time integration subprocesses and print
+        
+        Shapes:
+            y0: [D]
+            t: [N, C, T] or for [N, T] the intermediate time points will be 
+                calculated
+            t_init: [T]
+            t_final: [T]
+        """
         raise NotImplementedError
 
 
@@ -75,14 +126,36 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
         )
 
     
-    def integrate(self, ode_fxn=None, state=None, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
+    def integrate(self, ode_fxn=None, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
+        """
+        Perform the sequential numerical path integral on ode_fxn over a path
+        parameterized by time (t), which ranges from t_init to t_final. This 
+        is done by using the torchdiffeq odeint function.
+
+        Args:
+            ode_fxn (Callable): The function to integrate over along the path
+                parameterized by t
+            y0 (Tensor): Initial value of the integral
+            t (Tensor): Initial time points to evaluate ode_fxn and perform the
+                numerical integration over
+            t_init (Tensor): Initial integration time points
+            t_final (Tensor): Final integration time points
+            ode_args (Tuple): Extra arguments provided to ode_fxn
+            verbose (bool): Print derscriptive messages about the evaluation
+            verbose_speed (bool): Time integration subprocesses and print
+        
+        Shapes:
+            y0: [D]
+            t: [N, C, T] or for [N, T] the intermediate time points will be 
+                calculated
+            t_init: [T]
+            t_final: [T]
+        """
         ode_fxn = self.ode_fxn if ode_fxn is None else ode_fxn
         y0 = self.y0 if y0 is None else y0
         assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."
         if t is None:
             t=torch.tensor([t_init, t_final])
-        if state is not None:
-            t = state.t
         
         integral = odeint(
             func=ode_fxn,
@@ -134,62 +207,59 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
         self.previous_ode_fxn = None
 
     
-    def _get_tableau_b(self, t):
-        raise NotImplementedError
-
-
     def _error_norm(self, error):
+        """
+        Normalize multivariate errors to determine the step's total error
+        """
         return torch.sqrt(torch.mean(error**2, -1))
     
     
     def integrate(
             self,
             ode_fxn=None,
-            state=None,
             y0=None,
-            t_init=0.,
-            t_final=1.,
             t=None,
-            ode_args=None,
-            remove_mask=None
+            t_init=torch.tensor([0], dtype=torch.float64),
+            t_final=torch.tensor([1], dtype=torch.float64),
+            ode_args=(),
+            verbose=False,
+            verbose_speed=False
         ):
+        """
+        Perform the parallel numerical path integral on ode_fxn over a path
+        parameterized by time (t), which ranges from t_init to t_final.
+
+        Args:
+            ode_fxn (Callable): The function to integrate over along the path
+                parameterized by t
+            y0 (Tensor): Initial value of the integral
+            t (Tensor): Initial time points to evaluate ode_fxn and perform the
+                numerical integration over
+            t_init (Tensor): Initial integration time points
+            t_final (Tensor): Final integration time points
+            ode_args (Tuple): Extra arguments provided to ode_fxn
+            verbose (bool): Print derscriptive messages about the evaluation
+            verbose_speed (bool): Time integration subprocesses and print
         
-        verbose=False
-        speed_verbose=False
+        Shapes:
+            y0: [D]
+            t: [N, C, T] or for [N, T] the intermediate time points will be 
+                calculated
+            t_init: [T]
+            t_final: [T]
+        """
+
         ode_fxn = self.ode_fxn if ode_fxn is None else ode_fxn
         y0 = self.y0 if y0 is None else y0
         assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."
-        assert len(ode_fxn(torch.tensor([[t_init]])).shape) >= 2
-        if state is not None:
-            t = state.t
+        assert len(ode_fxn(torch.tensor([[t_init]]), *ode_args).shape) >= 2
         
-        t_add = t
-        if t_add is None:
-            if self.previous_t is None\
-                or self.previous_ode_fxn != ode_fxn.__name__:
-                t_add = torch.unsqueeze(
-                    torch.linspace(t_init, t_final, 13), 1
-                )
-            else:
+        if t is None:
+            same_fxn = self.previous_ode_fxn != ode_fxn.__name__
+            if self.previous_t is not None and same_fxn:
                 mask = (self.previous_t[:,0] <= t_final)\
                     + (self.previous_t[:,0] >= t_init)
-                t_add = self.previous_t[mask]
-
-        """
-        if error_ratios is None:
-            t_steps, y_steps = _add_initial_y(t_add, self._t_spacing_fxn)
-            integral_p, y_p, _ = self._calculate_integral(
-                t_steps, y_steps, y0=y0, degr=degree.P
-            )
-            integral_p1, y_p1, h = self._calculate_integral(
-                t_steps, y_steps, y0=y0, degr=degree.P1
-            )
-            error_ratios, error_ratios_2steps = _compute_error_ratios(
-                y_p, y_p1, self.rtol, self.atol, self._error_norm
-            )
-        else:
-            integral_p1 = None
-        """ 
+                t = self.previous_t[mask]
 
         y = None
         error_ratios=None
@@ -203,16 +273,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             #print("START OF LOOP", loop_cnt)
             if verbose:
                 print("BEGINNING LOOP")
-                print("TADD", t_add.shape, t_add, idxs_add)
-
-            #idxs_remove_pair = _find_excess_y(error_ratios_2steps, self.remove_cut)
 
             # Evaluate new points and add new evals and points to arrays
             t0 = time.time()
             y, t = self.adaptively_add_y(
-                ode_fxn, y, t, error_ratios, t_init, t_final
+                ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
             )
-            if speed_verbose: print("\t add time", time.time() - t0)
+            if verbose_speed: print("\t add time", time.time() - t0)
             if verbose or True:
                 print("NEW T", t.shape, t[:,:,0])
                 print("NEW Y", y.shape, y[:,:,0])
@@ -221,7 +288,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             t0 = time.time()
             method_output = self._calculate_integral(t, y, y0=y0)
             #integral_p1, sum_steps_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
-            if speed_verbose: print("\t calc integrals 1", time.time() - t0)
+            if verbose_speed: print("\t calc integrals 1", time.time() - t0)
             
             # Calculate error
             t0 = time.time()
@@ -230,7 +297,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
                 method_output.sum_steps, method_output.sum_step_errors
             )
             print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
-            if speed_verbose: print("\t calculate errors", time.time() - t0)
+            if verbose_speed: print("\t calculate errors", time.time() - t0)
             assert len(y) == len(error_ratios)
             assert len(y) - 1 == len(error_ratios_2steps)
             #print(error_ratios)
@@ -242,37 +309,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             # Create mask for remove points that are too close
             t0 = time.time()
             if torch.all(error_ratios <= 1.):
-                t_pruned = self.remove_excess_y(
-                    t, error_ratios_2steps, self._remove_excess_t
-                )
-            if speed_verbose: print("\t removal mask", time.time() - t0)
-
-            #y_pruned = y[~remove_mask]
-            #t_pruned = t[~remove_mask]
-
-            """
-            # Find indices where error is too large to add new points
-            # Evaluate integral
-            t0 = time.time()
-            _, y_p_pruned, _ = self._calculate_integral(
-                t_pruned, y_pruned, y0=y0, degr=degree.P
-            )
-            _, y_p1_pruned, _ = self._calculate_integral(
-                t_pruned, y_pruned, y0=y0, degr=degree.P1
-            )
-            if speed_verbose: print("\t calc integrals 2", time.time() - t0)
-            
-            # Calculate error
-            error_ratios_pruned, _ = _compute_error_ratios(
-                y_p_pruned, y_p1_pruned, self.rtol, self.atol, self._error_norm
-            )
-
-            t_add, idxs_add = _find_sparse_y(
-                t_pruned, self.p, error_ratios_pruned
-            )
-            """
-
-            if speed_verbose: print("\tLOOP TIME", time.time() - tl0)
+                t_pruned = self.remove_excess_y(t, error_ratios_2steps)
+            if verbose_speed: print("\t removal mask", time.time() - t0)
+            if verbose_speed: print("\tLOOP TIME", time.time() - tl0)
 
         print("SUM T", t.shape, torch.sum(t), torch.all(t[:-1,1]==t[1:,0]))
 
@@ -291,150 +330,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
         )
 
 
-    def _integrate(
-            self,
-            ode_fxn=None,
-            state=None,
-            y0=None,
-            t_init=0.,
-            t_final=1.,
-            t=None,
-            ode_args=None,
-            remove_mask=None
-        ):
-        
-        verbose=False
-        speed_verbose=False
-        ode_fxn = self.ode_fxn if ode_fxn is None else ode_fxn
-        y0 = self.y0 if y0 is None else y0
-        assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."
-        assert len(ode_fxn(torch.tensor([[t_init]])).shape) >= 2
-        if state is not None:
-            t = state.t
-            remove_mask = state.remove_mask
-            error_ratios = state.error_ratios
-        if remove_mask is not None:
-            t = t[~remove_mask]
-        
-        
-        t_add = t
-        if t_add is None:
-            if self.previous_t is None\
-                or self.previous_ode_fxn != ode_fxn.__name__:
-                t_add = torch.unsqueeze(
-                    torch.linspace(t_init, t_final, 13), 1
-                )
-            else:
-                mask = (self.previous_t[:,0] <= t_final)\
-                    + (self.previous_t[:,0] >= t_init)
-                t_add = self.previous_t[mask]
-        
-        if error_ratios is None:
-            t_steps, y_steps = _add_initial_y(t_add, self._t_spacing_fxn)
-            integral_p, y_p, _ = self._calculate_integral(
-                t_steps, y_steps, y0=y0, degr=degree.P
-            )
-            integral_p1, y_p1, h = self._calculate_integral(
-                t_steps, y_steps, y0=y0, degr=degree.P1
-            )
-            error_ratios, error_ratios_2steps = _compute_error_ratios(
-                y_p, y_p1, self.rtol, self.atol, self._error_norm
-            )
-        else:
-            integral_p1 = None
-
-        loop_cnt = 0
-        while torch.any(error_ratios > 1.) or integral_p1 is None:
-            # check remove
-            # remove idxs
-            # check and add
-            # new errors
-            tl0 = time.time()
-            #print("START OF LOOP", loop_cnt)
-            if verbose:
-                print("BEGINNING LOOP")
-                print("TADD", t_add.shape, t_add, idxs_add)
-
-            idxs_remove_pair = _find_excess_y(error_ratios_2steps, self.remove_cut)
-
-            # Evaluate new points and add new evals and points to arrays
-            t0 = time.time()
-            y, t = _adaptively_add_y(
-                ode_fxn, t_steps, y_steps, error_ratios, idxs_remove_pair
-            )
-            if speed_verbose: print("\t add time", time.time() - t0)
-            if verbose:
-                print("NEW T", t.shape, t)
-                print("NEW Y", y.shape, y)
-
-            # Evaluate integral
-            t0 = time.time()
-            integral_p, y_p, _ = self._calculate_integral(t, y, y0=y0, degr=degree.P)
-            integral_p1, y_p1, h = self._calculate_integral(t, y, y0=y0, degr=degree.P1)
-            if speed_verbose: print("\t calc integrals 1", time.time() - t0)
-            
-            # Calculate error
-            t0 = time.time()
-            error_ratios, error_ratios_2steps = _compute_error_ratios(
-                y_p, y_p1, self.rtol, self.atol, self._error_norm
-            )
-            if speed_verbose: print("\t calculate errors", time.time() - t0)
-            assert (len(y) - 1)//self.p == len(error_ratios)
-            assert (len(y) - 1)//self.p - 1 == len(error_ratios_2steps)
-            #print(error_ratios)
-            if verbose:
-                print("ERROR1", error_ratios)
-                print("ERROR2", error_ratios_2steps)
-                print(integral_p, integral_p1)
-            
-            # Create mask for remove points that are too close
-            """
-            t0 = time.time()
-            remove_mask = _find_excess_y(self.p, error_ratios_2steps, self.remove_cut)
-            if speed_verbose: print("\t removal mask", time.time() - t0)
-            assert (len(remove_mask) == len(t))
-            if verbose:
-                print("RCF", remove_mask)
-
-            y_pruned = y[~remove_mask]
-            t_pruned = t[~remove_mask]
-            """
-
-            # Find indices where error is too large to add new points
-            # Evaluate integral
-            t0 = time.time()
-            _, y_p_pruned, _ = self._calculate_integral(
-                t_pruned, y_pruned, y0=y0, degr=degree.P
-            )
-            _, y_p1_pruned, _ = self._calculate_integral(
-                t_pruned, y_pruned, y0=y0, degr=degree.P1
-            )
-            if speed_verbose: print("\t calc integrals 2", time.time() - t0)
-            
-            # Calculate error
-            error_ratios_pruned, _ = _compute_error_ratios(
-                y_p_pruned, y_p1_pruned, self.rtol, self.atol, self._error_norm
-            )
-
-            t_add, idxs_add = _find_sparse_y(
-                t_pruned, self.p, error_ratios_pruned
-            )
-
-            if speed_verbose: print("\tLOOP TIME", time.time() - tl0)
-
-        self.previous_ode_fxn = ode_fxn.__name__
-        self.t_previous = t
-        return IntegralOutput(
-            integral=integral_p1,
-            t=t,
-            h=h,
-            y=y_p1,
-            errors=torch.abs(y_p - y_p1),
-            error_ratios=error_ratios,
-            remove_mask=remove_mask
-        )
-    
-    
 class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -444,18 +339,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.p1 = self.method.order
         self.p = self.p1 - 1
  
-
-    def _adaptive_t_steps(self, t, idxs_add):
-        asdfas
-        t_bisect = (t[idxs_add,0] + t[idxs_add,-1])/2.
-        t_left = torch.concatenate(
-            [t[idxs_add,0].unsqueeze(1), t_bisect.unsqueeze(1)], dim=1
-        )
-        t_right = torch.concatenate(
-            [t_bisect.unsqueeze(1), t[idxs_add,-1].unsqueeze(1)], dim=1
-        )
-        return self._t_step_interpolate_uniform(t_left.flatten(), t_right.flatten())
-
 
     def _initial_t_steps(self,
             t,
@@ -469,14 +352,14 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         Args:
             t (Tensor): Input time, either None or tensor starting and
                 ending at the integration bounds
-            t_init (Tensor, optional) [D]: Minimum of integral range
-            t_final (Tensor, optional) [D]: Maximum of integral range
+            t_init (Tensor, optional): Minimum of integral range
+            t_final (Tensor, optional): Maximum of integral range
         
         Shapes:
-            t : [N, D] will populate intermediate evaluations according to
-                integration method, [N, C, D] will retun t
-            t_init: [D]
-            t_final: [D]
+            t : [N, T] will populate intermediate evaluations according to
+                integration method, [N, C, T] will retun t
+            t_init: [T]
+            t_final: [T]
         """
         
         if t is None:
@@ -488,6 +371,18 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
  
 
     def _t_step_interpolate(self, t_left, t_right):
+        """
+        Determine the time points to evaluate within the integration step that
+        spans [t_left, t_right] using the method's tableau c values
+
+        Args:
+            t_left (Tensor): Beginning times of all the integration steps
+            t_left (Tensor): End times of all the integration steps
+        
+        Shapes:
+            t_left: [N, T]
+            t_right: [N, T]
+        """
         dt = (t_right - t_left).unsqueeze(1)
         #steps = torch.arange(self.p1).unsqueeze(-1)
         steps = self.method.tableau.c.unsqueeze(-1)*dt
@@ -507,7 +402,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
                 in the contiguous pair to remove
         
         Shapes:
-            t: [N, C, D]
+            t: [N, C, T]
             remove_idxs: [R]
         """
         if len(remove_idxs) == 0:
@@ -520,14 +415,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         remove_mask[remove_idxs] = False
         return t[remove_mask]
     
-    def _get_tableau_b(self, t):
-        return self.method.tableau.b.unsqueeze(-1),\
-            self.method.tableau.b_error.unsqueeze(-1)
-    
-    def _get_num_tableau_c(self):
-        return len(self.method.tableau.c)
-
-
 
 class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
@@ -552,14 +439,14 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         Args:
             t (Tensor): Input time, either None or tensor starting and
                 ending at the integration bounds
-            t_init (Tensor, optional) [D]: Minimum of integral range
-            t_final (Tensor, optional) [D]: Maximum of integral range
+            t_init (Tensor, optional): Minimum of integral range
+            t_final (Tensor, optional): Maximum of integral range
         
         Shapes:
-            t : [N, D] will populate intermediate evaluations according to
-                integration method, [N, C, D] will retun t
-            t_init: [D]
-            t_final: [D]
+            t : [N, T] will populate intermediate evaluations according to
+                intetgration method, [N, C, T] will retun t
+            t_init: [T]
+            t_final: [T]
         """
  
         if t is None:
@@ -575,13 +462,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
         return torch.concatenate([_t, _t_ends], dim=1)
     
-    def _adaptive_t_steps(self, t, idxs_add):
-        """
-        Add points between current points to double the sampling
-        """
-        asdfsdfasdfd
-        return (t[idxs_add,1:] +  t[idxs_add,:-1])/2
-    
+   
     def _remove_excess_t(self, t, remove_idxs):
         """
         Merge two integration steps together through the time tensor
@@ -592,7 +473,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
                 in the contiguous pair to remove
         
         Shapes:
-            t: [N, C, D]
+            t: [N, C, T]
             remove_idxs: [R]
         """
         if len(remove_idxs) == 0:
@@ -605,13 +486,3 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         remove_mask = torch.ones(len(t), dtype=torch.bool)
         remove_mask[remove_idxs] = False
         return t[remove_mask]
-    
-    def _get_tableau_b(self, t):
-        norm_dt = t - t[:,0,None]
-        norm_dt = norm_dt/norm_dt[:,-1,None]
-        b, b_error = self.method.tableau_b(norm_dt)
-        return b.unsqueeze(-1), b_error.unsqueeze(-1)
-    
-    def _get_num_tableau_c(self):
-        return self.method.n_tableau_c
-

@@ -1,46 +1,40 @@
 import torch
-import numpy as np
-from numpy.testing import assert_allclose
 from .solvers import steps, MethodOutput, ParallelVariableAdaptiveStepsizeSolver, ParallelUniformAdaptiveStepsizeSolver
 
 
 
-def _RK_integral(t, y, tableau_b, y0=0, verbose=False):
+def _RK_integral(
+        t, 
+        y, 
+        tableau_b, 
+        y0=torch.tensor([0], dtype=torch.float64),
+        verbose=False
+    ):
     """
-    dt = t[1:] - t[:-1]
-    _t_p = t[0::self.p]
-    h = _t_p[1:] - _t_p[:-1]
+    Performs a single Runge-Kutta sum over the p or more evaluations of
+    ode_fxn, where p is the order of the Runge-Kutta integration method.
+
+    Args:
+        t (Tensor): Current time evaluations in the path integral
+        y (Tensor): Evaluations of ode_fxn at time points t
+        tableau_b (Tensor): Tableau b values (see wiki for notation convention)
+            that weight the temporal components after summing over y steps
+        y0 (Tensor): The initial integral value
+        verbose (bool): Boolean for printing intermediate results
+    
+    Shapes:
+        t: [N, C, T]
+        y: [N, C, D]
+        tableau_b: [N, C, 1] or [1, C, 1]
+        y0: [D]
     """
     h = t[:,-1] - t[:,0]
     if verbose:
         print("H", h.shape, h)
     
-    #tableau_b = _calculate_tableau_b(t, degr-degr)
     print("IN CALC INT H / TB", h.shape, tableau_b.shape)
-    #assert(torch.all(torch.sum(tableau_b, dim=-1) == 1))
     
     # The last point in the h-1 RK step is the first point in the h RK step
-    """
-    combined_tableau_b = tableau_b
-    combined_tableau_b[:-1,-1] += tableau_b[1:,0]
-    combined_tableau_b = torch.concatenate(
-        [combined_tableau_b[0], torch.flatten(combined_tableau_b[1:,1:])]
-    )
-    """
-    
-    """
-    #y_steps = torch.reshape(y[1:], (-1, max(self.p-1, 1)))
-    y_steps = torch.reshape(y[1:], (-1, max(self.p, 1)))
-    y_steps = torch.concatenate(
-        [
-            torch.concatenate(
-                [torch.tensor([y[0]]), y_steps[:-1,-1]]
-            ).unsqueeze(1),
-            y_steps
-        ],
-        dim=1
-    )
-    """
     y_steps = y
 
     #print("SHAPES dt / h / tb / ysteps", dt.shape, h.shape, tableau_b.shape, y_steps.shape)
@@ -59,32 +53,7 @@ def _RK_integral(t, y, tableau_b, y0=0, verbose=False):
     return integral, RK_steps, h
 
 
-def _calculate_tableau_b(self, t, degr):
-    if degr == degree.P:
-        tableau_b_fxn = self.tableau_b_p
-    elif degr == degree.P1:
-        tableau_b_fxn = self.tableau_b_p1
-    
-    norm_dt = t - t[:,0,None]
-    norm_dt = norm_dt/norm_dt[:,-1,None]
-    b = tableau_b_fxn(norm_dt, degr).unsqueeze(-1)
-    assert np.all(np.abs(torch.sum(b, dim=1).numpy() - 1.) < 1e-5)
-    #assert_allclose(torch.sum(b, dim=-1).numpy(), 1.)
-
-    return b
-
-"""
-class RKParallelAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
-    def __init__(self, solver, atol, rtol, y0=torch.tensor([0], dtype=torch.float), remove_cut=0.1, ode_fxn=None, t_init=0., t_final=1.):
-        super().__init__(
-            solver=solver, atol=atol, rtol=rtol, remove_cut=remove_cut, ode_fxn=ode_fxn, t_init=t_init, t_final=t_final
-        )
-        class_tb_p, class_tb_p1 = TABLEAU_CALCULATORS[solver]
-        self.tableau_b_p = class_tb_p()
-        self.tableau_b_p1 = class_tb_p1()
-        self.y0 = y0
-"""
-    
+   
 class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -93,6 +62,20 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
         #)
 
     def _calculate_integral(self, t, y, y0=0):
+        """
+        Internal Runge-Kutta (RK) integration method, carries out the RK method
+        on the given time (t) and ode_fxn evaluation points (y).
+
+        Args:
+            t (Tensor): Evaluation time steps for the RK integral
+            y (Tensor): Evalutions of the integrad at time steps t
+            y0 (Tensor): Initial values of the integral
+        
+        Shapes:
+            t: [N, C, T]
+            y: [N, C, D]
+            y0: [D]
+        """
         tableau_b, tableau_b_error = self._get_tableau_b(t)
         print("TABLE !!!!!!!!!!!!", tableau_b.shape, tableau_b_error.shape)
         integral, RK_steps, h = _RK_integral(t, y, tableau_b, y0=y0)
@@ -104,6 +87,30 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
             sum_step_errors=step_errors,
             h=h
         )
+    
+
+    def _get_tableau_b(self, t):
+        """
+        Return the Tableau b values (see wiki for notation convention)that
+        weight the temporal components after summing over y steps
+
+        Args:
+            t (Tensor): Current time evaluations in the path integral
+        
+        Shapes:
+            t: [N, C, T]
+        """
+        return self.method.tableau.b.unsqueeze(-1),\
+            self.method.tableau.b_error.unsqueeze(-1)
+    
+
+    def _get_num_tableau_c(self):
+        """
+        Return the number of Tableau c values (see wiki for notation
+        convention) that determine the fractional time evaluation 
+        points within a single RK step.
+        """
+        return len(self.method.tableau.c)
 
 
 class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeSolver):
@@ -114,6 +121,20 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
         #)
 
     def _calculate_integral(self, t, y, y0=0):
+        """
+        Internal Runge-Kutta (RK) integration method, carries out the RK method
+        on the given time (t) and ode_fxn evaluation points (y).
+
+        Args:
+            t (Tensor): Evaluation time steps for the RK integral
+            y (Tensor): Evalutions of the integrad at time steps t
+            y0 (Tensor): Initial values of the integral
+        
+        Shapes:
+            t: [N, C, T]
+            y: [N, C, D]
+            y0: [D]
+        """
         tableau_b, tableau_b_error = self._get_tableau_b(t)
         integral, RK_steps, h = _RK_integral(t, y, tableau_b, y0=y0)
         integral_error, step_errors, _ = _RK_integral(t, y, tableau_b_error, y0=y0)
@@ -124,9 +145,36 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
             sum_step_errors=step_errors,
             h=h
         )
+    
+    def _get_tableau_b(self, t):
+        """
+        Return the Tableau b values (see wiki for notation convention)that
+        weight the temporal components after summing over y steps
+
+        Args:
+            t (Tensor): Current time evaluations in the path integral
+        
+        Shapes:
+            t: [N, C, T]
+        """
+        norm_dt = t - t[:,0,None]
+        norm_dt = norm_dt/norm_dt[:,-1,None]
+        b, b_error = self.method.tableau_b(norm_dt)
+        return b.unsqueeze(-1), b_error.unsqueeze(-1)
+    
+    def _get_num_tableau_c(self):
+        """
+        Return the number of Tableau c values (see wiki for notation
+        convention) that determine the fractional time evaluation 
+        points within a single RK step.
+        """
+        return self.method.n_tableau_c
 
 
 def get_parallel_RK_solver(sampling_type, *args, **kwargs):
+    """
+    Return either the uniform or variable sampling RK method given input args.
+    """
     if sampling_type == steps.ADAPTIVE_UNIFORM:
         return RKParallelUniformAdaptiveStepsizeSolver(*args, **kwargs)
     elif sampling_type == steps.ADAPTIVE_VARIABLE:

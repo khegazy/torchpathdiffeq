@@ -1,9 +1,22 @@
+import torch
 from .solvers import SerialAdaptiveStepsizeSolver, steps
 from .runge_kutta import get_parallel_RK_solver
 
 
 
-def ode_path_integral(ode_fxn, y0, t, method, atol, rtol, computation='parallel', sampling='uniform', remove_cut=0.1, t_init=0, t_final=1):
+def ode_path_integral(
+        ode_fxn,
+        t,
+        method,
+        atol,
+        rtol,
+        t_init=torch.tensor([0], dtype=torch.float64),
+        t_final=torch.tensor([1], dtype=torch.float64),
+        y0=torch.tensor([0], dtype=torch.float64),
+        computation='parallel',
+        sampling='uniform',
+        remove_cut=0.1,
+    ):
 
     if computation.lower() == 'parallel':
         if sampling.lower() == 'uniform':
