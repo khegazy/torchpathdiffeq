@@ -16,6 +16,7 @@ def ode_path_integral(
         computation='parallel',
         sampling='uniform',
         remove_cut=0.1,
+        use_absolute_error_ratio=True
     ):
 
     if computation.lower() == 'parallel':
@@ -33,7 +34,8 @@ def ode_path_integral(
             rtol=rtol,
             remove_cut=remove_cut,
             t_init=t_init,
-            t_final=t_final
+            t_final=t_final,
+            use_absolute_error_ratio=use_absolute_error_ratio
         )
     elif computation.lower() == 'serial':
         integrator = SerialAdaptiveStepsizeSolver(
@@ -42,7 +44,8 @@ def ode_path_integral(
             rtol=rtol,
             ode_fxn=ode_fxn,
             t_init=t_init,
-            t_final=t_final
+            t_final=t_final,
+            use_absolute_error_ratio=use_absolute_error_ratio
         )
     else:
         raise ValueError(f"Path integral computation type must be 'parallel' or 'serial', not {computation}.")

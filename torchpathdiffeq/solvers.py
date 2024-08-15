@@ -8,7 +8,6 @@ from enum import Enum
 
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
 from .adaptivity import IntegralAdaptivity
-#_adaptively_add_y, _remove_excess_y, _find_sparse_y, _compute_error_ratios, _add_initial_y
 
 
 class steps(Enum):
@@ -36,7 +35,6 @@ class MethodOutput():
     sum_step_errors: torch.Tensor
     h: torch.Tensor
 
-    
 
 class SolverBase():
     def __init__(
@@ -57,6 +55,7 @@ class SolverBase():
         self.y0 = y0
         self.t_init = t_init
         self.t_final = t_final
+        print("MAKE SURE ATOL RTOL MATCH 1", atol, rtol)
 
     def _calculate_integral(self, t, y, y0=torch.tensor([0], dtype=torch.float64)):
         """
@@ -114,8 +113,10 @@ class SolverBase():
 
 
 class SerialAdaptiveStepsizeSolver(SolverBase):
-    def __init__(self, method, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0, t_final=1.) -> None:
-        super().__init__(
+    def __init__(self, *args, **kwargs):
+        #method, atol, rtol, y0=torch.tensor([0], dtype=torch.float), ode_fxn=None, t_init=0, t_final=1.) -> None:
+        super().__init__(*args, **kwargs)
+        """
             method=method,
             atol=atol,
             rtol=rtol,
@@ -124,6 +125,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
             t_init=t_init,
             t_final=t_final
         )
+        """
 
     
     def integrate(self, ode_fxn=None, y0=None, t_init=0., t_final=1., t=None, ode_args=None):
@@ -176,18 +178,20 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
 
 class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
     
-    def __init__(
-            self,
+    def __init__(self, *args, **kwargs):
+        """
             method,
             atol,
             rtol,
-            remove_cut=0.1,
             y0=torch.tensor([0], dtype=torch.float64),
             ode_fxn=None,
             t_init=torch.tensor([0], dtype=torch.float64),
             t_final=torch.tensor([1], dtype=torch.float64),
         ):
-        super().__init__(
+        """
+        super(SolverBase, self).__init__(*args, **kwargs)
+        super(IntegralAdaptivity, self).__init__(*args, **kwargs)
+        """
             method=method,
             atol=atol,
             rtol=rtol,
@@ -196,13 +200,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             t_init=t_init,
             t_final=t_final
         )
-
+        """
         self.method = None
         self.p1 = None
         self.p = None
-        self.atol = atol
-        self.rtol = rtol
-        self.remove_cut = remove_cut
         self.previous_t = None
         self.previous_ode_fxn = None
 
@@ -263,14 +264,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
 
         y = None
         error_ratios=None
-        loop_cnt = 0
         while y is None or torch.any(error_ratios > 1.):
-            # check remove
-            # remove idxs
-            # check and add
-            # new errors
             tl0 = time.time()
-            #print("START OF LOOP", loop_cnt)
             if verbose:
                 print("BEGINNING LOOP")
 
@@ -280,7 +275,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
                 ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
             )
             if verbose_speed: print("\t add time", time.time() - t0)
-            if verbose or True:
+            if verbose:
                 print("NEW T", t.shape, t[:,:,0])
                 print("NEW Y", y.shape, y[:,:,0])
 
@@ -296,7 +291,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             error_ratios, error_ratios_2steps = self.compute_error_ratios(
                 method_output.sum_steps, method_output.sum_step_errors
             )
-            print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
+            print("ERRORS RATIOS", len(error_ratios), torch.sum(error_ratios>1))
+            #print("ER SHAPES", error_ratios.shape, error_ratios_2steps.shape, y.shape, t.shape)
             if verbose_speed: print("\t calculate errors", time.time() - t0)
             assert len(y) == len(error_ratios)
             assert len(y) - 1 == len(error_ratios_2steps)
@@ -304,7 +300,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
             if verbose:
                 print("ERROR1", error_ratios)
                 print("ERROR2", error_ratios_2steps)
-                print(integral_p, integral_p1)
             
             # Create mask for remove points that are too close
             t0 = time.time()
@@ -312,8 +307,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
                 t_pruned = self.remove_excess_y(t, error_ratios_2steps)
             if verbose_speed: print("\t removal mask", time.time() - t0)
             if verbose_speed: print("\tLOOP TIME", time.time() - tl0)
-
-        print("SUM T", t.shape, torch.sum(t), torch.all(t[:-1,1]==t[1:,0]))
 
         self.previous_ode_fxn = ode_fxn.__name__
         self.t_previous = t
@@ -333,7 +326,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
 class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
         assert self.method_name in UNIFORM_METHODS
         self.method = UNIFORM_METHODS[self.method_name]
         self.p1 = self.method.order
@@ -419,8 +411,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
 class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        print("METHOD", self.method_name)
         assert self.method_name in VARIABLE_METHODS
         self.method = VARIABLE_METHODS[self.method_name]()
         self.p1 = self.method.order 
@@ -458,7 +448,6 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             error_message = f"Input time must be of length N*({self.method.order-1}) + 1, instead got {t.shape}"
             assert (len(t) - 1) % self.p == 0, error_message
         _t = torch.reshape(t[:-1], (-1, self.p, 1))
-        print("INIT T", _t.shape, _t[1:,0].shape, t[None,-1].shape)
         _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
         return torch.concatenate([_t, _t_ends], dim=1)
     

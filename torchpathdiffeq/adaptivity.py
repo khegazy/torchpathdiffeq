@@ -2,10 +2,12 @@ import torch
 from einops import rearrange
 
 class IntegralAdaptivity():
-    def __init__(self):
-        self.remove_cut = None
-        self.rtol = None
-        self.atol = None
+    def __init__(self, atol=1e-5, rtol=1e-5, remove_cut=0.1, use_absolute_error_ratio=True):
+        self.remove_cut = remove_cut
+        self.use_absolute_error_ratio = use_absolute_error_ratio
+        self.rtol = atol
+        self.atol = rtol
+        print("MAKE SURE ATOL RTOL MATCH2", atol, rtol)
 
     def _initial_t_steps(
             self,
@@ -159,15 +161,15 @@ class IntegralAdaptivity():
         if y is None or t is None or error_ratios is None:
             return self._add_initial_y(ode_fxn=ode_fxn, ode_args=ode_args, t=t, t_init=t_init, t_final=t_final)
 
-        print("ADAPTIVE ADD INP SHAPES", y.shape, t.shape)
+        #print("ADAPTIVE ADD INP SHAPES", y.shape, t.shape)
         if torch.all(error_ratios <= 1.):
             return y, t
             
         # Get new time steps for merged steps
         idxs_add = torch.where(error_ratios > 1.)[0]
-        print("idxs add", t.shape, idxs_add.shape, idxs_add)
+        #print("idxs add", t.shape, idxs_add.shape, idxs_add)
         t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, p, 1]
-        print("T and add in adpative", t.shape, t_steps_add.shape, '\n', t[:,:,0], '\n', t_steps_add[:,:,0])
+        #print("T and add in adpative", t.shape, t_steps_add.shape, '\n', t[:,:,0], '\n', t_steps_add[:,:,0])
         #t_steps_add = t_step_fxn(t, idxs_add)
         ##t_steps_add = t_steps_add[:,:-1]
 
@@ -198,7 +200,7 @@ class IntegralAdaptivity():
         t_combined[idx_input,:] = t
 
         # Add new t and y values to added rows
-        print("BEGINING COMB", y.shape, t.shape, y_combined.shape)
+        #print("BEGINING COMB", y.shape, t.shape, y_combined.shape)
         idxs_add_offset = idxs_add + torch.arange(len(idxs_add))
         t_add_combined = torch.nan*torch.ones(
             (len(idxs_add), (nm1_c+1)*2-1, d), dtype=torch.float64
@@ -208,7 +210,7 @@ class IntegralAdaptivity():
         t_combined[idxs_add_offset,:,:] = t_add_combined[:,:nm1_c+1]
         t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,nm1_c:]
 
-        print("TESTING T COMBINED", t[:,:,0], '\n',t_combined[:,:,0])
+        #print("TESTING T COMBINED", t[:,:,0], '\n',t_combined[:,:,0])
         y_add_combined = torch.nan*torch.ones(
             (len(idxs_add), (nm1_c+1)*2-1, d), dtype=torch.float64
         )
@@ -284,37 +286,101 @@ class IntegralAdaptivity():
             return mask
 
 
-    def compute_error_ratios(self, sum_steps, sum_step_errors):
+    def compute_error_ratios(self, sum_step_errors, sum_steps=None, integral=None):
         """
         Computes the ratio of the difference between chosen method of order p
-        and a method of order p-1, and the error tolerance determined by atol
-        and rtol. Integration steps of order p-1 use the same points.
+        and a method of order p-1, and the error tolerance determined by atol,
+        rtol, and the value of the integral. Integration steps of order p-1 
+        use the same points.
 
         Args:
-            sum_steps (Tensor): Sum over all t and y evaluations in a single
-                RK step multiplied by the total delta t for that step (h)
             sum_step_errors (Tensor): Similar to sum_steps but evaluated with
                 and error tableau made of the differences between a method of
                 order p and one of order p-1
+            sum_steps (Tensor): Sum over all t and y evaluations in a single
+                RK step multiplied by the total delta t for that step (h)
+            Integral (Tensor): The evaluated path integral
         
         Shapes:
-            sum_steps: [N, T]
-            sum_step_errors: [N, T]
-
+            sum_step_errors: [N, D]
+            sum_steps: [N, D]
+            integral: [D]
         """
+        if self.use_absolute_error_ratio:
+            return self._compute_error_ratios_absolute(
+                sum_step_errors, integral
+            )
+        else:
+            return self._compute_error_ratios_cumulative(
+                sum_step_errors, sum_steps
+            )
+    
+    
+    def _compute_error_ratios_absolute(self, sum_step_errors, integral):
+        """
+        Computes the ratio of the difference between chosen method of order p
+        and a method of order p-1, and the error tolerance determined by atol,
+        rtol, and the value of the integral. Integration steps of order p-1 
+        use the same points.
+
+        Args:
+            sum_step_errors (Tensor): Similar to sum_steps but evaluated with
+                and error tableau made of the differences between a method of
+                order p and one of order p-1
+            Integral (Tensor): The evaluated path integral
+        
+        Shapes:
+            sum_step_errors: [N, D]
+            integral: [D]
+        """
+        error_tol = self.atol + self.rtol*torch.abs(integral)
+        error_estimate = torch.abs(sum_step_errors)
+        error_ratio = self._error_norm(error_estimate/error_tol).abs()
+
+        error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
+        error_ratio_2steps= self._error_norm(
+            error_estimate_2steps/2*(error_tol)
+        ).abs() 
+        
+        return error_ratio, error_ratio_2steps   
+    
+    
+    def _compute_error_ratios_cumulative(self, sum_step_errors, sum_steps):
+        """
+        Computes the ratio of the difference between chosen method of order p
+        and a method of order p-1, and the error tolerance determined by atol,
+        rtol, and the value of the integral up to the current step. This method
+        is more similar to ODE error calculation methods but is less suitable
+        for path integrals where the total integral is known. Integration
+        steps of order p-1 use the same points.
+
+        Args:
+            sum_step_errors (Tensor): Similar to sum_steps but evaluated with
+                and error tableau made of the differences between a method of
+                order p and one of order p-1
+            sum_steps (Tensor): Sum over all t and y evaluations in a single
+                RK step multiplied by the total delta t for that step (h)
+        
+        Shapes:
+            sum_steps: [N, D]
+            sum_step_errors: [N, D]
+        """
+        cum_steps = torch.cumsum(sum_steps, dim=0)
         print("TODO: Removed max in error_tol, check against torchdiffeq")
         error_estimate = torch.abs(sum_step_errors)
-        error_tol = self.atol + self.rtol*torch.abs(sum_steps)
+        error_tol = self.atol + self.rtol*torch.abs(cum_steps)
         error_ratio = self._error_norm(error_estimate/error_tol).abs()
         print("COMP1", error_ratio.shape)
 
         error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
         error_tol_2steps = self.atol + self.rtol*torch.max(
             torch.stack(
-                [sum_steps[:-1].abs(), sum_steps[1:].abs()]
+                [cum_steps[:-1].abs(), cum_steps[1:].abs()]
             ),
             dim=0
         )[0]
-        error_ratio_2steps= self._error_norm(error_estimate_2steps/error_tol_2steps).abs() 
+        error_ratio_2steps= self._error_norm(
+            error_estimate_2steps/error_tol_2steps
+        ).abs() 
         
         return error_ratio, error_ratio_2steps
