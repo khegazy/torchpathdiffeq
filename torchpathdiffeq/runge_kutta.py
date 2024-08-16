@@ -1,5 +1,6 @@
 import torch
-from .solvers import steps, MethodOutput, ParallelVariableAdaptiveStepsizeSolver, ParallelUniformAdaptiveStepsizeSolver
+from .base import steps, MethodOutput
+from .parallel_solver import ParallelVariableAdaptiveStepsizeSolver, ParallelUniformAdaptiveStepsizeSolver
 
 
 

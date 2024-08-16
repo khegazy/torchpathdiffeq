@@ -1,5 +1,6 @@
 import torch
-from .solvers import SerialAdaptiveStepsizeSolver, steps
+from .base import steps
+from .serial_solver import SerialAdaptiveStepsizeSolver
 from .runge_kutta import get_parallel_RK_solver
 
 

@@ -1,115 +1,8 @@
 import time
 import torch
-import torch.distributed as dist
-import numpy as np
 from torchdiffeq import odeint
-from dataclasses import dataclass
-from enum import Enum
 
-from .methods import UNIFORM_METHODS, VARIABLE_METHODS
-from .adaptivity import IntegralAdaptivity
-
-
-class steps(Enum):
-    FIXED = 0
-    ADAPTIVE_UNIFORM = 1
-    ADAPTIVE_VARIABLE = 2
-
-@dataclass
-class IntegralOutput():
-    integral: torch.Tensor
-    t_pruned: torch.Tensor = None
-    t: torch.Tensor = None
-    h: torch.Tensor = None
-    y: torch.Tensor = None
-    sum_steps: torch.Tensor = None
-    integral_error: torch.Tensor = None
-    errors: torch.Tensor = None
-    error_ratios: torch.Tensor = None
-
-@dataclass
-class MethodOutput():
-    integral: torch.Tensor
-    integral_error: torch.Tensor
-    sum_steps: torch.Tensor
-    sum_step_errors: torch.Tensor
-    h: torch.Tensor
-
-
-class SolverBase():
-    def __init__(
-            self,
-            method,
-            atol,
-            rtol,
-            y0=torch.tensor([0], dtype=torch.float64),
-            ode_fxn=None,
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
-        ) -> None:
-
-        self.method_name = method.lower()
-        self.atol = atol
-        self.rtol = rtol
-        self.ode_fxn = ode_fxn
-        self.y0 = y0
-        self.t_init = t_init
-        self.t_final = t_final
-        print("MAKE SURE ATOL RTOL MATCH 1", atol, rtol)
-
-    def _calculate_integral(self, t, y, y0=torch.tensor([0], dtype=torch.float64)):
-        """
-        Internal integration method of a specific numerical integration scheme,
-        e.g. Runge-Kutta, that carries out the method on the given time (t) and
-        ode_fxn evaluation points (y).
-
-        Args:
-            t (Tensor): Evaluation time steps for the RK integral
-            y (Tensor): Evalutions of the integrad at time steps t
-            y0 (Tensor): Initial values of the integral
-        
-        Shapes:
-            t: [N, C, T]
-            y: [N, C, D]
-            y0: [D]
-        """
-        raise NotImplementedError
-    
-    def integrate(
-            self,
-            ode_fxn,
-            y0=torch.tensor([0], dtype=torch.float64),
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
-            t=None,
-            ode_args=()
-        ):
-        """
-        Perform the numerical path integral on ode_fxn over a path
-        parameterized by time (t), which ranges from t_init to t_final.
-
-        Args:
-            ode_fxn (Callable): The function to integrate over along the path
-                parameterized by t
-            y0 (Tensor): Initial value of the integral
-            t (Tensor): Initial time points to evaluate ode_fxn and perform the
-                numerical integration over
-            t_init (Tensor): Initial integration time points
-            t_final (Tensor): Final integration time points
-            ode_args (Tuple): Extra arguments provided to ode_fxn
-            verbose (bool): Print derscriptive messages about the evaluation
-            verbose_speed (bool): Time integration subprocesses and print
-        
-        Shapes:
-            y0: [D]
-            t: [N, C, T] or for [N, T] the intermediate time points will be 
-                calculated
-            t_init: [T]
-            t_final: [T]
-        """
-        raise NotImplementedError
-
-
+from .base import SolverBase, IntegralOutput
 
 
 class SerialAdaptiveStepsizeSolver(SolverBase):
@@ -176,7 +69,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
 
 
 
-class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
+class _ParallelAdaptiveStepsizeSolver(SolverBase):
     
     def __init__(self, *args, **kwargs):
         """
@@ -323,7 +216,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase, IntegralAdaptivity):
         )
 
 
-class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+class _ParallelUniformAdaptiveStepsizeSolver(_ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.method_name in UNIFORM_METHODS
@@ -408,7 +301,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return t[remove_mask]
     
 
-class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+class _ParallelVariableAdaptiveStepsizeSolver(_ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.method_name in VARIABLE_METHODS
