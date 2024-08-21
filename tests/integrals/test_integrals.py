@@ -72,19 +72,12 @@ def test_integrals():
     )
     for sampling_name, sampling, sampling_type in loop_items:
         for method in sampling.keys():
-            print("SOLVER", sampling_name, method)
             parallel_integrator = get_parallel_RK_solver(
-                sampling_type, 'adaptive_heun', atol, rtol, remove_cut=0.1
+                sampling_type, method='adaptive_heun', atol=atol, rtol=rtol, remove_cut=0.1
             )
-            #integrator = RKParallelAdaptiveStepsizeSolver(
-            #    solver=solver, atol=1e-7, rtol=1e-7, remove_cut=0.105
-            #)
             for name, (ode, solution) in ODE_dict.items():
                 integral_output = parallel_integrator.integrate(ode, t_init=t_init, t_final=t_final)
                 correct = solution(t_init=t_init, t_final=t_final)
-                error_string = f"{method} failed to properly integrate {name}, calculated {integral_output.integral} but expected {correct}"
-
+                
+                error_string = f"{sampling_name} {method} failed to properly integrate {name}, calculated {integral_output.integral} but expected {correct}"
                 assert torch.abs(integral_output.integral - correct)/correct < cutoff, error_string
-                #print(name, integral_output.h.shape)
-            
-test_integrals()

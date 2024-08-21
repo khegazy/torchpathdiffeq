@@ -24,23 +24,29 @@ def test_adding():
     t_final = 1
 
     correct = damped_sine_solution(t_init, t_final)
-    uniform_integrator = RKParallelUniformAdaptiveStepsizeSolver(
+    uniform_heun_integrator = RKParallelUniformAdaptiveStepsizeSolver(
         method='adaptive_heun', ode_fxn=integrand, atol=atol, rtol=rtol
+    )
+    uniform_dopri5_integrator = RKParallelUniformAdaptiveStepsizeSolver(
+        method='dopri5', ode_fxn=integrand, atol=atol, rtol=rtol
     )
     variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
         method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
     )
-    for type, integrator in zip(['Uniform', 'Variable'], [uniform_integrator, variable_integrator]):
+    loop = zip(
+        ['Uniform', 'Uniform', 'Variable'],
+        ['adaptive_heun', 'dopri5', 'generic3'],
+        [uniform_heun_integrator, uniform_dopri5_integrator, variable_integrator]
+    )
+    for type, method, integrator in loop:
         t = sparse_t
         for idx in range(3):
             integral_output = integrator.integrate(t=t)
             assert (integral_output.integral - correct)/correct < atol
             if idx < 1:
-                error_message = f"For {type} integrator: length of t {t.shape} shoud be < to t_pruned {integral_output.t_pruned.shape}"
+                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be < to t_pruned {integral_output.t_pruned.shape}"
                 assert len(t) < len(integral_output.t_pruned), error_message
             else:
-                error_message = f"For {type} integrator: length of t {t.shape} shoud be <= to t_pruned {integral_output.t_pruned.shape}"
+                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be <= to t_pruned {integral_output.t_pruned.shape}"
                 assert len(t) <= len(integral_output.t_pruned), error_message
             t = integral_output.t_pruned
-
-test_adding()

@@ -12,13 +12,13 @@ def test_ode_path_integral_fxn():
     
         OPI_integral = ode_path_integral(
             ode_fxn=integrand,
-            y0=0,
-            t=None,
             method=method,
+            computation='parallel',
+            sampling='uniform',
             atol=atol,
             rtol=rtol,
-            computation='parallel',
-            sampling='uniform'
+            y0=0,
+            t=None,
         )
 
         RK_integrator = RKParallelUniformAdaptiveStepsizeSolver(
@@ -43,13 +43,13 @@ def test_ode_path_integral_fxn():
     
         OPI_integral = ode_path_integral(
             ode_fxn=integrand,
-            y0=0,
-            t=None,
             method=method,
+            computation='parallel',
+            sampling='variable',
             atol=atol,
             rtol=rtol,
-            computation='parallel',
-            sampling='variable'
+            y0=0,
+            t=None,
         )
 
         RK_integrator = RKParallelVariableAdaptiveStepsizeSolver(
@@ -69,6 +69,3 @@ def test_ode_path_integral_fxn():
         assert_allclose(OPI_integral.sum_steps, RK_integral.sum_steps)
         assert_allclose(OPI_integral.errors, RK_integral.errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
-
-
-test_ode_path_integral_fxn()

@@ -16,6 +16,7 @@ def test_removal():
         method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
     )
     for type, integrator in zip(['Uniform', 'Variable'], [uniform_integrator, variable_integrator]):
+        print(type)
         t = dense_t
         for idx in range(3):
             integral_output = integrator.integrate(t=t)
@@ -26,5 +27,3 @@ def test_removal():
                 error_message = f"For {type} integrator: length of t {t.shape} shoud be >= to t_pruned {integral_output.t_pruned.shape}"
                 assert len(t) >= len(integral_output.t_pruned), error_message
             t = integral_output.t_pruned
-
-test_removal()

@@ -22,5 +22,3 @@ def test_tableau():
         b_tensor, _ = method.tableau_b(c_tensor)
         error_message = f"Tableau B coefficients to not sum to 1 for variable method {name}"
         assert torch.all(torch.abs(torch.sum(b_tensor, dim=-1) - 1.0) < 1e-5), error_message
-
-test_tableau()
