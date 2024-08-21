@@ -7,6 +7,19 @@ class steps(Enum):
     ADAPTIVE_UNIFORM = 1
     ADAPTIVE_VARIABLE = 2
 
+def get_sampling_type(sampling_type : str):
+    """
+    Convert string sampling type into steps enum type
+    """
+    types = {
+        'fixed' : steps.FIXED,
+        'adaptive_uniform' : steps.ADAPTIVE_UNIFORM,
+        'uniform' : steps.ADAPTIVE_UNIFORM,
+        'adaptive_variable' : steps.ADAPTIVE_VARIABLE,
+        'variable' : steps.ADAPTIVE_VARIABLE
+    }
+    return types[sampling_type]
+
 @dataclass
 class IntegralOutput():
     integral: torch.Tensor
@@ -38,6 +51,7 @@ class SolverBase():
             ode_fxn=None,
             t_init=torch.tensor([0], dtype=torch.float64),
             t_final=torch.tensor([1], dtype=torch.float64),
+            device=None
         ) -> None:
 
         self.method_name = method.lower()
@@ -47,7 +61,7 @@ class SolverBase():
         self.y0 = y0
         self.t_init = t_init
         self.t_final = t_final
-        print("MAKE SURE ATOL RTOL MATCH 1", atol, rtol)
+        self.device = device
 
     def _calculate_integral(self, t, y, y0=torch.tensor([0], dtype=torch.float64)):
         """
@@ -94,9 +108,13 @@ class SolverBase():
         
         Shapes:
             y0: [D]
-            t: [N, C, T] or for [N, T] the intermediate time points will be 
-                calculated
+            t: [N, C, T] or [N, T] for parallel integration, [N, T] for serial
+                integration
             t_init: [T]
             t_final: [T]
+        
+        Note:
+            Handling of the input time t is different across methods, see
+            the method's documentions for detail.
         """
         raise NotImplementedError

@@ -1,5 +1,5 @@
 import torch
-from .base import steps, MethodOutput
+from .base import steps, get_sampling_type, MethodOutput
 from .parallel_solver import ParallelVariableAdaptiveStepsizeSolver, ParallelUniformAdaptiveStepsizeSolver
 
 
@@ -33,34 +33,16 @@ def _RK_integral(
     if verbose:
         print("H", h.shape, h)
     
-    #print("IN CALC INT H / TB", h.shape, tableau_b.shape)
-    
-    # The last point in the h-1 RK step is the first point in the h RK step
-    y_steps = y
-
-    #print("SHAPES dt / h / tb / ysteps", dt.shape, h.shape, tableau_b.shape, y_steps.shape)
-    # Shapes
-    # dt: [t-1]
-    # h: [dt/p x 1]
-    # tableau_b: [dt/p x p+1] check
-    # y_steps: [dt/p x p+1] check
-    #print("TABLEAU / YSTEPS / H", tableau_b.shape, y_steps.shape, h.shape)
-    RK_steps = h*torch.sum(tableau_b*y_steps, dim=1)   # Sum over k evaluations weighted by c
-    #print("RK1", RK_steps.shape)
+    RK_steps = h*torch.sum(tableau_b*y, dim=1)   # Sum over k evaluations weighted by c
     if verbose:
         print("RK STEPS", RK_steps.shape, RK_steps)
     integral = y0 + torch.sum(RK_steps)                    # Sum over all steps with step size h
-    #print("INT / RK STEPS / H", integral.shape, RK_steps.shape, h.shape)
     return integral, RK_steps, h
-
 
    
 class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #super(TableauBase).__init__(
-        #    method=self.method, sampling_type=steps.ADAPTIVE_VARIABLE
-        #)
 
     def _calculate_integral(self, t, y, y0=0):
         """
@@ -78,7 +60,6 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
             y0: [D]
         """
         tableau_b, tableau_b_error = self._get_tableau_b(t)
-        #print("TABLE !!!!!!!!!!!!", tableau_b.shape, tableau_b_error.shape)
         integral, RK_steps, h = _RK_integral(t, y, tableau_b, y0=y0)
         integral_error, step_errors, _ = _RK_integral(t, y, tableau_b_error, y0=y0)
         return MethodOutput(
@@ -117,9 +98,6 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
 class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #super(TableauBase).__init__(
-        #    method=self.method, sampling_type=steps.ADAPTIVE_VARIABLE
-        #)
 
     def _calculate_integral(self, t, y, y0=0):
         """
@@ -176,6 +154,8 @@ def get_parallel_RK_solver(sampling_type, *args, **kwargs):
     """
     Return either the uniform or variable sampling RK method given input args.
     """
+    if isinstance(sampling_type, str):
+        sampling_type = get_sampling_type(sampling_type)
     if sampling_type == steps.ADAPTIVE_UNIFORM:
         return RKParallelUniformAdaptiveStepsizeSolver(*args, **kwargs)
     elif sampling_type == steps.ADAPTIVE_VARIABLE:
