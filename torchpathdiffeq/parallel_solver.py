@@ -1,5 +1,6 @@
 import time
 import torch
+import numpy as np
 from einops import rearrange
 
 from .methods import _get_method, UNIFORM_METHODS, VARIABLE_METHODS
@@ -77,13 +78,46 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         return torch.sqrt(torch.mean(error**2, -1))
     
 
+    def _get_new_eval_times(self, t, error_ratios=None, t_init=None, t_final=None):
+
+        if t is None or error_ratios is None:
+            if t is not None and len(t.shape) == 1:
+                t = t.unsqueeze(-1)
+            t_steps = self._initial_t_steps(
+                t, t_init=t_init, t_final=t_final
+            ).to(torch.float64)
+            N, C, _ = t_steps.shape
+
+            # Time points to evaluate, remove repetitive time points at the end
+            # of each step to minimize evaluations
+            t_add = torch.concatenate(
+                [t_steps[0], t_steps[1:,1:].reshape((-1, *(t_steps.shape[2:])))],
+                dim=0
+            )
+            idxs_add = torch.arange(N)
+        else: 
+            idxs_add = torch.where(error_ratios > 1.)[0]
+            t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+        
+        print("new times", t_add.shape)
+        print("\t", t_add)
+        return idxs_add, t_add
+        
+
+    def _get_initial_t_steps(self, t, t_init, t_final):
+        if t is not None and len(t.shape) == 1:
+            t = t.unsqueeze(-1)
+        return self._initial_t_steps(
+            t, t_init=t_init, t_final=t_final
+        ).to(torch.float64)
+
+
+
     def _add_initial_y(
             self,
             ode_fxn,
-            t,
-            t_init=None,
-            t_final=None,
-            ode_args=()
+            t_steps_add,
+            ode_args=(),
         ):
         """
         Initial evaluation of ode_fxn for the given t points, if t is None it
@@ -105,6 +139,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Notes:
             ode_fxn takes as input (t, *args)
         """
+        """
         if t is not None and len(t.shape) == 1:
             t = t.unsqueeze(-1)
         t_steps = self._initial_t_steps(
@@ -112,19 +147,23 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         ).to(torch.float64)
         N, C, _ = t_steps.shape
 
+        """
+        N, C, T = t_steps_add.shape 
         # Time points to evaluate, remove repetitive time points at the end
         # of each step to minimize evaluations
         t_add = torch.concatenate(
-            [t_steps[0], t_steps[1:,1:].reshape((-1, *(t_steps.shape[2:])))],
+            [
+                t_steps_add[0],
+                t_steps_add[1:,1:].reshape((-1, *(t_steps_add.shape[2:])))
+            ],
             dim=0
         )
-        
         # Calculate new geometries
         y_add = ode_fxn(t_add, *ode_args).to(torch.float64)
 
         # Add repetitive y values to the end of each integration step
-        y_steps = torch.reshape(y_add[1:], (N, C-1, -1))
-        y_steps = torch.concatenate(
+        y_steps = torch.reshape(y_add[1:], (N, C-1, T))
+        y = torch.concatenate(
             [
                 torch.concatenate(
                     [y_add[None,None,0,...], y_steps[:-1,None,-1]], dim=0
@@ -133,18 +172,36 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ],
             dim=1
         )
+        return y, t_steps_add
+        """
+        else:
+            assert len(t_add) % self.Cm1 == 0
+            y = torch.concatenate(
+                [
+                    y,
+                    torch.concatenate(
+                        [
+                            torch.concatenate(
+                                [y[None,None,-1,-1], y_add[:-1,-1,None]], dim=0
+                            ),
+                            y_add
+                        ],
+                        dim=1
+                    )
+                ],
+                dim=0
+            )
+        """
 
-        return y_steps, t_steps
 
-
-    def adaptively_add_y(
+   
+    def _interweave_evaluations(
             self,
             ode_fxn,
-            y=None,
-            t=None,
-            error_ratios=None,
-            t_init=None,
-            t_final=None,
+            y,
+            t,
+            idxs_add,
+            t_steps_add,
             ode_args=()
         ):
         """
@@ -173,6 +230,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Notes:
             ode_fxn takes as input (t, *args)
         """
+ 
+        """
         # Get variables or populate with default values, send to correct device
         _, t_init, t_final, _ = self._check_variables(t_init=t_init, t_final=t_final)
 
@@ -181,10 +240,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
         if torch.all(error_ratios <= 1.):
             return y, t
+        """
             
         # Get new time steps for merged steps
-        idxs_add = torch.where(error_ratios > 1.)[0]
-        t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+        #idxs_add = torch.where(error_ratios > 1.)[0]
+        #t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
 
         # Calculate new geometries
         n_add, nm1_c, d = t_steps_add.shape
@@ -244,6 +304,58 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         return y_combined, t_combined
 
 
+    def _adaptively_add_y(
+            self,
+            ode_fxn,
+            y,
+            t,
+            idxs_add,
+            t_add,
+            ode_args=()
+        ):
+        """
+        Adds new time points between current time points and splits these
+        poinsts into two steps where error_ratio < 1. ode_fxn is evaluated at
+        these new time points, both the new time points and y points are merged
+        with the original values in order of time.
+
+        Args:
+            ode_fxn (Callable): The ode function to be integrated
+            y (Tensor): Evaluations of ode_fxn at time points t
+            t (Tensor): Current time evaluations in the path integral
+            error_ratios (Tensor): Numerical integration error ratios for each
+                integration step
+            t_init (Tensor, optional): Minimum of integral range
+            t_final (Tensor, optional): Maximum of integral range
+            ode_args (Tuple): Arguments for ode_fxn
+        
+        SHAPES:
+            y: [N, C, D]
+            t : [N, C, T]
+            error_ratios : [N]
+            t_init: [T]
+            t_final: [T]
+        
+        Notes:
+            ode_fxn takes as input (t, *args)
+        """
+
+        if y is None:
+            return self._add_initial_y(
+                ode_fxn=ode_fxn,
+                t_steps_add=t_add,
+                ode_args=ode_args
+            )
+        else:
+            return self._interweave_evaluations(
+                ode_fxn=ode_fxn,
+                y=y,
+                t=t,
+                idxs_add=idxs_add,
+                t_steps_add=t_add,
+                ode_args=ode_args
+            )
+ 
     def remove_excess_y(self, t, error_ratios_2steps):
         """
         Remove a single integration time step where
@@ -407,8 +519,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_init=None,
             t_final=None,
             ode_args=(),
+            max_batch=None,
             verbose=False,
-            verbose_speed=False
+            verbose_speed=False,
         ):
         """
         Perform the parallel numerical path integral on ode_fxn over a path
@@ -461,48 +574,90 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     + (self.previous_t[:,0] >= t_init)
                 t = self.previous_t[mask]
 
-        y = None
-        error_ratios=None
-        while y is None or torch.any(error_ratios > 1.):
-            tl0 = time.time()
-            if verbose:
-                print("BEGINNING LOOP")
+        t_steps_init = self._get_initial_t_steps(t, t_init, t_final)
 
-            # Evaluate new points and add new evals and points to arrays
-            t0 = time.time()
-            y, t = self.adaptively_add_y(
-                ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
-            )
-            if verbose_speed: print("\t add time", time.time() - t0)
-            if verbose:
-                print("NEW T", t.shape, t[:,:,0])
-                print("NEW Y", y.shape, y[:,:,0])
+        N_ti = len(t_steps_init)
+        batch_buffer = 1.25
+        if max_batch is not None:
+            max_steps = (max_batch - 1)//self.Cm1
+            n_batches = (batch_buffer*N_ti*self.Cm1)//max_batch
+            batch_size = int(np.ceil(float(N_ti)/n_batches))
+        else:
+            n_batches = 1
+            batch_size = N_ti
+        for btc in range(n_batches):
+            y, t = None, None
+            error_ratios=None
+            # TODO: Consider if points removed from end due to too many evaluations, next t_init must be the same as old t_final
+            t_add = t_steps_init[btc*batch_size:(btc+1)*batch_size]
 
-            # Evaluate integral
-            t0 = time.time()
-            method_output = self._calculate_integral(t, y, y0=y0)
-            if verbose_speed: print("\t calc integrals 1", time.time() - t0)
-            
-            # Calculate error
-            t0 = time.time()
-            error_ratios, error_ratios_2steps = self._compute_error_ratios(
-                sum_step_errors=method_output.sum_step_errors,
-                sum_steps=method_output.sum_steps,
-                integral=method_output.integral
-            )
-            if verbose_speed: print("\t calculate errors", time.time() - t0)
-            assert len(y) == len(error_ratios)
-            assert len(y) - 1 == len(error_ratios_2steps)
-            if verbose:
-                print("ERROR1", error_ratios)
-                print("ERROR2", error_ratios_2steps)
-            
-            # Create mask for remove points that are too close
-            t0 = time.time()
-            if torch.all(error_ratios <= 1.):
-                t_pruned = self.remove_excess_y(t, error_ratios_2steps)
-            if verbose_speed: print("\t removal mask", time.time() - t0)
-            if verbose_speed: print("\tLOOP TIME", time.time() - tl0)
+            while y is None or torch.any(error_ratios > 1.):
+                tl0 = time.time()
+                if verbose:
+                    print("BEGINNING LOOP")
+
+                # Evaluate new points and add new evals and points to arrays
+                t0 = time.time()
+                #t_add_total, idxs_add_total = self._get_new_eval_times(
+                #    t, error_ratios=error_ratios, t_init=t_init, t_final=t_final
+                #)
+
+                # Determine new points to add
+                if error_ratios is not None and t is not None:
+                    idxs_add = torch.where(error_ratios > 1.)[0]
+                    t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+                else:
+                    idxs_add= None
+                
+                # If unique evaluations in y exceeds max_batch after adding
+                # t_add points, remove latest time evaluations
+                if y is not None and max_batch is not None:
+                    n_next_steps = len(y) + len(idxs_add)
+                    if n_next_steps > max_steps:
+                        n_remove_steps = n_next_steps - max_steps
+                        del y[-n_remove_steps:]
+                        y = y[:-n_remove_steps]
+                        t = t[:-n_remove_steps]
+                        mask = idxs_add < len(y)
+                        idxs_add = idxs_add[mask]
+                        t_add = t_add[mask]
+
+                y, t = self._adaptively_add_y(
+                    ode_fxn, y, t, idxs_add, t_add, ode_args
+                )
+                #y, t = self.adaptively_add_y(
+                #    ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
+                #)
+                if verbose_speed: print("\t add time", time.time() - t0)
+                if verbose:
+                    print("NEW T", t.shape, t[:,:,0])
+                    print("NEW Y", y.shape, y[:,:,0])
+
+                # Evaluate integral
+                t0 = time.time()
+                method_output = self._calculate_integral(t, y, y0=y0)
+                if verbose_speed: print("\t calc integrals 1", time.time() - t0)
+                
+                # Calculate error
+                t0 = time.time()
+                error_ratios, error_ratios_2steps = self._compute_error_ratios(
+                    sum_step_errors=method_output.sum_step_errors,
+                    sum_steps=method_output.sum_steps,
+                    integral=method_output.integral
+                )
+                if verbose_speed: print("\t calculate errors", time.time() - t0)
+                assert len(y) == len(error_ratios)
+                assert len(y) - 1 == len(error_ratios_2steps)
+                if verbose:
+                    print("ERROR1", error_ratios)
+                    print("ERROR2", error_ratios_2steps)
+                
+                # Create mask for remove points that are too close
+                t0 = time.time()
+                if torch.all(error_ratios <= 1.):
+                    t_pruned = self.remove_excess_y(t, error_ratios_2steps)
+                if verbose_speed: print("\t removal mask", time.time() - t0)
+                if verbose_speed: print("\tLOOP TIME", time.time() - tl0)
 
         self.previous_ode_fxn = ode_fxn.__name__
         self.t_previous = t
