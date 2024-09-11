@@ -23,6 +23,7 @@ def get_sampling_type(sampling_type : str):
 @dataclass
 class IntegralOutput():
     integral: torch.Tensor
+    loss: torch.Tensor = None
     t_pruned: torch.Tensor = None
     t: torch.Tensor = None
     h: torch.Tensor = None
@@ -97,6 +98,9 @@ class SolverBase():
             y0: [D]
         """
         raise NotImplementedError
+    
+    def _integral_loss(self, integral, *args, **kwargs):
+        return integral
     
     def integrate(
             self,
