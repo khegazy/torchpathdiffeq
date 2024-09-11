@@ -104,13 +104,33 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         return idxs_add, t_add
         
 
-    def _get_initial_t_steps(self, t, t_init, t_final):
+    def _get_initial_t_steps(self, t, t_init, t_final, inforce_endpoints=False):
         if t is not None and len(t.shape) == 1:
             t = t.unsqueeze(-1)
-        return self._initial_t_steps(
+        t = self._initial_t_steps(
             t, t_init=t_init, t_final=t_final
         ).to(torch.float64)
 
+        if inforce_endpoints:
+            if t_init != t[0,0]:
+                # Remove time steps where first point is less than t_init
+                t = t[t[:,0] > t_init]
+                # First step should start at t_init
+                t[0] = self._initial_t_steps(
+                    torch.tensor([t_init, t[0,-1]]).unsqueeze(0),
+                    t_init=t_init,
+                    t_final=t_final
+                ).to(torch.float64)
+            if t_final != t[-1,-1]:
+                # Remove time steps where last point is greater than t_final
+                t = t[t[:,-1] < t_final]
+                # Last step should end at t_final
+                t[-1] = self._initial_t_steps(
+                    torch.tensor([t[-1,0], t_final]).unsqueeze(0),
+                    t_init=t_init,
+                    t_final=t_final
+                ).to(torch.float64)
+        return t
 
 
     def _add_initial_y(
@@ -553,6 +573,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             of integration will remain [t[0], t[-1]]. If t is 2 dimensional the 
             intermediate time points will be calculated.
         """
+        # If t is given it must be consistent with given t_init and t_final
+        if t is not None:
+            if t_init is None:
+                t_init = t[0,0]
+            else:
+                assert torch.all(t[0,0] == t_init)
+            if t_final is None:
+                t_final = t[-1,-1]
+            else:
+                assert torch.all(t[-1,-1] == t_final)
         # Get variables or populate with default values, send to correct device
         ode_fxn, t_init, t_final, y0 = self._check_variables(
             ode_fxn, t_init, t_final, y0
@@ -573,23 +603,24 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 mask = (self.previous_t[:,0] <= t_final)\
                     + (self.previous_t[:,0] >= t_init)
                 t = self.previous_t[mask]
+        t_steps_init = t
+        t = None
 
-        t_steps_init = self._get_initial_t_steps(t, t_init, t_final)
-
-        N_ti = len(t_steps_init)
-        batch_buffer = 1.25
+        batch_buffer = 0.8
         if max_batch is not None:
             max_steps = (max_batch - 1)//self.Cm1
-            n_batches = (batch_buffer*N_ti*self.Cm1)//max_batch
-            batch_size = int(np.ceil(float(N_ti)/n_batches))
-        else:
-            n_batches = 1
-            batch_size = N_ti
-        for btc in range(n_batches):
+            batch_size = int(max_steps*batch_buffer)
+
+        while t is None or torch.all(t[-1,-1] != t_final):
+            # Initial time should start at the end of the previous batch
+            _t_init = t_init if t is None else t[-1,-1]
+            t_steps_init = self._get_initial_t_steps(
+                t, _t_init, t_final, inforce_endpoints=True
+            )
+
             y, t = None, None
             error_ratios=None
-            # TODO: Consider if points removed from end due to too many evaluations, next t_init must be the same as old t_final
-            t_add = t_steps_init[btc*batch_size:(btc+1)*batch_size]
+            t_add = t_steps_init if max_batch is None else t_steps_init[:batch_size]
 
             while y is None or torch.any(error_ratios > 1.):
                 tl0 = time.time()
@@ -701,7 +732,9 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         
         Shapes:
             t : [N, T] will populate intermediate evaluations according to
-                integration method, [N, C, T] will return t
+                integration method; [N, C, T] will return t if C is the same
+                as the number of evaluations per step, otherwise it will create
+                C steps between the first and last values in the second dim 
             t_init: [T]
             t_final: [T]
         """
@@ -714,7 +747,13 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             t = torch.linspace(0, 1., 7, device=self.device).unsqueeze(-1)
             t = t_init + t*(t_final - t_init)
         elif len(t.shape) == 3:
-            return t
+            if t.shape[1] == self.C:
+                return t
+            else:
+                if len(t) > 1:
+                    assert torch.all(t[:-1,0] == t[1:,-1])
+                t = t[:,torch.array([0,-1], dtype=torch.int),:]
+                t = torch.flatten(t, start_dim=0, end_dim=1)
         return self._t_step_interpolate(t[:-1], t[1:])
  
 
@@ -734,7 +773,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         dt = (t_right - t_left).unsqueeze(1)
         steps = self.method.tableau.c.unsqueeze(-1)*dt
         return t_left.unsqueeze(1) + steps
-
 
 
     def _remove_excess_t(self, t, remove_idxs):
@@ -787,7 +825,9 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         
         Shapes:
             t : [N, T] will populate intermediate evaluations according to
-                intetgration method, [N, C, T] will retun t
+                integration method; [N, C, T] will return t if C is the same
+                as the number of evaluations per step, otherwise it will create
+                C steps between the first and last values in the second dim 
             t_init: [T]
             t_final: [T]
         """
@@ -800,7 +840,15 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             t = torch.linspace(0, 1., 7*self.Cm1+1).unsqueeze(-1)
             t = t_init + t*(t_final - t_init)
         elif len(t.shape) == 3:
-            return t
+            if t.shape[1] == self.C:
+                return t
+            else:
+                if len(t) > 1:
+                    assert torch.all(t[:-1,0] == t[1:,-1])
+                steps = torch.tile(
+                    torch.arange(self.C)[None,:,None], (len(t), 1, t.shape[-1])
+                )
+                return _t[:,0,:] + steps*(t[:,-1,:] - t[:,0,:])/self.Cm1
         else:
             error_message = f"Input time must be of length N*({self.method.order-1}) + 1, instead got {t.shape}"
             assert (len(t) - 1) % self.Cm1 == 0, error_message
