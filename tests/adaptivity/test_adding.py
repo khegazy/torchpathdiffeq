@@ -43,10 +43,17 @@ def test_adding():
         for idx in range(3):
             integral_output = integrator.integrate(t=t)
             assert (integral_output.integral - correct)/correct < atol
+            t_pruned = integral_output.t_pruned
             if idx < 1:
-                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be < to t_pruned {integral_output.t_pruned.shape}"
+                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be < to t_pruned {t_pruned.shape}"
                 assert len(t) < len(integral_output.t_pruned), error_message
             else:
-                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be <= to t_pruned {integral_output.t_pruned.shape}"
+                error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be <= to t_pruned {t_pruned.shape}"
                 assert len(t) <= len(integral_output.t_pruned), error_message
+            t_flat = torch.flatten(t, start_dim=0, end_dim=1)
+            t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
+            assert torch.all(t_flat[1:] - t_flat[0:-1] >= 0)
+            assert torch.all(t_pruned_flat[1:] - t_pruned_flat[0:-1] >= 0)
+            assert torch.all(t[:-1,0,:] == t[0:,-1,:])
+            assert torch.all(t_pruned[:-1,0,:] == t_pruned[0:,-1,:])
             t = integral_output.t_pruned
