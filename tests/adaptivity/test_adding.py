@@ -1,4 +1,5 @@
-import torch 
+import torch
+import numpy as np
 from torchpathdiffeq import ode_path_integral, UNIFORM_METHODS, RKParallelUniformAdaptiveStepsizeSolver, RKParallelVariableAdaptiveStepsizeSolver
 
 def integrand(t):
@@ -17,9 +18,8 @@ def damped_sine_solution(t_init, t_final, w=3.7, a=0.2):
 
 
 def test_adding():
-    sparse_t = torch.linspace(0, 1, 3).unsqueeze(1)
-    atol = 1e-5
-    rtol = 1e-5
+    atol = 1e-9
+    rtol = 1e-7
     t_init = 0
     t_final = 1
 
@@ -39,7 +39,7 @@ def test_adding():
         [uniform_heun_integrator, uniform_dopri5_integrator, variable_integrator]
     )
     for type, method, integrator in loop:
-        t = sparse_t
+        t = torch.linspace(0, 1., integrator.Cm1+1).unsqueeze(1)
         for idx in range(3):
             integral_output = integrator.integrate(t=t)
             assert (integral_output.integral - correct)/correct < atol
@@ -50,10 +50,10 @@ def test_adding():
             else:
                 error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be <= to t_pruned {t_pruned.shape}"
                 assert len(t) <= len(integral_output.t_pruned), error_message
-            t_flat = torch.flatten(t, start_dim=0, end_dim=1)
+            t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
             t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-            assert torch.all(t_flat[1:] - t_flat[0:-1] >= 0)
-            assert torch.all(t_pruned_flat[1:] - t_pruned_flat[0:-1] >= 0)
-            assert torch.all(t[:-1,0,:] == t[0:,-1,:])
-            assert torch.all(t_pruned[:-1,0,:] == t_pruned[0:,-1,:])
-            t = integral_output.t_pruned
+            assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+            assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] >= 0)
+            assert np.allclose(integral_output.t[:-1,-1,:], integral_output.t[1:,0,:])
+            assert np.allclose(t_pruned[:-1,-1,:], t_pruned[1:,0,:])
+            t = t_pruned
