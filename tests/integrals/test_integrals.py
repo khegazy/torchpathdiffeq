@@ -112,4 +112,4 @@ def test_integrals():
                         assert len(no_batch_integral.t) <= len(integral_output.t)
                         assert len(no_batch_integral.t_pruned) <= len(integral_output.t_pruned) 
 
-#test_integrals()
+test_integrals()

@@ -19,7 +19,8 @@ def ode_path_integral(
         remove_cut=0.1,
         max_batch=None,
         use_absolute_error_ratio=True,
-        device='cpu'
+        device='cpu',
+        **kwargs
     ):
     """
     Integrate ode_fxn over either over t or from t_init to t_final. This
@@ -89,7 +90,8 @@ def ode_path_integral(
             t_init=t_init,
             t_final=t_final,
             use_absolute_error_ratio=use_absolute_error_ratio,
-            device=device
+            device=device,
+            **kwargs
         )
     elif computation.lower() == 'serial':
         integrator = SerialAdaptiveStepsizeSolver(
@@ -99,7 +101,8 @@ def ode_path_integral(
             ode_fxn=ode_fxn,
             t_init=t_init,
             t_final=t_final,
-            device=device
+            device=device,
+            **kwargs
         )
     else:
         raise ValueError(f"Path integral computation type must be 'parallel' or 'serial', not {computation}.")

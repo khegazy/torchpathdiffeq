@@ -2,6 +2,8 @@ import torch
 from dataclasses import dataclass
 from enum import Enum
 
+from .distributed import DistributedEnvironment
+
 class steps(Enum):
     FIXED = 0
     ADAPTIVE_UNIFORM = 1
@@ -42,7 +44,7 @@ class MethodOutput():
     h: torch.Tensor
 
 
-class SolverBase():
+class SolverBase(DistributedEnvironment):
     def __init__(
             self,
             method,
@@ -52,17 +54,19 @@ class SolverBase():
             ode_fxn=None,
             t_init=torch.tensor([0], dtype=torch.float64),
             t_final=torch.tensor([1], dtype=torch.float64),
-            device=None
+            device=None,
+            *args,
+            **kwargs
         ) -> None:
+        super().__init__(*args, **kwargs, device_type=device)
 
         self.method_name = method.lower()
         self.atol = atol
         self.rtol = rtol
         self.ode_fxn = ode_fxn
-        self.y0 = y0.to(device)
-        self.t_init = t_init.to(device)
-        self.t_final = t_final.to(device)
-        self.device = device
+        self.y0 = y0.to(self.device)
+        self.t_init = t_init.to(self.device)
+        self.t_final = t_final.to(self.device)
 
 
     def _check_variables(self, ode_fxn=None, t_init=None, t_final=None, y0=None):
@@ -139,3 +143,10 @@ class SolverBase():
             the method's documentions for detail.
         """
         raise NotImplementedError
+    
+
+    def __del__(self):
+        """
+        Class destructor terminates distributed process group
+        """
+        self.end_process()
