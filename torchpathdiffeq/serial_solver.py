@@ -9,7 +9,16 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
-    def integrate(self, ode_fxn=None, y0=None, t_init=None, t_final=None, t=None, ode_args=None):
+    def integrate(
+            self,
+            ode_fxn=None,
+            y0=None,
+            t_init=None,
+            t_final=None,
+            t=None,
+            ode_args=None,
+            max_batch=None
+        ):
         """
         Perform the sequential numerical path integral on ode_fxn over a path
         parameterized by time (t), which ranges from t_init to t_final. This 

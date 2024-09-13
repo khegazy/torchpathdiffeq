@@ -66,7 +66,7 @@ def test_integrals():
     rtol = 1e-7
     t_init = torch.tensor([0], dtype=torch.float64)
     t_final = torch.tensor([1], dtype=torch.float64)
-    max_batches = [None, 16, 7]
+    max_batches = [None, 512, 15]
     loop_items = zip(
         ['Uniform', 'Variable'],
         [UNIFORM_METHODS, VARIABLE_METHODS],
@@ -74,7 +74,7 @@ def test_integrals():
     )
     for sampling_name, sampling, sampling_type in loop_items:
         for method in sampling.keys():
-            #if method != 'fehlberg2':
+            #if method != 'dopri5':
             #    continue
             for name, (ode, solution) in ODE_dict.items():
                 correct = solution(t_init=t_init, t_final=t_final)

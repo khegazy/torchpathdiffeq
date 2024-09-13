@@ -17,6 +17,7 @@ def ode_path_integral(
         t_final=torch.tensor([1], dtype=torch.float64),
         y0=torch.tensor([0], dtype=torch.float64),
         remove_cut=0.1,
+        max_batch=None,
         use_absolute_error_ratio=True,
         device='cpu'
     ):
@@ -44,6 +45,8 @@ def ode_path_integral(
         ode_args (Tuple): Extra arguments provided to ode_fxn
         remove_cut (float): Cut to remove integration steps with error ratios
             less than this value, must be < 1
+        max_batch (int): Maximum number of ode_fxn evaluations to hold in
+            memory at a time
         use_absolute_error_ratio (bool): Use the total integration value when
             calulating the error ratio for adding or removing points, otherwise
             use integral value up to the time step being evaluated
@@ -105,7 +108,8 @@ def ode_path_integral(
         y0=y0,
         t=t,
         t_init=t_init,
-        t_final=t_final
+        t_final=t_final,
+        max_batch=max_batch
     )
 
     return integral_output
