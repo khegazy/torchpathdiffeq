@@ -7,11 +7,12 @@ from .methods import _get_method, UNIFORM_METHODS, VARIABLE_METHODS
 from .base import SolverBase, IntegralOutput, steps
 
 class ParallelAdaptiveStepsizeSolver(SolverBase):
-    def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, *args, **kwargs):
+    def __init__(self, remove_cut=0.1, max_batch=None, use_absolute_error_ratio=True, *args, **kwargs):
         """
         Args:
         remove_cut (float): Cut to remove integration steps with error ratios
             less than this value, must be < 1
+        max_batch (int): Maximum integrad evaluations to hold in memory
         use_absolute_error_ratio (bool): Use the total integration value when
             calulating the error ratio for adding or removing points, otherwise
             use integral value up to the time step being evaluated
@@ -21,6 +22,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert remove_cut < 1.
         self.remove_cut = remove_cut
         self.use_absolute_error_ratio = use_absolute_error_ratio
+        self.max_batch = max_batch
 
         self.method = None
         self.order = None
@@ -617,6 +619,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_init (Tensor): Initial integration time points
             t_final (Tensor): Final integration time points
             ode_args (Tuple): Extra arguments provided to ode_fxn
+            max_batch (int): Maximum integrad evaluations to hold in memory
             verbose (bool): Print derscriptive messages about the evaluation
             verbose_speed (bool): Time integration subprocesses and print
         
@@ -661,6 +664,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ode_fxn, t_init, t_final, y0
         )
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
+        max_batch = self.max_batch if max_batch is None else max_batch
 
         # Make sure ode_fxn exists and provides the correct output
         assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."

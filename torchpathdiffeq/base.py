@@ -15,6 +15,7 @@ def get_sampling_type(sampling_type : str):
     """
     types = {
         'fixed' : steps.FIXED,
+        'adaptive' : steps.ADAPTIVE_UNIFORM,
         'adaptive_uniform' : steps.ADAPTIVE_UNIFORM,
         'uniform' : steps.ADAPTIVE_UNIFORM,
         'adaptive_variable' : steps.ADAPTIVE_VARIABLE,
@@ -48,8 +49,8 @@ class SolverBase(DistributedEnvironment):
     def __init__(
             self,
             method,
-            atol,
-            rtol,
+            atol=1e-9,
+            rtol=1e-7,
             y0=torch.tensor([0], dtype=torch.float64),
             ode_fxn=None,
             t_init=torch.tensor([0], dtype=torch.float64),
