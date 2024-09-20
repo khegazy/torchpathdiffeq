@@ -27,7 +27,8 @@ class DistributedEnvironment():
         device_type : str = 'cuda',
         master_addr : str = None,
         master_port : str = None,
-        is_slurm : bool = False
+        is_slurm : bool = False, 
+        max_batch : int = None,
     ): 
         self.is_slurm = is_slurm
         self.backend = backend.lower()
@@ -47,6 +48,9 @@ class DistributedEnvironment():
         
         # Set device
         self.set_device()
+
+        # Set batch size
+        self.max_batch = max_batch
 
 
     def check_distributed(self):
