@@ -28,7 +28,7 @@ class DistributedEnvironment():
         master_addr : str = None,
         master_port : str = None,
         is_slurm : bool = False, 
-        max_batch : int = None,
+        # max_batch : int = None,
     ): 
         self.is_slurm = is_slurm
         self.backend = backend.lower()
@@ -50,7 +50,7 @@ class DistributedEnvironment():
         self.set_device()
 
         # Set batch size
-        self.max_batch = max_batch
+        # self.max_batch = max_batch
 
 
     def check_distributed(self):

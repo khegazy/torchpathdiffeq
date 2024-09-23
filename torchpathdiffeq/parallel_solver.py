@@ -7,7 +7,7 @@ from .methods import _get_method, UNIFORM_METHODS, VARIABLE_METHODS
 from .base import SolverBase, IntegralOutput, steps
 
 class ParallelAdaptiveStepsizeSolver(SolverBase):
-    def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, *args, **kwargs):
+    def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, max_batch=None, *args, **kwargs):
         """
         Args:
         remove_cut (float): Cut to remove integration steps with error ratios
@@ -28,6 +28,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.Cm1 = None
         self.previous_t = None
         self.previous_ode_fxn = None
+        self.max_batch = max_batch
 
 
     def _initial_t_steps(
@@ -634,6 +635,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             of integration will remain [t[0], t[-1]]. If t is 2 dimensional the 
             intermediate time points will be calculated.
         """
+        max_batch = self.max_batch if max_batch is None else max_batch
+
         # If t is given it must be consistent with given t_init and t_final
         if t is not None:
             if len(t.shape) == 2:
@@ -724,6 +727,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 
                 # If unique evaluations in y exceeds max_batch after adding
                 # t_add points, remove latest time evaluations
+                print(max_batch)
                 if y is not None and max_batch is not None:
                     n_next_steps = len(y) + len(idxs_add)
                     if n_next_steps > max_steps:
