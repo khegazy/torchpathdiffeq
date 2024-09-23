@@ -121,7 +121,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 # Remove time steps where first point is less than t_init
                 t = t[t[:,-1,0] > t_init[0]]
                 # First step should start at t_init
-                inp = torch.tensor([t_init.unsqueeze(0), t[0,-1].unsqueeze(0)])
+                inp = torch.tensor([t_init.unsqueeze(0), t[0,-1].unsqueeze(0)], device=self.device)
                 if t.shape[-1] == 1:
                     inp = inp.unsqueeze(-1)
                 t[0] = self._initial_t_steps(
@@ -727,12 +727,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 
                 # If unique evaluations in y exceeds max_batch after adding
                 # t_add points, remove latest time evaluations
-                print(max_batch)
                 if y is not None and max_batch is not None:
                     n_next_steps = len(y) + len(idxs_add)
                     if n_next_steps > max_steps:
                         #print("Removing", n_next_steps, max_steps, t.shape, t_add.shape)
-                        eval_counts = torch.ones(len(y))
+                        eval_counts = torch.ones(len(y), device=self.device)
                         eval_counts[idxs_add] = 2
                         eval_mask = torch.cumsum(eval_counts, dim=0).to(torch.int) <= max_steps
                         y = y[eval_mask]
