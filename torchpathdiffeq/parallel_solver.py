@@ -56,6 +56,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         raise NotImplementedError
     
 
+    def _evaluate_adaptive_y(self, ode_fxn, idxs_add, y, t, ode_args=()):
+        raise NotImplementedError
+    
+
     def _remove_excess_t(self, t, remove_idxs):
         """
         Merges neighboring time steps or removes and one time steps and extends
@@ -129,9 +133,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 ).to(torch.float64)
             if t_final != t[-1,-1]:
                 # Remove time steps where last point is greater than t_final
-                t = t[t[:,0] < t_final]
+                t = t[t[:,0,0] < t_final[0]]
                 # Last step should end at t_final
-                inp = torch.tensor([t[-1,0].unsqueeze(0), t_final.unsqueeze(0)]),
+                inp = torch.tensor([t[-1,0].unsqueeze(0), t_final.unsqueeze(0)])
                 if t.shape[-1] == 1:
                     inp = inp.unsqueeze(-1)
                 t[-1] = self._initial_t_steps(
@@ -221,14 +225,12 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         """
 
 
-   
-    def _interweave_evaluations(
+    def _adaptively_add_y(
             self,
             ode_fxn,
             y,
             t,
             idxs_add,
-            t_steps_add,
             ode_args=()
         ):
         """
@@ -257,7 +259,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Notes:
             ode_fxn takes as input (t, *args)
         """
- 
+
+        if idxs_add is None or len(idxs_add) == 0:
+            return y, t
+
+   
         """
         # Get variables or populate with default values, send to correct device
         _, t_init, t_final, _ = self._check_variables(t_init=t_init, t_final=t_final)
@@ -268,22 +274,27 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         if torch.all(error_ratios <= 1.):
             return y, t
         """
-            
         # Get new time steps for merged steps
         #idxs_add = torch.where(error_ratios > 1.)[0]
         #t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
-
         # Calculate new geometries
-        n_add, nm1_c, d = t_steps_add.shape
+        n_add = len(idxs_add)
         # ode_fxn input is 2 dims, t_steps_add has 3 dims, combine first two
+        y_add, t_steps_add = self._evaluate_adaptive_y(ode_fxn, idxs_add, y, t, ode_args)
+        D = y_add.shape[-1]
+        #print("Y T OUT", y_add.shape, t_steps_add.shape)
+        #print("T ADD", t_steps_add[:,:,0])
+        #print("Y ADD", y_add[:,:,0])
+        """
         t_steps_add = rearrange(t_steps_add, 'n c d -> (n c) d')
         y_add = ode_fxn(t_steps_add, *ode_args).to(torch.float64)
-        t_steps_add = rearrange(t_steps_add, '(n c) d -> n c d', n=n_add, c=nm1_c) 
-        y_add = rearrange(y_add, '(n c) d -> n c d', n=n_add, c=nm1_c) 
+        t_steps_add = rearrange(t_steps_add, '(n c) d -> n c d', n=n_add, c=self.Cm1) 
+        y_add = rearrange(y_add, '(n c) d -> n c d', n=n_add, c=self.Cm1) 
+        """
 
         # Create new vector to fill with old and new values
         y_combined = torch.zeros(
-            (len(y)+len(y_add), nm1_c+1, y_add.shape[-1]),
+            (len(y)+n_add, self.Cm1+1, y_add.shape[-1]),
             dtype=torch.float64,
             requires_grad=False,
             device=self.device
@@ -307,68 +318,37 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         idxs_add_offset = idxs_add + torch.arange(
             len(idxs_add), device=self.device
         )
-        t_add_combined = torch.nan*torch.ones(
-            (len(idxs_add), (nm1_c+1)*2-1, d),
-            dtype=torch.float64,
-            device=self.device
-        )
-        t_add_combined[:,torch.arange(nm1_c+1)*2] = t[idxs_add]
-        t_add_combined[:,torch.arange(nm1_c)*2+1] = t_steps_add
-        t_combined[idxs_add_offset,:,:] = t_add_combined[:,:nm1_c+1]
-        t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,nm1_c:]
+        select_idxs = torch.arange(len(idxs_add))*2
+        #t_add_combined = torch.nan*torch.ones(
+        #    (len(idxs_add), (self.Cm1+1)*2-1, D),
+        #    dtype=torch.float64,
+        #    device=self.device
+        #)
+        #t_add_combined[:,torch.arange(self.Cm1+1)*2] = t[idxs_add]
+        #t_add_combined[:,torch.arange(self.Cm1)*2+1] = t_steps_add
+        #t_combined[idxs_add_offset,:,:] = t_add_combined[:,:self.Cm1+1]
+        #t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,self.Cm1:]
+        t_combined[idxs_add_offset,:,:] = t_steps_add[select_idxs]
+        t_combined[idxs_add_offset+1,:,:] = t_steps_add[select_idxs+1]
 
-        y_add_combined = torch.nan*torch.ones(
-            (len(idxs_add), (nm1_c+1)*2-1, d),
-            dtype=torch.float64,
-            device=self.device
-        )
-        y_add_combined[:,torch.arange(nm1_c+1)*2] = y[idxs_add]
-        y_add_combined[:,torch.arange(nm1_c)*2+1] = y_add
-        y_combined[idxs_add_offset,:,:] = y_add_combined[:,:nm1_c+1]
-        y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,nm1_c:]
+        #y_add_combined = torch.nan*torch.ones(
+        #    (len(idxs_add), (self.Cm1+1)*2-1, D),
+        #    dtype=torch.float64,
+        #    device=self.device
+        #)
+        #y_add_combined[:,torch.arange(self.Cm1+1)*2] = y[idxs_add]
+        #y_add_combined[:,torch.arange(self.Cm1)*2+1] = y_add
+        #y_combined[idxs_add_offset,:,:] = y_add_combined[:,:self.Cm1+1]
+        #y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,self.Cm1:]
+        y_combined[idxs_add_offset,:,:] = y_add[select_idxs]
+        y_combined[idxs_add_offset+1,:,:] = y_add[select_idxs+1]
 
-        assert torch.all(t_combined[:-1,-1] == t_combined[1:,0])
+        #print("TIMES", t_combined[:,:,0])
+        #print("Y", y_combined[:,:,0])
+        #print("DT", t_combined[1:,0,0]-t_combined[:-1,-1,0])
+        assert np.allclose(t_combined[:-1,-1], t_combined[1:,0])
         return y_combined, t_combined
 
-
-    def _adaptively_add_y(
-            self,
-            ode_fxn,
-            y,
-            t,
-            idxs_add,
-            t_add,
-            ode_args=()
-        ):
-        """
-        Adds new time points between current time points and splits these
-        poinsts into two steps where error_ratio < 1. ode_fxn is evaluated at
-        these new time points, both the new time points and y points are merged
-        with the original values in order of time.
-
-        Args:
-            ode_fxn (Callable): The ode function to be integrated
-            y (Tensor): Evaluations of ode_fxn at time points t
-            t (Tensor): Current time evaluations in the path integral
-            error_ratios (Tensor): Numerical integration error ratios for each
-                integration step
-            t_init (Tensor, optional): Minimum of integral range
-            t_final (Tensor, optional): Maximum of integral range
-            ode_args (Tuple): Arguments for ode_fxn
-        
-        SHAPES:
-            y: [N, C, D]
-            t : [N, C, T]
-            error_ratios : [N]
-            t_init: [T]
-            t_final: [T]
-        
-        Notes:
-            ode_fxn takes as input (t, *args)
-        """
-
-        if len(t_add) == 0:
-            return y, t
 
         if y is None:
             return self._add_initial_y(
@@ -701,10 +681,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_steps = self._get_initial_t_steps(
                 t_steps_init, _t_init, t_final, inforce_endpoints=True
             )
-            t_add = t_steps if max_batch is None else t_steps[:batch_size]
+            t_steps = t_steps if max_batch is None else t_steps[:batch_size]
             #print("INIT TADD PORTION", t_add.shape, t_steps.shape)
             #print("TADD INIT", t_add[:,:,0])
-            t = None
+            #t = None
+            y, t = self._add_initial_y(
+                ode_fxn=ode_fxn, t_steps_add=t_steps, ode_args=ode_args
+            )
 
             error_ratios=None
             while error_ratios is None or torch.any(error_ratios > 1.):
@@ -721,13 +704,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 # Determine new points to add
                 if error_ratios is not None and t is not None:
                     idxs_add = torch.where(error_ratios > 1.)[0]
-                    t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+                    #t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
                 else:
                     idxs_add= None
                 
                 # If unique evaluations in y exceeds max_batch after adding
                 # t_add points, remove latest time evaluations
-                if y is not None and max_batch is not None:
+                if error_ratios is not None and max_batch is not None:
                     n_next_steps = len(y) + len(idxs_add)
                     if n_next_steps > max_steps:
                         #print("Removing", n_next_steps, max_steps, t.shape, t_add.shape)
@@ -736,18 +719,18 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         eval_mask = torch.cumsum(eval_counts, dim=0).to(torch.int) <= max_steps
                         y = y[eval_mask]
                         t = t[eval_mask]
-                        t_add = t_add[eval_mask[idxs_add]]
+                        #t_add = t_add[eval_mask[idxs_add]]
                         idxs_add = idxs_add[eval_mask[idxs_add]]
 
                 #print("B4 Adding Y", t_add.shape, len(t_add))
                 #if y is not None:
                 #    print(y.shape, t.shape)
                 y, t = self._adaptively_add_y(
-                    ode_fxn, y, t, idxs_add, t_add, ode_args
+                    ode_fxn, y, t, idxs_add, ode_args
                 )
                 #print("ADDED Y (t)", y.shape)#, t[:,:,0])
                 t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-                assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+                #assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
                 #y, t = self.adaptively_add_y(
                 #    ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
                 #)
@@ -904,6 +887,28 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return t_left.unsqueeze(1) + steps
 
 
+    def _evaluate_adaptive_y(self, ode_fxn, idxs_add, y, t, ode_args=()):
+        D = t.shape[-1]
+        t_mid = (t[idxs_add,-1] + t[idxs_add,0])/2.
+        t_left = torch.concatenate(
+            [t[idxs_add,None,0], t_mid[:,None]], dim=1
+        )
+        t_right = torch.concatenate(
+            [t_mid[:,None], t[idxs_add,None,-1]], dim=1
+        )
+        #print("ORIG T", t[idxs_add,:,0])
+        #print("T LEFT", t_left[:,:,0])
+        #print("T RIGHT", t_right[:,:,0])
+        #print("VIEW", t_left.view(-1,D))
+        t_eval_steps = self._t_step_interpolate(
+            t_left.view(-1,D), t_right.view(-1, D)
+        )
+        y_add = ode_fxn(t_eval_steps.view(-1, D), *ode_args)
+        y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
+        #print("SHAPES", t_eval_steps.shape, y_add.shape)
+        return y_add, t_eval_steps
+        
+    
     def _remove_excess_t(self, t, remove_idxs):
         """
         Merge two integration steps together through the time tensor
@@ -1009,8 +1014,51 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         _t = torch.reshape(t[:-1], (-1, self.Cm1, 1))
         _t_ends = torch.concatenate([_t[1:,0], t[None,-1]]).unsqueeze(1)
         return torch.concatenate([_t, _t_ends], dim=1)
-    
-   
+
+
+    def _evaluate_adaptive_y(self, ode_fxn, idxs_add, y, t, ode_args=()):
+        t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+        #print("ORIG T", t[idxs_add,:,0])
+        y_add = ode_fxn(t_steps_add.view(-1, t.shape[-1]), *ode_args)
+        y_add = rearrange(y_add, "(N C) D -> N C D", N=len(idxs_add))
+        D = y_add.shape[-1]
+        
+        select_prev_idxs = torch.arange(self.C)*2
+        select_prev_idxs[select_prev_idxs>=self.C] += 1
+        select_add_idxs = torch.arange(self.Cm1)*2 + 1
+        select_add_idxs[select_add_idxs>=self.C] += 1
+        t_add_combined = torch.nan*torch.ones(
+            (len(idxs_add), (self.C)*2, D),
+            dtype=torch.float64,
+            device=self.device
+        )
+        t_add_combined[:,select_prev_idxs] = t[idxs_add]
+        t_add_combined[:,select_add_idxs] = t_steps_add
+        t_add_combined[:,self.C] = t_add_combined[:,self.C-1]
+        t_add_combined = torch.reshape(
+            t_add_combined, (len(idxs_add)*2, self.C, D)
+        )
+
+        #print("IDXS", select_prev_idxs, select_add_idxs)
+        y_add_combined = torch.nan*torch.ones(
+            (len(idxs_add), self.C*2, D),
+            dtype=torch.float64,
+            device=self.device
+        )
+        #print("SHAPES",y.shape, y_add.shape)
+        y_add_combined[:,select_prev_idxs] = y[idxs_add]
+        y_add_combined[:,select_add_idxs] = y_add
+        y_add_combined[:,self.C] = y_add_combined[:,self.C-1]
+        y_add_combined = torch.reshape(
+            y_add_combined, (len(idxs_add)*2, self.C, D)
+        )
+
+        #print("SHAPES", t_add_combined.shape, y_add_combined.shape)
+        #print(t[:,:,0], y[:,:,0])
+        #print(t_add_combined[:,:,0], y_add_combined[:,:,0])
+        return y_add_combined, t_add_combined
+
+
     def _remove_excess_t(self, t, remove_idxs):
         """
         Merge two integration steps together through the time tensor
@@ -1052,3 +1100,118 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         #remove_mask[remove_idxs] = False
         return t_pruned
         return t[remove_mask]
+        
+    def __depricated_adaptively_add_y(
+            self,
+            ode_fxn,
+            y,
+            t,
+            idxs_add,
+            ode_args=()
+        ):
+        """
+        Adds new time points between current time points and splits these
+        poinsts into two steps where error_ratio < 1. ode_fxn is evaluated at
+        these new time points, both the new time points and y points are merged
+        with the original values in order of time.
+
+        Args:
+            ode_fxn (Callable): The ode function to be integrated
+            y (Tensor): Evaluations of ode_fxn at time points t
+            t (Tensor): Current time evaluations in the path integral
+            error_ratios (Tensor): Numerical integration error ratios for each
+                integration step
+            t_init (Tensor, optional): Minimum of integral range
+            t_final (Tensor, optional): Maximum of integral range
+            ode_args (Tuple): Arguments for ode_fxn
+        
+        SHAPES:
+            y: [N, C, D]
+            t : [N, C, T]
+            error_ratios : [N]
+            t_init: [T]
+            t_final: [T]
+        
+        Notes:
+            ode_fxn takes as input (t, *args)
+        """
+
+        if idxs_add is None or len(idxs_add) == 0:
+            return y, t
+
+   
+        """
+        # Get variables or populate with default values, send to correct device
+        _, t_init, t_final, _ = self._check_variables(t_init=t_init, t_final=t_final)
+
+        if y is None or t is None or error_ratios is None:
+            return self._add_initial_y(ode_fxn=ode_fxn, ode_args=ode_args, t=t, t_init=t_init, t_final=t_final)
+
+        if torch.all(error_ratios <= 1.):
+            return y, t
+        """
+        # Get new time steps for merged steps
+        #idxs_add = torch.where(error_ratios > 1.)[0]
+        #t_steps_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
+        # Calculate new geometries
+        n_add = idxs_add.shape
+        # ode_fxn input is 2 dims, t_steps_add has 3 dims, combine first two
+        y_add, t_steps_add = self._evaluate_adaptive_y(ode_fxn, idxs_add, t, ode_args)
+        print("Y OUT", y_add.shape)
+        print("T STEP SHAPE", t_steps_add.shape)
+        """
+        t_steps_add = rearrange(t_steps_add, 'n c d -> (n c) d')
+        y_add = ode_fxn(t_steps_add, *ode_args).to(torch.float64)
+        t_steps_add = rearrange(t_steps_add, '(n c) d -> n c d', n=n_add, c=self.Cm1) 
+        y_add = rearrange(y_add, '(n c) d -> n c d', n=n_add, c=self.Cm1) 
+        """
+
+        # Create new vector to fill with old and new values
+        y_combined = torch.zeros(
+            (len(y)+len(y_add), self.Cm1+1, y_add.shape[-1]),
+            dtype=torch.float64,
+            requires_grad=False,
+            device=self.device
+        ).detach()
+        t_combined = torch.zeros_like(
+            y_combined,
+            dtype=torch.float64,
+            requires_grad=False,
+            device=self.device
+        ).detach()
+        
+        # Add old t and y values, skipping regions with new points
+        idx_offset = torch.zeros(len(y), dtype=torch.long)
+        idx_offset[idxs_add] = 1
+        idx_offset = torch.cumsum(idx_offset, dim=0)
+        idx_input = torch.arange(len(y)) + idx_offset
+        y_combined[idx_input,:] = y
+        t_combined[idx_input,:] = t
+
+        # Add new t and y values to added rows
+        idxs_add_offset = idxs_add + torch.arange(
+            len(idxs_add), device=self.device
+        )
+        t_add_combined = torch.nan*torch.ones(
+            (len(idxs_add), (self.Cm1+1)*2-1, d),
+            dtype=torch.float64,
+            device=self.device
+        )
+        t_add_combined[:,torch.arange(self.Cm1+1)*2] = t[idxs_add]
+        t_add_combined[:,torch.arange(self.Cm1)*2+1] = t_steps_add
+        t_combined[idxs_add_offset,:,:] = t_add_combined[:,:self.Cm1+1]
+        t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,self.Cm1:]
+
+        y_add_combined = torch.nan*torch.ones(
+            (len(idxs_add), (self.Cm1+1)*2-1, d),
+            dtype=torch.float64,
+            device=self.device
+        )
+        y_add_combined[:,torch.arange(self.Cm1+1)*2] = y[idxs_add]
+        y_add_combined[:,torch.arange(self.Cm1)*2+1] = y_add
+        y_combined[idxs_add_offset,:,:] = y_add_combined[:,:self.Cm1+1]
+        y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,self.Cm1:]
+
+        assert torch.all(t_combined[:-1,-1] == t_combined[1:,0])
+        return y_combined, t_combined
+
