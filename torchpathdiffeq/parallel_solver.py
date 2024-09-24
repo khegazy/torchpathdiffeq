@@ -628,7 +628,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 error_message = f"When giving t (with 3 dims) the second dimension must match the integration method's number of samples per step. For {self.method_name} it's {self.C}"
                 assert t.shape[1] == self.C, error_message
                 assert torch.all(
-                    torch.flatten(t, 0, 1)[1:] >= torch.flatten(t, 0, 1)[:-1]
+                    torch.flatten(t, 0, 1)[1:] + 1e-10 >= torch.flatten(t, 0, 1)[:-1]
                 )
             if t_init is None:
                 t_init = t[0,0]
@@ -765,7 +765,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     # Create mask for remove points that are too close
                     t_pruned = self.remove_excess_y(t, error_ratios_2steps)
                     t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-                    assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+                    assert torch.all(t_flat[1:] - t_flat[:-1] + 1e-10 >= 0)
                     # Calculate loss
                     loss = loss_fxn(
                         integral=method_output.integral,
