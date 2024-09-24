@@ -346,7 +346,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         #print("TIMES", t_combined[:,:,0])
         #print("Y", y_combined[:,:,0])
         #print("DT", t_combined[1:,0,0]-t_combined[:-1,-1,0])
-        assert np.allclose(t_combined[:-1,-1], t_combined[1:,0])
+        assert torch.allclose(t_combined[:-1,-1], t_combined[1:,0])
         return y_combined, t_combined
 
 
