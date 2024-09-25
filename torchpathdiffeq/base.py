@@ -4,6 +4,9 @@ from enum import Enum
 
 from .distributed import DistributedEnvironment
 
+ATOL_ASSERT=1e-15
+RTOL_ASSERT=1e-7
+
 class steps(Enum):
     FIXED = 0
     ADAPTIVE_UNIFORM = 1

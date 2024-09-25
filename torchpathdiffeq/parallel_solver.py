@@ -4,7 +4,7 @@ import numpy as np
 from einops import rearrange
 
 from .methods import _get_method, UNIFORM_METHODS, VARIABLE_METHODS
-from .base import SolverBase, IntegralOutput, steps
+from .base import SolverBase, IntegralOutput, steps, ATOL_ASSERT, RTOL_ASSERT
 
 class ParallelAdaptiveStepsizeSolver(SolverBase):
     def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, max_batch=None, *args, **kwargs):
@@ -21,6 +21,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert remove_cut < 1.
         self.remove_cut = remove_cut
         self.use_absolute_error_ratio = use_absolute_error_ratio
+        self.max_batch = max_batch
 
         self.method = None
         self.order = None
@@ -346,7 +347,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         #print("TIMES", t_combined[:,:,0])
         #print("Y", y_combined[:,:,0])
         #print("DT", t_combined[1:,0,0]-t_combined[:-1,-1,0])
-        assert torch.allclose(t_combined[:-1,-1], t_combined[1:,0])
+        assert torch.allclose(
+            t_combined[:-1,-1], t_combined[1:,0],
+            atol=ATOL_ASSERT, rtol=RTOL_ASSERT
+        )
         return y_combined, t_combined
 
 
@@ -620,7 +624,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         # If t is given it must be consistent with given t_init and t_final
         if t is not None:
             if len(t.shape) == 2:
-                assert torch.all(t[1:] > t[:-1])
+                assert torch.all(t[1:] + ATOL_ASSERT > t[:-1])
                 if self.Cm1 > 1:
                     error_message = f"When giving t (with 2 dims) the first dimension (N) must satisfy N % {self.Cm1} = 1 in order to be properly divided into integration steps for the {self.method_name} method."
                     assert len(t) % self.Cm1 == 1, error_message
@@ -628,16 +632,17 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 error_message = f"When giving t (with 3 dims) the second dimension must match the integration method's number of samples per step. For {self.method_name} it's {self.C}"
                 assert t.shape[1] == self.C, error_message
                 assert torch.all(
-                    torch.flatten(t, 0, 1)[1:] + 1e-10 >= torch.flatten(t, 0, 1)[:-1]
+                    torch.flatten(t, 0, 1)[1:] + ATOL_ASSERT >= torch.flatten(t, 0, 1)[:-1]
+
                 )
             if t_init is None:
                 t_init = t[0,0]
             else:
-                assert torch.all(t[0,0] == t_init)
+                assert torch.allclose(t[0,0], t_init, atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
             if t_final is None:
                 t_final = t[-1,-1]
             else:
-                assert torch.all(t[-1,-1] == t_final)
+                assert torch.allclose(t[-1,-1], t_final, atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
         
         # Get variables or populate with default values, send to correct device
         ode_fxn, t_init, t_final, y0 = self._check_variables(
@@ -666,6 +671,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         t, y = None, None
 
         batch_buffer = 0.8
+        max_batch = self.max_batch if max_batch is None else max_batch
         if max_batch is not None:
             assert max_batch >= 2*self.Cm1 + 1, f"max_batch ({max_batch}) must be >= to the number of samples in two integration steps ({2*self.Cm1 + 1})"
             max_steps = (max_batch - 1)//self.Cm1
@@ -730,7 +736,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 )
                 #print("ADDED Y (t)", y.shape)#, t[:,:,0])
                 t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-                #assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+                assert torch.all(t_flat[1:] - t_flat[:-1] + ATOL_ASSERT >= 0)
                 #y, t = self.adaptively_add_y(
                 #    ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
                 #)
@@ -765,7 +771,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     # Create mask for remove points that are too close
                     t_pruned = self.remove_excess_y(t, error_ratios_2steps)
                     t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-                    assert torch.all(t_flat[1:] - t_flat[:-1] + 1e-10 >= 0)
+                    assert torch.all(t_flat[1:] - t_flat[:-1] + ATOL_ASSERT >= 0)
                     # Calculate loss
                     loss = loss_fxn(
                         integral=method_output.integral,
@@ -788,6 +794,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         loss=loss
                     )
                     # If batching, take the gradient and free memory
+                    print("Y T SHAPES", max_batch, y.shape, t.shape)
                     if max_batch is not None:
                         if loss.requires_grad:
                             loss.backward()
@@ -863,7 +870,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             else:
                 if len(t) > 1:
                     print(t[:,:,0])
-                    assert torch.all(t[:-1,-1] == t[1:,0])
+                    assert torch.allclose(t[:-1,-1], t[1:,0], atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
                 t = t[:,torch.tensor([0,-1], dtype=torch.int),:]
                 t = torch.flatten(t, start_dim=0, end_dim=1)
         return self._t_step_interpolate(t[:-1], t[1:])
@@ -936,10 +943,10 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         t_pruned[remove_idxs-torch.arange(len(remove_idxs), device=self.device)] = t_replace
         #print(t_replace[:5,:,0])
         #print(t_pruned[:5,:,0])
-        #t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        #assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] >= 0)
-        #t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-        #assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+        t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
+        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + ATOL_ASSERT >= 0)
+        t_flat = torch.flatten(t, start_dim=0, end_dim=1)
+        assert torch.all(t_flat[1:] - t_flat[:-1] + ATOL_ASSERT>= 0)
         #print("t_replace", t_replace)
         #t[remove_idxs+1] = t_replace
         #print("filled t", t[:,:,0])
@@ -999,7 +1006,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             return t
         else:
             if len(t) > 1:
-                assert torch.all(t[:-1,-1] == t[1:,0])
+                assert torch.allclose(t[:-1,-1], t[1:,0], atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
             t_left = t[:,0] 
             t_right = t[:,-1] 
             #steps = torch.tile(
@@ -1075,7 +1082,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         if len(remove_idxs) == 0 or len(t) == 1:
             return t
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-        assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
+        assert torch.all(t_flat[1:] - t_flat[:-1] + ATOL_ASSERT >= 0)
         combined_steps = torch.concatenate(
             [t[remove_idxs,:], t[remove_idxs+1,1:]], dim=1
         )
@@ -1091,9 +1098,9 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         t_pruned = t[remove_mask]
         update_idxs = remove_idxs-torch.arange(len(remove_idxs))
         t_pruned[update_idxs] = combined_steps[:,keep_idxs]
-        #t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        #assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] >= 0)
-        #assert np.allclose(t_pruned[:-1,-1,:], t_pruned[1:,0,:])
+        t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
+        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + ATOL_ASSERT >= 0)
+        assert np.allclose(t_pruned[:-1,-1,:], t_pruned[1:,0,:], atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
 
         #t[remove_idxs+1] = combined_steps[:,keep_idxs]
         #remove_mask = torch.ones(len(t), dtype=torch.bool)
@@ -1212,6 +1219,6 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_combined[idxs_add_offset,:,:] = y_add_combined[:,:self.Cm1+1]
         y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,self.Cm1:]
 
-        assert torch.all(t_combined[:-1,-1] == t_combined[1:,0])
+        assert torch.allclose(t_combined[:-1,-1], t_combined[1:,0], atol=ATOL_ASSERT, rtol=RTOL_ASSERT)
         return y_combined, t_combined
 
