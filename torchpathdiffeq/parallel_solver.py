@@ -29,6 +29,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.Cm1 = None
         self.previous_t = None
         self.previous_ode_fxn = None
+        self.max_batch = max_batch
 
 
     def _initial_t_steps(
@@ -125,7 +126,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 # Remove time steps where first point is less than t_init
                 t = t[t[:,-1,0] > t_init[0]]
                 # First step should start at t_init
-                inp = torch.tensor([t_init.unsqueeze(0), t[0,-1].unsqueeze(0)])
+                inp = torch.tensor([t_init.unsqueeze(0), t[0,-1].unsqueeze(0)], device=self.device)
                 if t.shape[-1] == 1:
                     inp = inp.unsqueeze(-1)
                 t[0] = self._initial_t_steps(
@@ -618,6 +619,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             of integration will remain [t[0], t[-1]]. If t is 2 dimensional the 
             intermediate time points will be calculated.
         """
+        max_batch = self.max_batch if max_batch is None else max_batch
+
         # If t is given it must be consistent with given t_init and t_final
         if t is not None:
             if len(t.shape) == 2:
@@ -630,6 +633,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 assert t.shape[1] == self.C, error_message
                 assert torch.all(
                     torch.flatten(t, 0, 1)[1:] + ATOL_ASSERT >= torch.flatten(t, 0, 1)[:-1]
+
                 )
             if t_init is None:
                 t_init = t[0,0]
@@ -716,7 +720,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     n_next_steps = len(y) + len(idxs_add)
                     if n_next_steps > max_steps:
                         #print("Removing", n_next_steps, max_steps, t.shape, t_add.shape)
-                        eval_counts = torch.ones(len(y))
+                        eval_counts = torch.ones(len(y), device=self.device)
                         eval_counts[idxs_add] = 2
                         eval_mask = torch.cumsum(eval_counts, dim=0).to(torch.int) <= max_steps
                         y = y[eval_mask]
@@ -936,7 +940,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         #print(remove_idxs[:5])
         #print(remove_mask[:5])
         t_pruned = t[remove_mask]
-        t_pruned[remove_idxs-torch.arange(len(remove_idxs))] = t_replace
+        t_pruned[remove_idxs-torch.arange(len(remove_idxs), device=self.device)] = t_replace
         #print(t_replace[:5,:,0])
         #print(t_pruned[:5,:,0])
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
@@ -991,7 +995,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             t_init=t_init, t_final=t_final
         )
         if t is None:
-            t = torch.linspace(0, 1., 7).unsqueeze(-1)
+            t = torch.linspace(0, 1., 7, device=t_init.device).unsqueeze(-1)
             t = t_init + t*(t_final - t_init)
             t_left = t[:-1]
             t_right = t[1:]
