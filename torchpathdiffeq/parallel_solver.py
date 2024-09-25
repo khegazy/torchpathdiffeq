@@ -988,7 +988,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             t_init=t_init, t_final=t_final
         )
         if t is None:
-            t = torch.linspace(0, 1., 7).unsqueeze(-1)
+            t = torch.linspace(0, 1., 7, device=t_init.device).unsqueeze(-1)
             t = t_init + t*(t_final - t_init)
             t_left = t[:-1]
             t_right = t[1:]
