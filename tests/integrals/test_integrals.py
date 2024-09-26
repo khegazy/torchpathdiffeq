@@ -83,29 +83,29 @@ def test_integrals():
                     #    continue
                     print("STARTING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", method, name, max_batch)
                     parallel_integrator = get_parallel_RK_solver(
-                        sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1
+                        sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1, device="cuda"
                     )
                     integral_output = parallel_integrator.integrate(
                         ode, t_init=t_init, t_final=t_final, max_batch=max_batch
                     )
                     
                     error_string = f"{sampling_name} {method} failed to properly integrate {name} with max_batch {max_batch}, calculated {integral_output.integral.item()} but expected {correct.item()}"
-                    assert torch.abs(integral_output.integral - correct)/correct < cutoff, error_string
+                    assert torch.abs(integral_output.integral.cpu() - correct)/correct < cutoff, error_string
 
                     t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
                     t_pruned_flat = torch.flatten(integral_output.t_pruned, start_dim=0, end_dim=1)
                     assert torch.all(t_flat[1:] - t_flat[0:-1] >= 0)
                     assert torch.all(t_pruned_flat[1:] - t_pruned_flat[0:-1] >= 0)
-                    assert np.allclose(integral_output.t[1:,0,:], integral_output.t[:-1,-1,:])
-                    assert np.allclose(integral_output.t_pruned[1:,0,:], integral_output.t_pruned[:-1,-1,:])
+                    assert torch.allclose(integral_output.t[1:,0,:], integral_output.t[:-1,-1,:])
+                    assert torch.allclose(integral_output.t_pruned[1:,0,:], integral_output.t_pruned[:-1,-1,:])
                     
                     
                     if max_batch is None:
                         no_batch_integral = integral_output
-                        no_batch_delta = torch.abs(no_batch_integral.integral - correct)
+                        no_batch_delta = torch.abs(no_batch_integral.integral.cpu() - correct)
                     else:
                         rel_tol = 1e-3
-                        if torch.abs(integral_output.integral - correct) > no_batch_delta:
+                        if torch.abs(integral_output.integral.cpu() - correct) > no_batch_delta:
                             print(no_batch_integral.integral, integral_output.integral)
                             assert torch.abs(1 - (no_batch_integral.integral/integral_output.integral)) < rel_tol
                             assert 10*torch.abs(no_batch_integral.integral_error) >= torch.abs(integral_output.integral_error)

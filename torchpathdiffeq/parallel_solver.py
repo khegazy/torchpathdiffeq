@@ -757,12 +757,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 )
                 #print("ADDED Y (t)", y.shape)#, t[:,:,0])
                 t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-                if not torch.all(t_flat[1:] - t_flat[:-1] >= 0):
-                    idxs = torch.where(t_flat[1:] - t_flat[:-1] < 0)[0]
-                    print(idxs.shape, t_flat.shape, idxs)
-                    for idx in idxs:
-                        print("WTF", idx, t_flat[idx-8:idx+8])
-                        print("WTF", idx, t_flat[idx-8:idx+8] - t_flat[idx-9:idx+7])
                 assert torch.all(t_flat[1:] - t_flat[:-1] + 1e-7>= 0)
                 #y, t = self.adaptively_add_y(
                 #    ode_fxn, y, t, error_ratios, t_init, t_final, ode_args
