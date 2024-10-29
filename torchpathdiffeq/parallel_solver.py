@@ -936,7 +936,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         #print(remove_idxs[:5])
         #print(remove_mask[:5])
         t_pruned = t[remove_mask]
-        t_pruned[remove_idxs-torch.arange(len(remove_idxs))] = t_replace
+        t_pruned[remove_idxs-torch.arange(len(remove_idxs), device = remove_idxs.device)] = t_replace
         #print(t_replace[:5,:,0])
         #print(t_pruned[:5,:,0])
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
