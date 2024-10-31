@@ -115,7 +115,6 @@ class CurveNet(nn.Module):
         t = F.tanh(self.fc2(t))
         t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
 
-
 class CurveNetLoss(nn.Module):
     """
     Computes the loss L(w) := L(Y, model(X; w))
@@ -161,8 +160,8 @@ def get_accuracy(logit, target, batch_size):
     return accuracy.item()
 
 
-### Main training loop ###
-def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'cnn', init_point: bool = True):
+### End-points training loop ###
+def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'resnet', init_point: bool = True):
     criterion = test_config['criterion'][criterion_str]
 
     if model == 'cnn':
@@ -234,8 +233,36 @@ def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'c
     print('Finished Training')
     print('____________________________________________________________')
     return ls_list, acc_list
-### Main training loop ###
+### End-points training loop ###
 
+
+def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss):
+    optimizer = test_config['optims'][optimizer_str](path.parameters())
+    integrator = get_parallel_RK_solver(
+        test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
+        rtol=test_config['rtol'], remove_cut=0.1
+    )
+
+    for epoch in range(test_config['epochs']):
+        path.train()
+        for i, data in enumerate(trainloader, 0):
+            inputs, labels = data
+            inputs         = inputs.to(test_config['device'])
+            labels         = labels.to(test_config['device'])
+
+            optimizer.zero_grad()
+
+            # pot = partial(potential, X=inputs, Y=labels)
+
+            integrator.integrate(
+                potential, t_init=t_init, t_final=t_final, max_batch=test_config['max_batches'], ode_args=(inputs, labels)
+            )
+            # ode_fxn(t, *ode_args)
+
+            if integrator._integrator.max_batch is None:
+                integrator.integral.backward()
+
+            optimizer.step()
 
 
 if args.w_init is None:
