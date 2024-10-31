@@ -6,6 +6,11 @@ from torch.nn.utils import vector_to_parameters, parameters_to_vector
 import torchvision
 import torchvision.transforms as transforms
 from resnet import *
+from torchpathdiffeq import\
+    steps,\
+    get_parallel_RK_solver,\
+    UNIFORM_METHODS,\
+    VARIABLE_METHODS\
 
 
 from functools import partial
@@ -21,13 +26,19 @@ parser.add_argument('-rd', '--resnet_depth')
 parser.add_argument('-p', '--cifar10_path')
 parser.add_argument('-w1', '--w_init')
 parser.add_argument('-w2', '--w_end')
+parser.add_argument('-mp', '--model_path')
+
 
 args = parser.parse_args()
 
 if args.w_init is not None and args.w_end is None:
+    if args.model_path is None:
+        raise ValueError("Please specify both ends of the curve in addition to the model path")
     raise ValueError("Both ends of the curve should be specified")
 
 if args.w_init is None and args.w_end is not None:
+    if args.model_path is None:
+        raise ValueError("Please specify both ends of the curve in addition to the model path")
     raise ValueError("Both ends of the curve should be specified")
 
 
@@ -43,8 +54,14 @@ test_config = {
     'LR': 1e-3,
     'resnet_depth': int(args.resnet_depth),
     'cifar10_path': args.cifar10_path,
-    'checkpoints_path': './checkpoints'
+    'checkpoints_path': './checkpoints',
+    'sampling_type': 'Uniform',
+    'method': UNIFORM_METHODS,
+    'atol': 1e-9,
+    'rtol': 1e-7,
+    'max_batches': 512
 }
+
 test_config['optims'] = {
         'Adam': partial(optim.Adam, lr=test_config["LR"])
 }
@@ -77,46 +94,45 @@ class Net(nn.Module):
 ### Test CNN architecture ###
 
 
+### Describing the network used for the path ###
 
-### Describing the flow ###
-class CurveFlow(nn.Module):
-    def __init__(self, nn_dims: int, w1: torch.Tensor, w2: torch.Tensor, criterion: nn.Module, model: nn.Module, family: str = 'poly'):
-        super(CurveFlow, self).__init__()
-        self.family = family
-        self.linear = nn.Linear(nn_dims, 1)
+class CurveNet(nn.Module):
+    def __init__(self, nn_dims: int, w1: torch.Tensor, w2: torch.Tensor, criterion: nn.Module, model: nn.Module):
+        super(CurveNet, self).__init__()
+        self.fc1 = nn.Linear(1, 100) # take input `t`
+        self.fc2 = nn.Linear(100, 100)
+        self.fc3 = nn.Linear(100, nn_dims) #... and return a set of weights in the weight-space
         self.w1 = w1
         self.w2 = w2
         self.criterion = criterion
-        self.model = model
+        self.model = model #TODO: Keeping the initial model on hand for evaluation... or not?
 
-    def forward(self, x, y):
-        t_tilde = torch.rand(1)
-        curve_eval: torch.Tensor
-
-        if self.family == 'poly':
-            curve_eval = poly_chain(self.linear, t_tilde, self.w1, self.w2)
-        else:
-            curve_eval = bezier_curve(self.Linear, t_tilde, self.w1, self.w2)
-
-        # Loading the current parameters in the network
-        vector_to_parameters(curve_eval, self.model.parameters())
-        self.criterion(y, self.model(x)).backward()
-
-        #TODO: return the flattened gradient wrt every parameter
+    def forward(self, t): # `t\in [0, 1]`
+        #TODO: enforce `t\in [0, 1]` --- this will be respected by `get_parallel_RK_solver`, confirm
+        #TODO: How do I enforce CurveNet(0) = w1 && CurveNet(1) = w2?
+        #TODO: How will a `CurveNet` instance actually be trained?
+        t = F.tanh(self.fc1(t))
+        t = F.tanh(self.fc2(t))
+        t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
 
 
-def poly_chain(params, t, w1, w2):
-    # The output of this function should be a valid set of NN parameters
-    if 0 <= t < 0.5:
-        return 2 * (t * params + (0.5 - t) * w1)
-    else:
-        return 2 * ((t - 0.5) * w2 + (1 - t) * params)
+class CurveNetLoss(nn.Module):
+    """
+    Computes the loss L(w) := L(Y, model(X; w))
+    Should be passed to the integrator
+    """
+    def __init__(self, nn_dims: int, criterion: nn.Module, model: nn.Module, curve: CurveNet):
+        super(CurveNetLoss, self).__init__()
+        self.criterion = criterion
+        self.model = model # we don't need the trained weights here, just require the empty model
+        self.curve = curve
 
-def bezier_curve(params, t, w1, w2):
-    # The output of this function should be a valid set of NN parameters
-    return (1 - t) ** 2 * w1 + 2 * t * (1 - t) * params + t ** 2 * w2
+    def forward(self, t, X, Y):
+        w = self.curve(t)
+        vector_to_parameters(w, self.model.parameters()) # loads weights `w` in `model`
+        return self.criterion(Y, model(X))
 
-### Describing the flow ###
+### Describing the network used for the path ###
 
 
 
@@ -145,7 +161,6 @@ def get_accuracy(logit, target, batch_size):
     return accuracy.item()
 
 
-
 ### Main training loop ###
 def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'cnn', init_point: bool = True):
     criterion = test_config['criterion'][criterion_str]
@@ -166,7 +181,7 @@ def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'c
 
     ls_list = []
     acc_list = []
-    for epoch in range(test_config['epochs']):  # loop over the dataset multiple times
+    for epoch in range(test_config['epochs']):
         train_running_loss = 0.0
         train_acc          = 0.0
 
@@ -234,4 +249,23 @@ if args.w_init is None:
 else:
     # training end-points were passed in and will be directly used for
     # the curve-fitting procedure
+    parallel_integrator = get_parallel_RK_solver(
+        test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
+        rtol=test_config['rtol'], remove_cut=0.1
+    )
+
+    t_init = torch.tensor([0], dtype=torch.float64)
+    t_final = torch.tensor([1], dtype=torch.float64)
+
+    criterion = nn.CrossEntropyLoss()
+    model = torch.load(args.model_path)
+    nn_dims = None #TODO: Grab from `model`
+    curve_net = CurveNet(nn_dims, args.w_init, args.w_end, criterion, model)
+    curve_net_loss = CurveNetLoss(nn_dims, criterion, model, curve_net)
+
+    #TODO: Definitely need to find a way to impose CurveNet(0) = w_init && ...
+    parallel_integrator.integrate(
+        curve_net_loss, t_init=t_init, t_final=t_final, max_batch=test_config['max_batches']
+    )
+
     pass
