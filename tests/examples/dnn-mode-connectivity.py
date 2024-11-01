@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -111,9 +112,13 @@ class CurveNet(nn.Module):
         #TODO: enforce `t\in [0, 1]` --- this will be respected by `get_parallel_RK_solver`, confirm
         #TODO: How do I enforce CurveNet(0) = w1 && CurveNet(1) = w2?
         #TODO: How will a `CurveNet` instance actually be trained?
+        coeffs = [1 - t, t, 1 - torch.cos(2 * math.pi * t)]
         t = F.tanh(self.fc1(t))
         t = F.tanh(self.fc2(t))
         t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
+
+        # enforcing that `Phi_t` evaluates to w_1 @ 0 and w_2 @ 1
+        return coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t
 
 class CurveNetLoss(nn.Module):
     """
@@ -235,7 +240,7 @@ def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'r
     return ls_list, acc_list
 ### End-points training loop ###
 
-
+### Path training loop ###
 def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss):
     optimizer = test_config['optims'][optimizer_str](path.parameters())
     integrator = get_parallel_RK_solver(
@@ -263,6 +268,7 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss):
                 integrator.integral.backward()
 
             optimizer.step()
+### Path training loop ###
 
 
 if args.w_init is None:
