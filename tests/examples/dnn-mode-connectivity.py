@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.nn.utils import vector_to_parameters, parameters_to_vector
 import torchvision
 import torchvision.transforms as transforms
+import numpy as np
 from resnet import *
 from torchpathdiffeq import\
     steps,\
@@ -66,9 +67,9 @@ test_config = {
     'checkpoints_path': './checkpoints',
     'sampling_type': steps.ADAPTIVE_UNIFORM,
     'method': 'adaptive_heun',
-    'atol': 1e-9,
-    'rtol': 1e-7,
-    'max_batches': 512,
+    'atol': 1e-5,
+    'rtol': 1e-3,
+    'max_batches': 256,
     'model_init_path': "",
     'model_end_path': "",
     'w1_path': "./checkpointsinit_resnet_20_epochs_100LR_0.001.pt",
@@ -122,7 +123,6 @@ class CurveNet(nn.Module):
         #TODO: How do I enforce CurveNet(0) = w1 && CurveNet(1) = w2?
         #TODO: How will a `CurveNet` instance actually be trained?
         coeffs = [1 - t, t, 1 - torch.cos(2 * math.pi * t)]
-        #MARK: Data types mismatching between `t` and weights in `self.fc1`
         t = F.tanh(self.fc1(t))
         t = F.tanh(self.fc2(t))
         t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
@@ -142,14 +142,10 @@ class CurveNetLoss(nn.Module):
         self.curve = curve
 
     def forward(self, t, X, Y):
-        print("actual_input ", t.shape)
         w = self.curve(t) # grab the curves output
         loss = []
         for dim in range(w.shape[0]):
             vector_to_parameters(w[dim, :].view(-1), self.model.parameters())
-            #MARK: Data type discrepancy @ self.model(X)
-            # i.e. between the inputs and the weights of the models
-            # i.e. between the output of `CurveNet` (doubles) and the inputs (floats)
             loss.append(self.criterion(self.model(X), Y).view(1,1))
         return torch.tensor(loss).to(test_config['device']).view(len(loss), 1)
 ### Describing the network used for the path ###
@@ -161,13 +157,29 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-trainset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=True,
-                                        download=True, transform=transform)
+# Ratio of the dataset to use
+ratio = 0.05
+
+full_trainset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=True,
+                                             download=True, transform=transform)
+full_testset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=False,
+                                            download=True, transform=transform)
+
+# Calculate the number of samples to include
+train_size = int(len(full_trainset) * ratio)
+test_size = int(len(full_testset) * ratio)
+
+# Randomly select indices for subset
+train_indices = np.random.choice(len(full_trainset), train_size, replace=False)
+test_indices = np.random.choice(len(full_testset), test_size, replace=False)
+
+# Create subsets of the trainset and testset
+trainset = torch.utils.data.Subset(full_trainset, train_indices)
+testset = torch.utils.data.Subset(full_testset, test_indices)
+
+# Create DataLoaders with the subset
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=test_config['batch_size'],
                                           shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=False,
-                                       download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=test_config['batch_size'],
                                          shuffle=False, num_workers=2)
 ### Data loading ###
@@ -259,6 +271,10 @@ def train_resnet_cifar10(optimizer_str: str, criterion_str: str, model: str = 'r
 ### Path training loop ###
 def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, integrator):
     optimizer = test_config['optims'][optimizer_str](path.parameters())
+    print(f'{optimizer_str}')
+    print(f'{test_config["device"]}')
+
+    integral = None
 
     for epoch in range(test_config['epochs']):
         path.train()
@@ -269,14 +285,28 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, inte
 
             optimizer.zero_grad()
 
-            integrator.integrate(
+            integral = integrator.integrate(
                 potential, t_init=t_init, t_final=t_final, max_batch=test_config['max_batches'], ode_args=(inputs, labels)
             )
 
-            if integrator._integrator.max_batch is None:
-                integrator.integral.backward()
+            if test_config['max_batches'] is None:
+                # only run a backward pass if we microbatch
+                integral.integral.backward()
 
             optimizer.step()
+        print(f'Epoch#: {epoch}')
+
+    # Saving all of the OP tensors
+    torch.save(integral.integral, 'mode_test_integral.pt')
+    torch.save(integral.loss, 'mode_test_loss.pt')
+    torch.save(integral.t_pruned, 'mode_test_t_pruned.pt')
+    torch.save(integral.t, 'mode_test_t.pt')
+    torch.save(integral.h, 'mode_test_h.pt')
+    torch.save(integral.y, 'mode_test_y.pt')
+    torch.save(integral.sum_steps, 'mode_test_sum_steps.pt')
+    torch.save(integral.integral_error, 'mode_test_integral_error.pt')
+    torch.save(integral.errors, 'mode_test_errors.pt')
+    torch.save(integral.error_ratios, 'mode_test_error_ratios.pt')
 ### Path training loop ###
 
 parallel_integrator = get_parallel_RK_solver(
@@ -288,7 +318,7 @@ t_init = torch.tensor([0])
 t_final = torch.tensor([1])
 
 # This is what we will load weights into and use for evaluating the loss
-plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
+plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])#.to(torch.float64)
 model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
 model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
 
@@ -300,6 +330,6 @@ w2 = parameters_to_vector(model_w2_params) # flattened params
 
 
 path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
-path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device']) # potential along path
+path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
 
 train_path('Adam', path, path_loss, parallel_integrator)
