@@ -17,7 +17,7 @@ def ode_path_integral(
         t_final=torch.tensor([1], dtype=torch.float64),
         y0=torch.tensor([0], dtype=torch.float64),
         remove_cut=0.1,
-        max_batch=None,
+        total_mem_usage=0.9,
         use_absolute_error_ratio=True,
         device='cpu',
         **kwargs
@@ -93,6 +93,14 @@ def ode_path_integral(
             device=device,
             **kwargs
         )
+        
+        integral_output = integrator.integrate(
+            y0=y0,
+            t=t,
+            t_init=t_init,
+            t_final=t_final,
+            total_mem_usage=total_mem_usage
+        )
     elif computation.lower() == 'serial':
         integrator = SerialAdaptiveStepsizeSolver(
             method=method,
@@ -104,15 +112,14 @@ def ode_path_integral(
             device=device,
             **kwargs
         )
+    
+        integral_output = integrator.integrate(
+            y0=y0,
+            t=t,
+            t_init=t_init,
+            t_final=t_final,
+        )
     else:
         raise ValueError(f"Path integral computation type must be 'parallel' or 'serial', not {computation}.")
-
-    integral_output = integrator.integrate(
-        y0=y0,
-        t=t,
-        t_init=t_init,
-        t_final=t_final,
-        max_batch=max_batch
-    )
 
     return integral_output

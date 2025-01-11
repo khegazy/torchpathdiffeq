@@ -14,6 +14,7 @@ def wolf_schlegel(t, y=None):
     while len(t.shape) < 2:
         t = t.unsqueeze(0)
 
+    print(WS_min_init.shape, WS_min_final.shape, t.shape)
     interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
     x = interpolate[:,0].unsqueeze(-1)
     y = interpolate[:,1].unsqueeze(-1)

@@ -26,6 +26,7 @@ def get_sampling_type(sampling_type : str):
 class IntegralOutput():
     integral: torch.Tensor
     loss: torch.Tensor = None
+    gradient_taken: bool = None
     t_pruned: torch.Tensor = None
     t: torch.Tensor = None
     h: torch.Tensor = None

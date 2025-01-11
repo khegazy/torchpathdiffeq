@@ -40,7 +40,7 @@ def test_ode_path_integral_fxn():
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
         assert_allclose(OPI_integral.sum_steps, RK_integral.sum_steps)
-        assert_allclose(OPI_integral.errors, RK_integral.errors)
+        assert_allclose(OPI_integral.sum_step_errors, RK_integral.sum_step_errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
 
     ###############################
@@ -74,7 +74,7 @@ def test_ode_path_integral_fxn():
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
         assert_allclose(OPI_integral.sum_steps, RK_integral.sum_steps)
-        assert_allclose(OPI_integral.errors, RK_integral.errors)
+        assert_allclose(OPI_integral.sum_step_errors, RK_integral.sum_step_errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
     
     
