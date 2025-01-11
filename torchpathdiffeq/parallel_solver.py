@@ -598,7 +598,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         else:
             return self._get_cpu_memory()
 
-    def _setup_memory_checks(self, ode_fxn, t_test):
+    def _setup_memory_checks(self, ode_fxn, t_test, ode_args=()):
         assert len(t_test.shape) <= 2
         if len(t_test.shape) == 2:
             t_test = t_test[0]
@@ -614,7 +614,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             if self.ode_unit_mem_size is not None:
                 if self.ode_unit_mem_size*N > mem_before[0]:
                     return
-            result = ode_fxn(t_input)
+            result = ode_fxn(t_input, *ode_args)
             mem_after = self._get_memory()
             del result
             self.ode_unit_mem_size = max(0, (mem_before[0] - mem_after[0])/float(N))
@@ -707,7 +707,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
         same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
         if not same_ode_fxn:
-            self._setup_memory_checks(ode_fxn, t_init)
+            self._setup_memory_checks(ode_fxn, t_init, ode_args=ode_args)
         assert self._get_max_ode_evals(total_mem_usage) > (2*self.Cm1 + 1),\
             "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
