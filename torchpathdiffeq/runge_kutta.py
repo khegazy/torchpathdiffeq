@@ -36,7 +36,7 @@ def _RK_integral(
     RK_steps = h*torch.sum(tableau_b*y, dim=1)   # Sum over k evaluations weighted by c
     if verbose:
         print("RK STEPS", RK_steps.shape, RK_steps)
-    integral = y0 + torch.sum(RK_steps)                    # Sum over all steps with step size h
+    integral = y0 + torch.sum(RK_steps, dim=0)                    # Sum over all steps with step size h
     return integral, RK_steps, h
 
    

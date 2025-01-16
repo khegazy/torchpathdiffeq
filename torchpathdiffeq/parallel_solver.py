@@ -8,7 +8,7 @@ from .methods import _get_method, UNIFORM_METHODS, VARIABLE_METHODS
 from .base import SolverBase, IntegralOutput, steps
 
 class ParallelAdaptiveStepsizeSolver(SolverBase):
-    def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, *args, **kwargs):
+    def __init__(self, remove_cut=0.1, use_absolute_error_ratio=True, error_calc_idx=None, *args, **kwargs):
         """
         Args:
         remove_cut (float): Cut to remove integration steps with error ratios
@@ -30,6 +30,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.previous_t = None
         self.previous_ode_fxn = None
         self.ode_eval_unit_size = None
+        self.error_calc_idx = error_calc_idx
 
 
     def _initial_t_steps(
@@ -142,7 +143,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 t[-1] = self._initial_t_steps(
                     inp, t_init=t_init, t_final=t_final
                 ).to(self.dtype)
-        
         return t
 
 
@@ -181,7 +181,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         N, C, _ = t_steps.shape
 
         """
-        N, C, T = t_steps_add.shape 
+        N, C, _ = t_steps_add.shape 
         # Time points to evaluate, remove repetitive time points at the end
         # of each step to minimize evaluations
         t_add = torch.concatenate(
@@ -193,9 +193,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         )
         # Calculate new geometries
         y_add = ode_fxn(t_add, *ode_args).to(self.dtype)
+        _, D = y_add.shape
 
         # Add repetitive y values to the end of each integration step
-        y_steps = torch.reshape(y_add[1:], (N, C-1, T))
+        y_steps = torch.reshape(y_add[1:], (N, C-1, D))
         y = torch.concatenate(
             [
                 torch.concatenate(
@@ -296,13 +297,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
         # Create new vector to fill with old and new values
         y_combined = torch.zeros(
-            (len(y)+n_add, self.Cm1+1, y_add.shape[-1]),
+            (len(y)+n_add, self.Cm1+1, D),
             dtype=self.dtype,
             requires_grad=False,
             device=self.device
         ).detach()
-        t_combined = torch.zeros_like(
-            y_combined,
+        t_combined = torch.zeros(
+            (len(y)+n_add, self.Cm1+1, t.shape[-1]),
             dtype=self.dtype,
             requires_grad=False,
             device=self.device
@@ -740,7 +741,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_steps = self._get_initial_t_steps(
                 t_steps_init, _t_init, t_final, inforce_endpoints=True
             )
-            t_steps = t_steps[:min(len(t_steps), self._get_max_ode_evals(total_mem_usage))]
+            max_steps = int(0.8*self._get_max_ode_evals(total_mem_usage)//self.C)
+            t_steps = t_steps[:min(len(t_steps), max_steps)]
             #print("INIT TADD PORTION", t_add.shape, t_steps.shape)
             #print("TADD INIT", t_add[:,:,0])
             #t = None
@@ -763,13 +765,26 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 # Determine new points to add
                 if error_ratios is None:
                     idxs_add= None
-                elif self._get_max_ode_evals(total_mem_usage) < self.Cm1:
-                    del y
-                    y, t = self._add_initial_y(
-                        ode_fxn=ode_fxn, t_steps_add=t, ode_args=ode_args
-                    )
-                    idxs_add = None
-                    take_gradient = take_gradient is None or take_gradient
+                else:
+                    idxs_add = torch.where(error_ratios > 1.)[0]
+                    if self._get_max_ode_evals(total_mem_usage) < len(idxs_add)*self.C:
+                        del y
+                        eval_counts = torch.ones(len(y), device=self.device)
+                        eval_counts[idxs_add] = 2
+                        eval_counts = self.C*torch.cumsum(eval_counts, dim=0).to(torch.int)
+                        
+                        max_steps = int(0.48*self._get_max_ode_evals(total_mem_usage))
+                        assert max_steps > 2*self.Cm1 + 1
+                        cut_idx = torch.argmin(torch.abs(eval_counts - max_steps))
+                        if eval_counts[cut_idx] > max_steps:
+                            cut_idx -= 1
+                        t = t[:cut_idx]
+                        y, t = self._add_initial_y(
+                            ode_fxn=ode_fxn, t_steps_add=t, ode_args=ode_args
+                        )
+                        idxs_add = None
+                        take_gradient = take_gradient is None or take_gradient
+                """
                 else:
                     idxs_add = torch.where(error_ratios > 1.)[0]
                     #t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
@@ -786,6 +801,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         t = t[eval_mask]
                         #t_add = t_add[eval_mask[idxs_add]]
                         idxs_add = idxs_add[eval_mask[idxs_add]]
+                """
 
                 #print("B4 Adding Y", t_add.shape, len(t_add))
                 #if y is not None:
@@ -811,8 +827,14 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 
                 # Calculate error
                 t0 = time.time()
+                if self.error_calc_idx is None:
+                    sum_step_errors = method_output.sum_step_errors
+                else:
+                    sum_step_errors =\
+                        method_output.sum_step_errors[:,self.error_calc_idx]
+                    sum_step_errors = sum_step_errors.unsqueeze(-1)
                 error_ratios, error_ratios_2steps = self._compute_error_ratios(
-                    sum_step_errors=method_output.sum_step_errors,
+                    sum_step_errors=sum_step_errors,
                     sum_steps=method_output.sum_steps,
                     integral=method_output.integral.detach()
                 )
@@ -842,7 +864,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 y=y,
                 sum_steps=method_output.sum_steps,
                 integral_error=method_output.integral_error,
-                sum_step_errors=torch.abs(method_output.sum_step_errors),
+                sum_step_errors=torch.abs(sum_step_errors),
                 error_ratios=error_ratios,
                 t_init=t_init,
                 t_final=t_final,
