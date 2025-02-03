@@ -1,9 +1,11 @@
 import math
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn.utils import vector_to_parameters, parameters_to_vector
+import matplotlib.pyplot as plt
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
@@ -58,6 +60,7 @@ if args.w_init is None and args.w_end is not None:
 ### config dictionary for the tests ###
 test_config = {
     'epochs': 100,
+    'epochs_integrator': 100,
     'batch_size': 32,
     'criterion': {
         'CE': nn.CrossEntropyLoss()
@@ -157,15 +160,24 @@ class CurveNet(nn.Module):
         #TODO: How do I enforce CurveNet(0) = w1 && CurveNet(1) = w2?
         #TODO: How will a `CurveNet` instance actually be trained?
         coeffs = [1 - t, t, 1 - torch.cos(2 * math.pi * t)]
+        # coeffs = [1 - t, t]
+        t_init = torch.tensor([0]).to(test_config['device']).type(torch.float)
+        t_final = torch.tensor([1]).to(test_config['device']).type(torch.float)
+        f1 = F.tanh(self.fc3(F.tanh(self.fc2(F.tanh(self.fc1(t_final))))))
+        f0 = F.tanh(self.fc3(F.tanh(self.fc2(F.tanh(self.fc1(t_init))))))
         t = F.tanh(self.fc1(t))
         t = F.tanh(self.fc2(t))
         t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
 
         # enforcing that `Phi_t` evaluates to w_1 @ 0 and w_2 @ 1
         if len(t.shape) < 2:
-            return (coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t).view(1, self.nn_dims)
+            # return (coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t).view(1, self.nn_dims)
+            return (coeffs[0] * (t - f0 + self.w1) + coeffs[1] * (t - f1 + self.w2)).view(1, self.nn_dims)
         else:
-            return coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t
+            # return coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t
+            return coeffs[0] * (t - f0 + self.w1) + coeffs[1] * (t - f1 + self.w2)
+        # (1-t) * w1 + t * (f(t) - f(1) + w2)
+        # (1 - t) * (f(t) - f(0) + w1) + t * (f(t) - f(1) + w2)
 
 class CurveNetLoss(nn.Module):
     """
@@ -179,12 +191,18 @@ class CurveNetLoss(nn.Module):
         self.curve = curve
 
     def forward(self, t):#, X, Y):
+        #TODO: pass in the weights here instead of time
         w = self.curve(t) # grab the curves output
         loss_ls = []
         self.model.eval()
         for dim in range(w.shape[0]):
             eval_running_loss = 0.0
+            # start_time = time.time()
             vector_to_parameters(w[dim, :].view(-1), self.model.parameters())
+            # end_time = time.time()
+            # execution_time = end_time - start_time
+
+            # print(f"Execution time: {execution_time:.6f} seconds")
 
             for i, eval_data in enumerate(testloader, 0):
                 eval_X, eval_Y = eval_data
@@ -253,7 +271,38 @@ def load_data():
 trainloader, testloader = load_data()
 ### Data loading ###
 
+### Curve eval on a straight line, START
 
+def eval_line(w1: torch.Tensor, w2: torch.Tensor, plain_model: nn.Module, num_points: int):
+    # Generating the linearly interpolated points
+    t_values = torch.linspace(0, 1, num_points)
+    points = torch.lerp(w1, w2, t_values.unsqueeze(1))
+    criterion = test_config['criterion']['CE']
+    loss_ls = []
+
+    print("Line\n")
+    for i in range(num_points):
+        eval_running_loss = 0.0
+        # Loading weights in the model for eval
+        vector_to_parameters(points[i, :], plain_model.parameters())
+        for j, eval_data in enumerate(testloader, 0):
+            eval_X, eval_Y = eval_data
+            eval_X = eval_X.to(test_config['device'])
+            eval_Y = eval_Y.to(test_config['device'])
+            eval_outputs = plain_model(eval_X)
+
+            loss = criterion(eval_outputs, eval_Y)
+            eval_running_loss += loss.detach().item()
+        # loss_ls.append(eval_running_loss/len(testloader))
+        loss_ls.append(eval_running_loss)
+        print(f"Point# {i}")
+    # return torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1)
+    return {
+        "loss": torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1),
+        "t": t_values
+    }
+
+### Curve eval on a straight line, END
 
 def get_accuracy(logit, target, batch_size):
     ''' Obtain accuracy for training round '''
@@ -341,7 +390,7 @@ def train_mlp_mnist(optimizer_str: str, criterion_str: str, init_point: bool = T
     criterion = test_config['criterion'][criterion_str]
 
     # net = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
-    net = MNISTMLP()
+    net = MNISTMLP().to(test_config['device'])
     # Xavier initialization for the input layer to the ResNet:
     nn.init.xavier_uniform_(net.fc1.weight)
 
@@ -412,10 +461,11 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, inte
     optimizer = test_config['optims'][optimizer_str](path.parameters())
     print(f'{optimizer_str}')
     print(f'{test_config["device"]}')
+    int_list = []
 
     integral = None
 
-    for epoch in range(test_config['epochs']):
+    for epoch in range(test_config['epochs_integrator']):
         path.train()
         optimizer.zero_grad()
 
@@ -425,6 +475,7 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, inte
 
         if test_config['max_batches'] is None:
             integral.integral.backward()
+        int_list.append(integral.integral)
 
         optimizer.step()
         print(f'Epoch#: {epoch}')
@@ -449,11 +500,13 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, inte
     #         optimizer.step()
         # print(f'Epoch#: {epoch}')
     # Saving all of the OP tensors
+    int_list = torch.tensor(int_list)
     torch.save({
                 'epoch': test_config["epochs"],
                 'model_state_dict': path.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 }, 'mode_test_path_t_detached.pt')
+    torch.save(int_list, 'mode_test_integral_list.pt')
     torch.save(integral.integral, 'mode_test_integral_t_detached_correct.pt')
     torch.save(integral.loss, 'mode_test_loss_t_detached_correct.pt')
     torch.save(integral.t_pruned, 'mode_test_t_pruned_t_detached_correct.pt')
@@ -467,105 +520,154 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss, inte
 ### Path training loop ###
 
 ### Path eval ###
-def eval_curve(curve: CurveNet, potential: CurveNetLoss, t: torch.Tensor, og_model: nn.Module, tmp: bool):
+def eval_curve(curve: CurveNet, plain_model: nn.Module, num_points: int):
+    #, tmp: bool):
+    t_values = torch.linspace(0, 1, num_points).view(num_points, 1)
+    # points = torch.lerp(w1, w2, t_values.unsqueeze(1))
+    points = curve(t_values)
     criterion = test_config['criterion']['CE']
     ls_list = []
 
-    for epoch in range(test_config['epochs']):
-        test_running_loss = 0.0
+    # for epoch in range(test_config['epochs_integrator']):
+    print("Curve\n")
+    for i in range(num_points):
+        eval_running_loss = 0.0
+        vector_to_parameters(points[i, :], plain_model.parameters())
         curve.eval()
-        for test_i, test_data in enumerate(testloader, 0):
-            test_inputs, test_labels = test_data
-            test_inputs  = test_inputs.to(test_config['device'])
-            test_labels  = test_labels.to(test_config['device'])
-            test_outputs = og_model(test_inputs)
+        for j, eval_data in enumerate(testloader, 0):
+            eval_X, eval_Y = eval_data
+            eval_X = eval_X.to(test_config['device'])
+            eval_Y = eval_Y.to(test_config['device'])
+            eval_outputs = plain_model(eval_X)
 
-            # loss = potential(t, test_inputs, test_labels)
-            loss = criterion(test_outputs, test_labels)
-            test_running_loss += loss.detach().item()
+            loss = criterion(eval_outputs, eval_Y)
+            eval_running_loss += loss.detach().item()
 
-        ls_list.append(test_running_loss/len(testloader))
-        print(f"Epoch# {epoch}")
+        ls_list.append(eval_running_loss/len(testloader))
+        print(f"Point# {i}")
 
-    if tmp:
-        torch.save(torch.tensor(ls_list), "resnet_w1_eval_with_state_dict.pt")
-    else:
-        torch.save(torch.tensor(ls_list), "resnet_w1_eval_v2p.pt")
+    # if tmp:
+    #     torch.save(torch.tensor(ls_list), "resnet_w1_eval_with_state_dict.pt")
+    # else:
+    #     torch.save(torch.tensor(ls_list), "resnet_w1_eval_v2p.pt")
 
-    return ls_list
+    # return ls_list
+
+    return {
+        "loss": torch.tensor(ls_list).to(test_config['device']).view(len(ls_list), 1),
+        "t": t_values
+    }
+
 ### Path eval ###
+
+### Plot vs lines ###
+plain_model = MNISTMLP()
+model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
+model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
+param_names = {name for name, _ in plain_model.named_parameters()}
+model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
+w1 = parameters_to_vector(model_w1_params) # flattened params
+model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
+w2 = parameters_to_vector(model_w2_params) # flattened params
+
+# curve = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
+# curve_out = eval_curve(curve, plain_model, num_points=135)
+
+line_out = eval_line(w1, w2, plain_model, num_points=135)
+
+y_tensor = torch.load('mode_test_y_t_detached_correct.pt')
+t_tensor = torch.load('mode_test_t_pruned_t_detached_correct.pt')
+integral_tensor = torch.load()
+
+# Flatten the tensors
+y_flat = y_tensor.flatten().numpy()
+t_flat = t_tensor.flatten().numpy()
+
+plt.plot(t_flat, y_flat, label='Integrator', color='blue')
+# plt.plot(curve_out['t'], curve_out['loss'], label='Untrained curve', color='blue')
+plt.plot(line_out['t'], line_out['loss'], label='Straight line', color='red')
+plt.xlabel('Time')
+plt.ylabel('Loss value')
+plt.title('Loss Value vs Time')
+plt.legend()
+plt.grid()
+
+plt.show()
+### Plot vs lines, END ###
 
 # train_mlp_mnist('Adam', 'CE')
 # train_mlp_mnist('Adam', 'CE', False)
 
-if args.train_curve is None:
-    parallel_integrator = get_parallel_RK_solver(
-        test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
-        rtol=test_config['rtol'], remove_cut=0.1, dtype=torch.float
-    ) # instantiating the integrator
+# if args.train_curve is None:
+#     parallel_integrator = get_parallel_RK_solver(
+#         test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
+#         rtol=test_config['rtol'], remove_cut=0.1, dtype=torch.float
+#     ) # instantiating the integrator
 
-    t_init = torch.tensor([0]).to(test_config['device'])
-    t_final = torch.tensor([1]).to(test_config['device'])
+#     t_init = torch.tensor([0]).to(test_config['device'])
+#     t_final = torch.tensor([1]).to(test_config['device'])
 
-    # This is what we will load weights into and use for evaluating the loss
-    if test_config['dataset'] == 'mnist':
-        plain_model = MNISTMLP()
-    else:
-        plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
-    model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
-    model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
+#     # This is what we will load weights into and use for evaluating the loss
+#     if test_config['dataset'] == 'mnist':
+#         plain_model = MNISTMLP()
+#     else:
+#         plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
 
-    # names of subset of parameters to grab from state_dict
-    param_names = {name for name, _ in plain_model.named_parameters()}
+#     model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
+#     model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
 
-    model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
-    w1 = parameters_to_vector(model_w1_params) # flattened params
+#     # names of subset of parameters to grab from state_dict
+#     param_names = {name for name, _ in plain_model.named_parameters()}
 
-    model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
-    w2 = parameters_to_vector(model_w2_params) # flattened params
+#     model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
+#     w1 = parameters_to_vector(model_w1_params) # flattened params
 
-    path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
-    path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
+#     model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
+#     w2 = parameters_to_vector(model_w2_params) # flattened params
 
-    train_path('Adam', path, path_loss, parallel_integrator)
-else:
-    t_init = torch.tensor([0], dtype=torch.float).to(test_config['device'])
-    t_final = torch.tensor([1], dtype=torch.float).to(test_config['device'])
-
-    plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
-    plain_model_ = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
-    model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device'])
-    model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device'])
-
-    param_names = {name for name, _ in plain_model.named_parameters()}
-
-    # Filter checkpoint's state_dict to only include these parameters
-    model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
-    # model_w1_params = [tup[1] for tup in list(model_w1['model_state_dict'].items())]
-    w1 = parameters_to_vector(model_w1_params)
-
-    # model_w2_params = [tup[1] for tup in list(model_w2['model_state_dict'].items())]
-    model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
-    w2 = parameters_to_vector(model_w2_params)
-
-    path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device'])
-    # path.load_state_dict(torch.load(test_config['curve_path'])['model_state_dict']) # loading path ckpt
-
-    path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])
-
-    # print(path(t_init).view(-1) == w1)
-    # plain_model.load_state_dict(model_w1['model_state_dict'])
-    # vector_to_parameters(path(t_init).view(-1), plain_model.parameters())
-    vector_to_parameters(w1, plain_model.parameters())
-    plain_model_.load_state_dict(model_w1['model_state_dict'])
-    # eval_curve(path, path_loss, t_init, plain_model, False)
-    # eval_curve(path, path_loss, t_init, plain_model_, True)
-
-    # for p1, p2 in zip(plain_model.parameters(), plain_model_.parameters()):
-    #     if p1.data.ne(p2.data).sum() > 0:
-    #         print(False)
-    # print(True)
+#     path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
+#     path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
 
 
-    # ls_list = eval_curve(path, path_loss, t_final, plain_model)
-    pass
+#     train_path('Adam', path, path_loss, parallel_integrator)
+# else:
+#     t_init = torch.tensor([0], dtype=torch.float).to(test_config['device'])
+#     t_final = torch.tensor([1], dtype=torch.float).to(test_config['device'])
+
+#     plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
+#     plain_model_ = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
+#     model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device'])
+#     model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device'])
+
+#     param_names = {name for name, _ in plain_model.named_parameters()}
+
+#     # Filter checkpoint's state_dict to only include these parameters
+#     model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
+#     # model_w1_params = [tup[1] for tup in list(model_w1['model_state_dict'].items())]
+#     w1 = parameters_to_vector(model_w1_params)
+
+#     # model_w2_params = [tup[1] for tup in list(model_w2['model_state_dict'].items())]
+#     model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
+#     w2 = parameters_to_vector(model_w2_params)
+
+#     path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device'])
+#     # path.load_state_dict(torch.load(test_config['curve_path'])['model_state_dict']) # loading path ckpt
+
+#     path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])
+
+#     # print(path(t_init).view(-1) == w1)
+#     # plain_model.load_state_dict(model_w1['model_state_dict'])
+#     # vector_to_parameters(path(t_init).view(-1), plain_model.parameters())
+#     vector_to_parameters(w1, plain_model.parameters())
+#     plain_model_.load_state_dict(model_w1['model_state_dict'])
+#     # eval_curve(path, path_loss, t_init, plain_model, False)
+#     # eval_curve(path, path_loss, t_init, plain_model_, True)
+
+#     # for p1, p2 in zip(plain_model.parameters(), plain_model_.parameters()):
+#     #     if p1.data.ne(p2.data).sum() > 0:
+#     #         print(False)
+#     # print(True)
+
+
+#     # ls_list = eval_curve(path, path_loss, t_final, plain_model)
+#     pass
