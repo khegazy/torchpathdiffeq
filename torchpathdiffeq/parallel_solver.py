@@ -102,7 +102,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 [t_steps[0], t_steps[1:,1:].reshape((-1, *(t_steps.shape[2:])))],
                 dim=0
             )
-            idxs_add = torch.arange(N)
+            idxs_add = torch.arange(N, device=self.device)
         else: 
             idxs_add = torch.where(error_ratios > 1.)[0]
             t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
@@ -310,10 +310,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         ).detach()
         
         # Add old t and y values, skipping regions with new points
-        idx_offset = torch.zeros(len(y), dtype=torch.long)
+        idx_offset = torch.zeros(len(y), dtype=torch.long, device=self.device)
         idx_offset[idxs_add] = 1
         idx_offset = torch.cumsum(idx_offset, dim=0)
-        idx_input = torch.arange(len(y)) + idx_offset
+        idx_input = torch.arange(len(y), device=self.device) + idx_offset
         y_combined[idx_input,:] = y
         t_combined[idx_input,:] = t
 
@@ -321,7 +321,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         idxs_add_offset = idxs_add + torch.arange(
             len(idxs_add), device=self.device
         )
-        select_idxs = torch.arange(len(idxs_add))*2
+        select_idxs = torch.arange(len(idxs_add), device=self.device)*2
         #t_add_combined = torch.nan*torch.ones(
         #    (len(idxs_add), (self.Cm1+1)*2-1, D),
         #    dtype=torch.float64,
@@ -770,7 +770,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     #print("START ADDING INDICES", t.shape, len(idxs_add), "  |  ", self._get_max_ode_evals(total_mem_usage), len(idxs_add)*self.C)
                     #print("MEMORY", self._get_cuda_memory(), len(idxs_add)*self.C*self.ode_unit_mem_size)
                     if self._get_max_ode_evals(total_mem_usage) < len(idxs_add)*self.C:
-                        ti, tl = t[0,0,0], t[-1,0,0]
                         del y
                         eval_counts = torch.ones(len(t), device=self.device)
                         eval_counts[idxs_add] = 2
@@ -787,7 +786,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         )
                         idxs_add = None
                         take_gradient = take_gradient is None or take_gradient
-                        #print("DELETING AND RESTARTING YYYYYYYYYYYYYYYYYYYYY", ti, tl, t[0,0,0], t[-1,0,0])
+
                 """
                 else:
                     idxs_add = torch.where(error_ratios > 1.)[0]
@@ -981,7 +980,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
                 if len(t) > 1:
                     print(t[:,:,0])
                     assert torch.allclose(t[:-1,-1], t[1:,0], atol=self.atol_assert, rtol=self.rtol_assert)
-                t = t[:,torch.tensor([0,-1], dtype=torch.int),:]
+                t = t[:,torch.tensor([0,-1], dtype=torch.int, device=self.device),:]
                 t = torch.flatten(t, start_dim=0, end_dim=1)
         return self._t_step_interpolate(t[:-1], t[1:])
  
@@ -1126,7 +1125,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             #    torch.arange(self.C)[None,:,None], (len(t), 1, t.shape[-1])
             #)
             #return t[:,0,:] + steps*(t[:,-1,:] - t[:,0,:])/self.Cm1
-        steps = torch.arange(self.C)[None,:,None]/self.Cm1
+        steps = torch.arange(self.C, device=self.device)[None,:,None]/self.Cm1
         t_left = t_left.unsqueeze(1)
         t_right = t_right.unsqueeze(1)
         return t_left + steps*(t_right - t_left)
@@ -1143,9 +1142,9 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_add = rearrange(y_add, "(N C) D -> N C D", N=len(idxs_add))
         D = y_add.shape[-1]
         
-        select_prev_idxs = torch.arange(self.C)*2
+        select_prev_idxs = torch.arange(self.C, device=self.device)*2
         select_prev_idxs[select_prev_idxs>=self.C] += 1
-        select_add_idxs = torch.arange(self.Cm1)*2 + 1
+        select_add_idxs = torch.arange(self.Cm1, device=self.device)*2 + 1
         select_add_idxs[select_add_idxs>=self.C] += 1
         t_add_combined = torch.nan*torch.ones(
             (len(idxs_add), (self.C)*2, D),
@@ -1199,17 +1198,17 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         combined_steps = torch.concatenate(
             [t[remove_idxs,:], t[remove_idxs+1,1:]], dim=1
         )
-        keep_idxs = torch.arange(self.C, dtype=torch.long)*2
+        keep_idxs = torch.arange(self.C, dtype=torch.long, device=self.device)*2
         #print(combined_steps[:5,:,0])
         #print(keep_idxs)
         #print(combined_steps[:5,keep_idxs,0])
         
-        remove_mask = torch.ones(len(t), dtype=torch.bool)
+        remove_mask = torch.ones(len(t), dtype=torch.bool, device=self.device)
         remove_mask[remove_idxs] = False
         #print(remove_idxs[:5])
         #print(remove_mask[:5])
         t_pruned = t[remove_mask]
-        update_idxs = remove_idxs-torch.arange(len(remove_idxs))
+        update_idxs = remove_idxs-torch.arange(len(remove_idxs), device=self.device)
         t_pruned[update_idxs] = combined_steps[:,keep_idxs]
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
         assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
@@ -1301,10 +1300,10 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         ).detach()
         
         # Add old t and y values, skipping regions with new points
-        idx_offset = torch.zeros(len(y), dtype=torch.long)
+        idx_offset = torch.zeros(len(y), dtype=torch.long, device=self.device)
         idx_offset[idxs_add] = 1
         idx_offset = torch.cumsum(idx_offset, dim=0)
-        idx_input = torch.arange(len(y)) + idx_offset
+        idx_input = torch.arange(len(y), device=self.device) + idx_offset
         y_combined[idx_input,:] = y
         t_combined[idx_input,:] = t
 
@@ -1317,8 +1316,8 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             dtype=self.dtype,
             device=self.device
         )
-        t_add_combined[:,torch.arange(self.Cm1+1)*2] = t[idxs_add]
-        t_add_combined[:,torch.arange(self.Cm1)*2+1] = t_steps_add
+        t_add_combined[:,torch.arange(self.Cm1+1, device=self.device)*2] = t[idxs_add]
+        t_add_combined[:,torch.arange(self.Cm1, device=self.device)*2+1] = t_steps_add
         t_combined[idxs_add_offset,:,:] = t_add_combined[:,:self.Cm1+1]
         t_combined[idxs_add_offset+1,:,:] = t_add_combined[:,self.Cm1:]
 
@@ -1327,8 +1326,8 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             dtype=torch.self.dtype,
             device=self.device
         )
-        y_add_combined[:,torch.arange(self.Cm1+1)*2] = y[idxs_add]
-        y_add_combined[:,torch.arange(self.Cm1)*2+1] = y_add
+        y_add_combined[:,torch.arange(self.Cm1+1, device=self.device)*2] = y[idxs_add]
+        y_add_combined[:,torch.arange(self.Cm1, device=self.device)*2+1] = y_add
         y_combined[idxs_add_offset,:,:] = y_add_combined[:,:self.Cm1+1]
         y_combined[idxs_add_offset+1,:,:] = y_add_combined[:,self.Cm1:]
 
