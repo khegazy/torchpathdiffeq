@@ -130,7 +130,7 @@ class SolverBase(DistributedEnvironment):
         raise NotImplementedError
     
     def _integral_loss(self, integral, *args, **kwargs):
-        return integral
+        return integral.integral
     
     def integrate(
             self,
