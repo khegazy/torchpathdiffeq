@@ -63,7 +63,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         raise NotImplementedError
     
 
-    def _merge_excess_t(self, t, remove_idxs):
+    def _merge_excess_t(self, t, sum_steps, sum_step_errors, remove_idxs):
         """
         Merges neighboring time steps or removes and one time steps and extends
         its neighbor to cover the same range.
@@ -228,7 +228,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             )
         """
 
-    def _adaptively_add_y(
+    def _adaptively_add_steps(
             self,
             method_output,
             error_ratios,
@@ -240,11 +240,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         ):
         keep_mask = error_ratios < 1.0
         t_step_trackers[t_step_barrier_idxs[keep_mask]] = False
-        method_output.sum_steps = method_output.sum_steps[keep_mask]
-        method_output.sum_step_errors = method_output.sum_step_errors[keep_mask]
-        method_output.h = method_output.h[keep_mask]
-        method_output.integral = torch.sum(method_output.sum_steps, 0)
-        method_output.integral_error = torch.sum(method_output.sum_step_errors, 0)
 
         remove_mask = error_ratios >= 1.0
         N_t_add = torch.sum(remove_mask)
@@ -258,7 +253,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             dtype=bool,
             device=self.device
         )
-
 
         # Transfer over previous time points
         idx_offset = torch.zeros(
@@ -281,10 +275,20 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert torch.sum(torch.isnan(t_step_barriers_new)) == 0
         assert len(idxs_new) + len(idxs_transfer) == len(t_step_barriers_new)
 
-        return method_output, y_step_eval[keep_mask], t_step_eval[keep_mask], t_step_barriers_new, t_step_trackers_new, error_ratios[keep_mask]
+        if method_output is not None:
+            method_output.sum_steps = method_output.sum_steps[keep_mask]
+            method_output.sum_step_errors = method_output.sum_step_errors[keep_mask]
+            method_output.h = method_output.h[keep_mask]
+            method_output.integral = torch.sum(method_output.sum_steps, 0)
+            method_output.integral_error = torch.sum(method_output.sum_step_errors, 0)
+        if y_step_eval is not None:
+            y_step_eval = y_step_eval[keep_mask] 
+        if t_step_eval is not None:
+            t_step_eval = t_step_eval[keep_mask] 
+        return method_output, y_step_eval, t_step_eval, t_step_barriers_new, t_step_trackers_new, error_ratios[keep_mask]
 
 
-    def _adaptively_add_y_orig(
+    def _adaptively_add_steps_orig(
             self,
             ode_fxn,
             y,
@@ -428,7 +432,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 ode_args=ode_args
             )
  
-    def prune_excess_t(self, t, error_ratios_2steps):
+    def prune_excess_t(self, t, sum_steps, sum_step_errors, error_ratios_2steps):
         """
         Remove a single integration time step where
         error_ratios_2steps < remove_cut by merging two neighboring time steps,
@@ -447,7 +451,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         """
             
         if len(error_ratios_2steps) == 0:
-            return t# torch.empty(0, dtype=torch.long)
+            return t, sum_steps, sum_step_errors
         # Since error ratios encompasses 2 RK steps each neighboring element shares
         # a step, we cannot remove that same step twice and therefore remove the 
         # first in pair of steps that it appears in
@@ -457,10 +461,52 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert not torch.any(ratio_idxs_cut[:-1] + 1 == ratio_idxs_cut[1:])
 
         if len(ratio_idxs_cut) == 0:
-            return t
+            return t, sum_steps, sum_step_errors
         
-        t_pruned = self._merge_excess_t(t, ratio_idxs_cut)
-        return t_pruned
+        return self._merge_excess_t(
+            t, sum_steps, sum_step_errors, ratio_idxs_cut
+        )
+
+    def _get_optimal_t_step_barriers(self, record, t_step_barriers):
+        # Prune t of excess sampling
+        _, error_ratios_2steps = self._compute_error_ratios(
+            sum_step_errors=record['sum_step_errors'],
+            sum_steps=record['sum_steps'],
+            integral=record['integral'].detach()
+        )
+        t_pruned, sum_steps_pruned, sum_step_errors_pruned = self.prune_excess_t(
+            record['t'],
+            record['sum_steps'],
+            record['sum_step_errors'],
+            error_ratios_2steps
+        )
+        t_step_barriers_pruned = torch.concatenate(
+            [t_pruned[:,0,:], t_step_barriers[-1].unsqueeze(0)],
+            dim=0
+        )
+
+        # Add new t steps using converged integral value
+        error_ratios, error_ratios_2steps = self._compute_error_ratios(
+            sum_step_errors=sum_step_errors_pruned,
+            sum_steps=sum_steps_pruned,
+            integral=record['integral'].detach()
+        )
+        adaptive_step = self._adaptively_add_steps(
+            method_output=None,
+            error_ratios=error_ratios,
+            y_step_eval=None,
+            t_step_eval=None,
+            t_step_barriers=t_step_barriers_pruned,
+            t_step_barrier_idxs=torch.arange(
+                len(t_step_barriers_pruned)-1, device=self.device
+            ),
+            t_step_trackers=torch.zeros(
+                len(t_step_barriers_pruned), dtype=bool, device=self.device
+            )
+        ) 
+        _, _, _, t_step_barriers_optimal, _, _ = adaptive_step
+
+        return t_step_barriers_optimal
 
 
     def _rec_remove(self, mask):
@@ -752,6 +798,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             take_gradient=None,
             total_mem_usage=0.9,
             loss_fxn=None,
+            max_batch=None,
             verbose=True,
             verbose_speed=False,
         ):
@@ -885,7 +932,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 ode_fxn=ode_fxn, t_steps_add=t_steps, ode_args=ode_args
             )
             """
-            max_steps = int(self._get_max_ode_evals(total_mem_usage)//self.C)
+            if max_batch is not None:
+                max_steps = max_batch//self.C
+            else:
+                max_steps = int(self._get_max_ode_evals(total_mem_usage)//self.C)
+
             if y is not None:
                 assert max_steps >= len(y), f"{max_steps}  {len(y)}"
             
@@ -952,7 +1003,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             #print("BEFORE ADAPTIVE", t_step_eval.shape, t_step_barriers.shape, t_step_trackers.shape, y_step_eval.shape, error_ratios.shape)
             #print(t_step_barriers[:,0])
             method_output, y_step_eval, t_step_eval,\
-            t_step_barriers, t_step_trackers, error_ratios = self._adaptively_add_y(
+            t_step_barriers, t_step_trackers, error_ratios = self._adaptively_add_steps(
                 method_output=method_output,
                 error_ratios=error_ratios,
                 y_step_eval=y_step_eval,
@@ -1016,29 +1067,19 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 #print(y[:,:,0])
                 #print("LOSS!!!!!", loss)
         
-        # Prune t of excess sampling
+        
         record = self._sort_record(record)
-        # TODO: Change to absolute and add new t points as errors have changed with full integral
-        _, error_ratios_2steps = self._compute_error_ratios(
-            sum_step_errors=record['sum_step_errors'],
-            sum_steps=record['sum_steps'],
-            integral=record['integral'].detach()
+        t_step_barriers_optimal = self._get_optimal_t_step_barriers(
+            record, t_step_barriers
         )
-        t_pruned = self.prune_excess_t(record['t'], error_ratios_2steps)
-        #print("REMOVING T", record['t'].shape, error_ratios_2steps.shape, t_pruned.shape)
-
+        self.t_step_barriers_previous = t_step_barriers_optimal
         self.previous_ode_fxn = ode_fxn.__name__
-        t_step_barriers_pruned = torch.concatenate(
-            [t_pruned[:,0,:], t_step_barriers[-1].unsqueeze(0)],
-            dim=0
-        )
-        self.t_step_barriers_previous = t_step_barriers_pruned
 
         return IntegralOutput(
             integral=record['integral'],
             loss=record['loss'],
             gradient_taken=take_gradient,
-            t_pruned=t_step_barriers_pruned,
+            t_optimal=t_step_barriers_optimal,
             t=record['t'],
             h=record['h'],
             y=record['y'],
@@ -1109,7 +1150,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 #print("B4 Adding Y", t_add.shape, len(t_add))
                 #if y is not None:
                 #    print(y.shape, t.shape)
-                y, t = self._adaptively_add_y(
+                y, t = self._adaptively_add_steps(
                     ode_fxn, y, t, idxs_add, ode_args
                 )
                 #print("SECOND MEMORY", self._get_cuda_memory())
@@ -1325,7 +1366,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return y_add, t_eval_steps
         
     
-    def _merge_excess_t(self, t, remove_idxs):
+    def _merge_excess_t(self, t, sum_steps, sum_step_errors, remove_idxs):
         """
         Merge two integration steps together through the time tensor
 
@@ -1339,34 +1380,39 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             remove_idxs: [R]
         """
         if len(remove_idxs) == 0 or len(t) == 1:
-            return t
+            return t, sum_steps, sum_step_errors
+        
+        # Merged steps to replace excess steps
         t_replace = self._t_step_interpolate(
             t[remove_idxs,0], t[remove_idxs+1,-1]
         )
+        sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs+1]
+        sum_step_errors_replace = sum_step_errors[remove_idxs] + sum_step_errors[remove_idxs+1]
 
+        # Remove excess steps
         remove_mask = torch.ones(len(t), device=self.device, dtype=torch.bool)
         remove_mask[remove_idxs] = False
-        #print(remove_idxs[:5])
-        #print(remove_mask[:5])
         t_pruned = t[remove_mask]
+        sum_steps_pruned = sum_steps[remove_mask]
+        sum_step_errors_pruned = sum_step_errors[remove_mask]
+
+        # Merge neighbor time-step with removed step 
         remove_idxs_shifted = remove_idxs - torch.arange(
             len(remove_idxs), device=self.device
-        ) 
+        )
         t_pruned[remove_idxs_shifted] = t_replace
-        #print(t_replace[:5,:,0])
-        #print(t_pruned[:5,:,0])
+        sum_steps_pruned[remove_idxs_shifted] = sum_steps_replace
+        sum_step_errors_pruned[remove_idxs_shifted] = sum_step_errors_replace
+        
+        # Check that t is ordered and first/last match
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
         assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert>= 0)
-        #print("t_replace", t_replace)
-        #t[remove_idxs+1] = t_replace
-        #print("filled t", t[:,:,0])
-        #print("REMOVE MASK", remove_mask)
-        #print("END REMOVE EXC", t[remove_mask,:,0])
-        #print("T PRUNED", t_pruned[:,:,0])
-        return t_pruned
+        
+        return t_pruned, sum_steps_pruned, sum_step_errors_pruned
     
+
 
 class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
@@ -1478,7 +1524,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return y_add_combined, t_add_combined
 
 
-    def _merge_excess_t(self, t, remove_idxs):
+    def _merge_excess_t(self, t, sum_steps, sum_step_errors, remove_idxs):
         """
         Merge two integration steps together through the time tensor
 
@@ -1492,35 +1538,45 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
             remove_idxs: [R]
         """
         if len(remove_idxs) == 0 or len(t) == 1:
-            return t
+            return t, sum_steps, sum_step_errors
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
+
+        # Merged steps to replace excess steps
         combined_steps = torch.concatenate(
             [t[remove_idxs,:], t[remove_idxs+1,1:]], dim=1
         )
+        sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs+1]
+        sum_step_errors_replace = sum_step_errors[remove_idxs] + sum_step_errors[remove_idxs+1]
         keep_idxs = torch.arange(self.C, dtype=torch.long, device=self.device)*2
-        #print(combined_steps[:5,:,0])
-        #print(keep_idxs)
-        #print(combined_steps[:5,keep_idxs,0])
-        
+
+        # Remove excess steps
         remove_mask = torch.ones(len(t), dtype=torch.bool, device=self.device)
         remove_mask[remove_idxs] = False
-        #print(remove_idxs[:5])
-        #print(remove_mask[:5])
         t_pruned = t[remove_mask]
-        update_idxs = remove_idxs-torch.arange(len(remove_idxs), device=self.device)
+        sum_steps_pruned = sum_steps[remove_mask]
+        sum_step_errors_pruned = sum_step_errors[remove_mask]
+
+        # Merge neighbor time-step with removed step  
+        update_idxs = remove_idxs - torch.arange(
+            len(remove_idxs), device=self.device
+        )
         t_pruned[update_idxs] = combined_steps[:,keep_idxs]
+        sum_steps_pruned[update_idxs] = sum_steps_replace
+        sum_step_errors_pruned[update_idxs] = sum_step_errors_replace
+        
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
         assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
         assert np.allclose(t_pruned[:-1,-1,:], t_pruned[1:,0,:], atol=self.atol_assert, rtol=self.rtol_assert)
 
+
         #t[remove_idxs+1] = combined_steps[:,keep_idxs]
         #remove_mask = torch.ones(len(t), dtype=torch.bool)
         #remove_mask[remove_idxs] = False
-        return t_pruned
+        return t_pruned, sum_steps_pruned, sum_step_errors_pruned
         return t[remove_mask]
         
-    def __depricated_adaptively_add_y(
+    def __depricated_adaptively_add_steps(
             self,
             ode_fxn,
             y,
