@@ -820,8 +820,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         
         Shapes:
             y0: [D]
-            t: [N, C, T] or for [N, T] the intermediate time points will be 
-                calculated
+            t: [N, T] the edges of the integration steps
             t_init: [T]
             t_final: [T]
         
@@ -837,6 +836,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         t_final = t_final if t_final is None else t_final.to(self.dtype)
 
         if t is not None:
+            assert len(t.shape) == 2
+            #TODO: Do I need below for the variable case, it should not be in the uniform case. Check rest of if statement for both cases. Might need to remove above assert
+            """
             if len(t.shape) == 2:
                 assert torch.all(t[1:] + self.atol_assert > t[:-1])
                 if self.Cm1 > 1:
@@ -848,14 +850,19 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 assert torch.all(
                     torch.flatten(t, 0, 1)[1:] + self.atol_assert >= torch.flatten(t, 0, 1)[:-1]
                 )
+            """
             if t_init is None:
-                t_init = t[0,0]
+                t_init = t[0]
+                #t_init = t[0,0]
             else:
-                assert torch.allclose(t[0,0], t_init, atol=self.atol_assert, rtol=self.rtol_assert)
+                assert torch.allclose(t[0], t_init, atol=self.atol_assert, rtol=self.rtol_assert)
+                #assert torch.allclose(t[0,0], t_init, atol=self.atol_assert, rtol=self.rtol_assert)
             if t_final is None:
-                t_final = t[-1,-1]
+                t_final = t[-1]
+                #t_final = t[-1,-1]
             else:
-                assert torch.allclose(t[-1,-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert)
+                assert torch.allclose(t[-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert)
+                #assert torch.allclose(t[-1,-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert)
         #assert t_init < t_final, "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
         
         # Get variables or populate with default values, send to correct device
@@ -901,7 +908,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_step_barriers = t_init\
                 + torch.arange(N_init_steps+1).unsqueeze(-1)*(t_final - t_init)/N_init_steps
         else:
-            t_step_barriers = t[:,0]
+            t_step_barriers = t
         t_step_trackers = torch.ones(len(t_step_barriers), device=self.device).to(bool)
         t_step_trackers[-1] = False # t_final cannot be a step starting point
         """
