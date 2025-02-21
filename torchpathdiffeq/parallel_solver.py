@@ -1027,6 +1027,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             #print("AFTER ADAPTIVE", t_step_eval.shape, t_step_barriers.shape, t_step_trackers.shape, y_step_eval.shape, error_ratios.shape)
             #print(t_step_barriers[:,0])
             if t_step_eval.shape[0] > 0:
+                take_gradient = torch.any(t_step_trackers) or take_gradient
+                
                 intermediate_results = IntegralOutput(
                     integral=method_output.integral,
                     loss=None,
