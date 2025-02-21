@@ -683,15 +683,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         idxs_keep, idxs_input = self._get_sorted_indices(
             record['t'][:,0,0].detach(), results.t[:,0,0].detach()
         )       
-        result_dict = dataclass_asdict(results)
+        #result_dict = dataclass_asdict(results)
         for key in record.keys():
             is_number = len(record[key].shape) == 1 and record[key].shape[0] == 1 
             is_number = is_number or len(record[key].shape) == 0
             if 'integral' in key or 'loss' in key:
-                record[key] = record[key] + result_dict[key].detach()
+                record[key] = record[key] + getattr(results, key).detach()
             else:
                 record[key] = self._insert_sorted_results(
-                    record[key], idxs_keep, result_dict[key], idxs_input
+                    record[key], idxs_keep, getattr(results, key), idxs_input
                 )
         assert torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] > 0)
         """
@@ -729,7 +729,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
     def _sort_record(self, record):
         sorted_idxs = torch.argsort(record['t'][:,0,0], dim=0)
         for key in record.keys():
-            if len(record[key].shape) > 0 and len(record[key]) > 1:
+            if 'loss' not in key and 'integral' not in key:
                 record[key] = record[key][sorted_idxs]
         all_ascending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] > 0)
         all_descending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] < 0)
@@ -799,7 +799,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             total_mem_usage=0.9,
             loss_fxn=None,
             max_batch=None,
-            verbose=True,
+            verbose=False,
             verbose_speed=False,
         ):
         """
@@ -958,12 +958,12 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
             error_ratios=None
 
-            N, C, D = t_step_eval.shape
+            N, C, T = t_step_eval.shape
             y_step_eval = ode_fxn(
                 torch.flatten(t_step_eval, start_dim=0, end_dim=-2),
                 *ode_args
             )
-            y_step_eval = torch.reshape(y_step_eval, (N, C, D))
+            y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
             
             # Evaluate integral
             t0 = time.time()
@@ -1039,8 +1039,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     integral_error=method_output.integral_error,
                     sum_step_errors=torch.abs(method_output.sum_step_errors),
                     error_ratios=error_ratios,
-                    #t_init=t_init,
-                    #t_final=t_final,
+                    t_init=t_init,
+                    t_final=t_final,
                     y0=0
                 )
 
