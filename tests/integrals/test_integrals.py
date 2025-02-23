@@ -39,8 +39,6 @@ def test_integrals():
                 error_string = f"{sampling_name} {method} failed to properly integrate {name}, calculated {integral_output.integral.item()} but expected {correct.item()}"
                 t_flat = torch.flatten(integral_output.t[:,:,0])
                 t_flat_unique = torch.flatten(integral_output.t[:,1:,0])
-                print("VALS", integral_output.integral, correct, integral_output.t.shape, torch.sum(t_flat[1:] - t_flat[:-1] + 1e-15 < 0), torch.sum(t_flat_unique[1:] - t_flat_unique[:-1] + 1e-15 < 0))
-                print("CUTOFF", cutoff, torch.abs((integral_output.integral - correct)/correct))
                 """
                 serial_integral = ode_path_integral(
                     ode_fxn=ode,
@@ -60,7 +58,6 @@ def test_integrals():
                 assert torch.all(t_flat[1:] - t_flat[0:-1] >= 0)
                 assert torch.all(t_optimal_flat[1:] - t_optimal_flat[0:-1] >= 0)
                 assert torch.allclose(integral_output.t[1:,0,:], integral_output.t[:-1,-1,:])
-                #assert torch.allclose(integral_output.t_optimal[1:,0,:], integral_output.t_optimal[:-1,-1,:])
                 
                 """
                 if max_batch is None:
@@ -76,5 +73,3 @@ def test_integrals():
                     assert len(no_batch_integral.t_optimal) <= len(integral_output.t_optimal) 
                 """
         break
-
-test_integrals()

@@ -35,7 +35,7 @@ def test_ode_path_integral_fxn():
 
         assert_allclose(OPI_integral.integral, RK_integral.integral)
         assert_allclose(OPI_integral.integral_error, RK_integral.integral_error)
-        assert_allclose(OPI_integral.t_pruned, RK_integral.t_pruned)
+        assert_allclose(OPI_integral.t_optimal, RK_integral.t_optimal)
         assert_allclose(OPI_integral.y, RK_integral.y)
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
@@ -69,7 +69,7 @@ def test_ode_path_integral_fxn():
 
         assert_allclose(OPI_integral.integral, RK_integral.integral)
         assert_allclose(OPI_integral.integral_error, RK_integral.integral_error)
-        assert_allclose(OPI_integral.t_pruned, RK_integral.t_pruned)
+        assert_allclose(OPI_integral.t_optimal, RK_integral.t_optimal)
         assert_allclose(OPI_integral.y, RK_integral.y)
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
