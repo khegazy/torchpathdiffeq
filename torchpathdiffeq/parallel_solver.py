@@ -637,7 +637,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
     def _get_sorted_indices(self, record, result):
         idxs_sorted = torch.searchsorted(record, result)
         idxs_input = idxs_sorted + torch.arange(len(result), device=self.device)
-        idxs_keep = torch.arange(len(result) + len(record))
+        idxs_keep = torch.arange(len(result) + len(record), device=self.device)
         keep_mask = torch.ones(len(idxs_keep), device=self.device).to(bool)
         keep_mask[idxs_input] = False
         idxs_keep = idxs_keep[keep_mask]
@@ -743,9 +743,19 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         return free, total
 
     def _get_cuda_memory(self):
-        free = torch.cuda.mem_get_info()[0]/1024**3
-        total = torch.cuda.mem_get_info()[1]/1024**3
-        return free, total
+        mem_info = torch.cuda.mem_get_info(self.device)
+        # Total memory on the GPU
+        total_gpu = mem_info[1]/1024**3
+        # Memory that is free outside of the PyTorch cache
+        free_gpu = mem_info[0]/1024**3
+        # Memory reserved for the PyTorch cache
+        torch_cache = torch.cuda.memory_reserved(self.device)/1024**3
+        # Cache memory being used by tensors
+        torch_cache_used = torch.cuda.memory_allocated(self.device)/1024**3
+        # Total free amount of memory that can be used
+        total_free = free_gpu + (torch_cache - torch_cache_used)
+        
+        return total_free, total_gpu
     
     def _get_memory(self):
         if self.device_type == 'cuda':
@@ -906,7 +916,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             
         if t is None:
             t_step_barriers = t_init\
-                + torch.arange(N_init_steps+1).unsqueeze(-1)*(t_final - t_init)/N_init_steps
+                + (t_final - t_init)/N_init_steps*torch.arange(
+                    N_init_steps+1, device=self.device
+                ).unsqueeze(-1)
         else:
             t_step_barriers = t
         t_step_trackers = torch.ones(len(t_step_barriers), device=self.device).to(bool)
@@ -1027,6 +1039,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             #print("AFTER ADAPTIVE", t_step_eval.shape, t_step_barriers.shape, t_step_trackers.shape, y_step_eval.shape, error_ratios.shape)
             #print(t_step_barriers[:,0])
             if t_step_eval.shape[0] > 0:
+                take_gradient = torch.any(t_step_trackers) or take_gradient 
                 intermediate_results = IntegralOutput(
                     integral=method_output.integral,
                     loss=None,
@@ -1073,6 +1086,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 #print(t[:,:,0])
                 #print(y[:,:,0])
                 #print("LOSS!!!!!", loss)
+            del y_step_eval
         
         
         record = self._sort_record(record)
