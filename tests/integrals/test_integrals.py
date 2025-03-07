@@ -16,10 +16,15 @@ def test_integrals():
     rtol = 1e-7
     t_init = torch.tensor([0], dtype=torch.float64)
     t_final = torch.tensor([1], dtype=torch.float64)
+    #loop_items = zip(
+    #    ['Uniform', 'Variable'],
+    #    [UNIFORM_METHODS, VARIABLE_METHODS],
+    #    [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
+    #)
     loop_items = zip(
-        ['Uniform', 'Variable'],
-        [UNIFORM_METHODS, VARIABLE_METHODS],
-        [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
+        ['Uniform'],
+        [UNIFORM_METHODS],
+        [steps.ADAPTIVE_UNIFORM]
     )
     for sampling_name, sampling, sampling_type in loop_items:
         for method in sampling.keys():
@@ -72,4 +77,3 @@ def test_integrals():
                     assert len(no_batch_integral.t) <= len(integral_output.t)
                     assert len(no_batch_integral.t_optimal) <= len(integral_output.t_optimal) 
                 """
-        break

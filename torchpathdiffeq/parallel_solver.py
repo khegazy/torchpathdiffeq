@@ -116,8 +116,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             idxs_add = torch.where(error_ratios > 1.)[0]
             t_add = (t[idxs_add,1:] +  t[idxs_add,:-1])/2     #[n_add, C-1, 1]
         
-        print("new times", t_add.shape)
-        print("\t", t_add)
+        #print("new times", t_add.shape)
+        #print("\t", t_add)
         return idxs_add, t_add
         
 
@@ -647,7 +647,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             error_estimate_2steps/error_tol_2steps
         ).abs() 
         
-        print("IN CUMSUM ERORR")
         return error_ratio, error_ratio_2steps
  
     def _get_sorted_indices(self, record, result):
@@ -1382,7 +1381,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
 
         Args:
             t_left (Tensor): Beginning times of all the integration steps
-            t_left (Tensor): End times of all the integration steps
+            t_right (Tensor): End times of all the integration steps
         
         Shapes:
             t_left: [N, T]

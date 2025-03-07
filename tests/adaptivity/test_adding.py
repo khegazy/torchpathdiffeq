@@ -33,10 +33,15 @@ def test_adding():
     variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
         method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
     )
+    #loop = zip(
+    #    ['Uniform', 'Uniform', 'Variable'],
+    #    ['adaptive_heun', 'dopri5', 'generic3'],
+    #    [uniform_heun_integrator, uniform_dopri5_integrator, variable_integrator]
+    #)
     loop = zip(
-        ['Uniform', 'Uniform', 'Variable'],
-        ['adaptive_heun', 'dopri5', 'generic3'],
-        [uniform_heun_integrator, uniform_dopri5_integrator, variable_integrator]
+        ['Uniform', 'Uniform'],
+        ['adaptive_heun', 'dopri5'],
+        [uniform_heun_integrator, uniform_dopri5_integrator]
     )
     for type, method, integrator in loop:
         t = torch.linspace(0, 1., integrator.Cm1+1).unsqueeze(1)

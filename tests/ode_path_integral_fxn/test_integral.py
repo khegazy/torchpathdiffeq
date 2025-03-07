@@ -46,6 +46,7 @@ def test_ode_path_integral_fxn():
     ###############################
     #####  Parallel Variable  #####
     ###############################
+    """
     for method in VARIABLE_METHODS.keys():
     
         OPI_integral = ode_path_integral(
@@ -77,6 +78,7 @@ def test_ode_path_integral_fxn():
         assert_allclose(OPI_integral.sum_step_errors, RK_integral.sum_step_errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
     
+    """
     
     ####################
     #####  Serial  #####

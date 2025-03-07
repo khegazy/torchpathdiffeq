@@ -14,7 +14,6 @@ def wolf_schlegel(t, y=None):
     while len(t.shape) < 2:
         t = t.unsqueeze(0)
 
-    print(WS_min_init.shape, WS_min_final.shape, t.shape)
     interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
     x = interpolate[:,0].unsqueeze(-1)
     y = interpolate[:,1].unsqueeze(-1)
@@ -43,12 +42,11 @@ class wf():
 def test_chemistry():
     atol = 1e-5
     rtol = 1e-5
-    loop_items = zip(
-        ['Uniform', 'Variable'],
-        [UNIFORM_METHODS, VARIABLE_METHODS],
-        [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
-    )
-    print("STARTING")
+    #loop_items = zip(
+    #    ['Uniform', 'Variable'],
+    #    [UNIFORM_METHODS, VARIABLE_METHODS],
+    #    [steps.ADAPTIVE_UNIFORM, steps.ADAPTIVE_VARIABLE]
+    #)
     loop_items = zip(
         ['Uniform'],
         [UNIFORM_METHODS],
@@ -74,8 +72,6 @@ def test_chemistry():
 
             parallel_integral = parallel_integrator.integrate()
             serial_integral = serial_integrator.integrate()
-            print("SERIAL INTEGRAL STEPS", wf_class.calls)
-            print("PARALLEL INTEGRAL STEPS", parallel_integral.t.shape, parallel_integral.t_pruned.shape)
             print("USING METHOD", method, serial_method)
 
             error = torch.abs(parallel_integral.integral - serial_integral.integral)
