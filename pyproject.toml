@@ -38,9 +38,9 @@ docs = [
 ]
 
 [project.urls]
-repository = "https://github.com/Quantum-Accelerators/torchpathdiffeq"
-documentation = "https://quantum-accelerators.github.io/torchpathdiffeq/"
-changelog = "https://github.com/Quantum-Accelerators/torchpathdiffeq/blob/main/CHANGELOG.md"
+repository = "https://github.com/khegazy/torchpathdiffeq"
+documentation = "https://khegazy.github.io/torchpathdiffeq/"
+changelog = "https://github.com/khegazy/torchpathdiffeq/blob/main/CHANGELOG.md"
 
 [tool.setuptools.package-data]
 torchpathdiffeq = ["py.typed"]
