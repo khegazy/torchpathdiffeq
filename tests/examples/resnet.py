@@ -9,7 +9,7 @@ import torchvision
 from torchvision.datasets import CIFAR10
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-import tensorboard
+from torch.utils.tensorboard import SummaryWriter
 
 from model import resnet_164
 import argparse
@@ -108,7 +108,7 @@ def validate(model, ceriterion):
         loss = ceriterion(score, vl)
         prec1 = accuracy(score.data, label)
 
-        losses.update(loss.data[0], x.size(0))
+        losses.update(loss.data, x.size(0))
         top1.update(prec1[0][0], x.size(0))
 
         batch_time.update(time.time() - end)
@@ -125,7 +125,7 @@ def validate(model, ceriterion):
 # train
 def train(model, model_id: int):
     remove_log()
-    writer = tensorboard.SummaryWriter('./log')
+    writer = SummaryWriter('./log')
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9,
                             weight_decay=0.0001)
     ceriterion = nn.CrossEntropyLoss()
@@ -159,10 +159,11 @@ def train(model, model_id: int):
             batch_time.update(time.time()-end)
             prec1 = accuracy(score.data, label)
 
-            losses.update(loss.data[0], x.size(0))
+            print(loss.data, x.size(0))
+            losses.update(loss.data, x.size(0))
             top1.update(prec1[0][0], x.size(0))
 
-            writer.add_scalar('train_loss', loss.data[0], step)
+            writer.add_scalar('train_loss', loss.data, step)
             writer.add_scalar('train_acc', prec1[0][0], step)
 
             if (ind+1) % PRINT_FREQUENCY == 0:

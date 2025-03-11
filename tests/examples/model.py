@@ -21,15 +21,15 @@ class Bottleneck(nn.Module):
     def _make_layer(self):
         # conv 1x1
         self.bn1 = nn.BatchNorm2d(self.inplanes)
-        self.conv1 = nn.Conv2d(self.inplanes, self.bottleneck_planes,
+        self.conv1 = nn.Conv2d(self.inplanes, int(self.bottleneck_planes),
                                kernel_size=1, stride=self.stride, bias=False)
         # conv 3x3
-        self.bn2 = nn.BatchNorm2d(self.bottleneck_planes)
-        self.conv2 = nn.Conv2d(self.bottleneck_planes, self.bottleneck_planes,
+        self.bn2 = nn.BatchNorm2d(int(self.bottleneck_planes))
+        self.conv2 = nn.Conv2d(int(self.bottleneck_planes), int(self.bottleneck_planes),
                                kernel_size=3, stride=1, padding=1, bias=False)
         # conv 1x1
-        self.bn3 = nn.BatchNorm2d(self.bottleneck_planes)
-        self.conv3 = nn.Conv2d(self.bottleneck_planes, self.outplanes, kernel_size=1,
+        self.bn3 = nn.BatchNorm2d(int(self.bottleneck_planes))
+        self.conv3 = nn.Conv2d(int(self.bottleneck_planes), self.outplanes, kernel_size=1,
                                stride=1)
         if self.inplanes != self.outplanes:
             self.shortcut = nn.Conv2d(self.inplanes, self.outplanes, kernel_size=1,
@@ -97,7 +97,7 @@ class ResNet(nn.Module):
     def _make_layer(self, block, inplanes, outplanes, nstage, stride=1):
         layers = []
         layers.append(block(inplanes, outplanes, stride))
-        for i in range(1, nstage):
+        for i in range(1, int(nstage)):
             layers.append(block(outplanes, outplanes, stride=1))
         return nn.Sequential(*layers)
 
