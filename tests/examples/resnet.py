@@ -1,273 +1,200 @@
-from __future__ import absolute_import
-
-'''Resnet for cifar dataset.
-Ported form
-https://github.com/facebook/fb.resnet.torch
-and
-https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
-(c) YANG, Wei
-'''
+## training script for CIFAR10
+import os, shutil, time
+from itertools import count
+import torch
 import torch.nn as nn
-import math
-from copy import deepcopy
+import torch.optim as optim
+from torch.autograd import Variable
+import torchvision
+from torchvision.datasets import CIFAR10
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
+import tensorboard
 
-__all__ = ['resnet']
+from model import resnet_164
+import argparse
 
+CIFAR10_DIR = './data/'
 
-def conv3x3(in_planes, out_planes, stride=1):
-    "3x3 convolution with padding"
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
+WORKERS = 4
+BATCH_SIZE = 128
+USE_CUDA = torch.cuda.is_available()
+MAX_EPOCH = 150
+PRINT_FREQUENCY = 100
 
+if USE_CUDA:
+    import torch.backends.cudnn as cudnn
+    cudnn.benchmark = True
+# load data
+if not os.path.exists(CIFAR10_DIR):
+    raise RuntimeError('Cannot find CIFAR10 directory')
 
-class BasicBlock(nn.Module):
-    expansion = 1
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+train_set = CIFAR10(root=CIFAR10_DIR, train=True, transform=transforms.Compose([
+                        transforms.RandomHorizontalFlip(),
+                        transforms.RandomCrop((32, 32), 4),
+                        transforms.ToTensor(), normalize]))
 
-    def __init__(
-            self,
-            inplanes,
-            planes,
-            residual_not,
-            batch_norm_not,
-            stride=1,
-            downsample=None):
-        super(BasicBlock, self).__init__()
-        self.residual_not = residual_not
-        self.batch_norm_not = batch_norm_not
-        self.conv1 = conv3x3(inplanes, planes, stride)
-        if self.batch_norm_not:
-            self.bn1 = nn.BatchNorm2d(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)
-        if self.batch_norm_not:
-            self.bn2 = nn.BatchNorm2d(planes)
-        self.downsample = downsample
-        self.stride = stride
+train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,
+                              num_workers=WORKERS, pin_memory=True)
 
-    def forward(self, x):
-        residual = x
+val_loader = DataLoader(CIFAR10(root=CIFAR10_DIR, train=False, transform=
+                                    transforms.Compose([
+                                        transforms.ToTensor(), normalize])),
+                                batch_size=BATCH_SIZE, shuffle=False,
+                                num_workers=WORKERS, pin_memory=True)
+# get resnet-164
+def get_model(output_classes: int, seed: int):
+    model = resnet_164(output_classes, seed)
+    if USE_CUDA:
+        model = model.cuda()
+    return model
 
-        out = self.conv1(x)
-        if self.batch_norm_not:
-            out = self.bn1(out)
-        out = self.relu(out)
+# remove existing log directory
+def remove_log():
+    if os.path.exists('./log'):
+        shutil.rmtree('./log')
+        os.mkdir('./log')
 
-        out = self.conv2(out)
-        if self.batch_norm_not:
-            out = self.bn2(out)
+# Metric
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
 
-        if self.downsample is not None:
-            residual = self.downsample(x)
-        if self.residual_not:
-            out += residual
-        out = self.relu(out)
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
 
-        return out
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
+# top-k accuracy
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
 
-class Bottleneck(nn.Module):
-    expansion = 4
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
 
-    def __init__(
-            self,
-            inplanes,
-            planes,
-            residual_not,
-            batch_norm_not,
-            stride=1,
-            downsample=None):
-        super(Bottleneck, self).__init__()
-        self.residual_not = residual_not
-        self.batch_norm_not = batch_norm_not
-        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
-        if self.batch_norm_not:
-            self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
-                               padding=1, bias=False)
-        if self.batch_norm_not:
-            self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
-        if self.batch_norm_not:
-            self.bn3 = nn.BatchNorm2d(planes * 4)
-        self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
-        self.stride = stride
+    res = []
+    for k in topk:
+        correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
 
-    def forward(self, x):
-        residual = x
+# validation
+def validate(model, ceriterion):
+    model.eval()
 
-        out = self.conv1(x)
-        if self.batch_norm_not:
-            out = self.bn1(out)
-        out = self.relu(out)
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+    top1 = AverageMeter()
 
-        out = self.conv2(out)
-        if self.batch_norm_not:
-            out = self.bn2(out)
-        out = self.relu(out)
+    end = time.time()
+    for ind, (x, label) in enumerate(val_loader):
+        if USE_CUDA:
+            x, label = x.cuda(), label.cuda()
+        vx, vl = Variable(x, volatile=True), Variable(label, volatile=True)
 
-        out = self.conv3(out)
-        if self.batch_norm_not:
-            out = self.bn3(out)
+        score = model(vx)
+        loss = ceriterion(score, vl)
+        prec1 = accuracy(score.data, label)
 
-        if self.downsample is not None:
-            residual = self.downsample(x)
-        if self.residual_not:
-            out += residual
+        losses.update(loss.data[0], x.size(0))
+        top1.update(prec1[0][0], x.size(0))
 
-        out = self.relu(out)
+        batch_time.update(time.time() - end)
+        end = time.time()
 
-        return out
+    print('Test: [{0}/{0}]\t'
+          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'.format(
+          len(val_loader), batch_time=batch_time, loss=losses, top1=top1))
 
+    return top1.avg, losses.avg
 
-ALPHA_ = 1
+# train
+def train(model, model_id: int):
+    remove_log()
+    writer = tensorboard.SummaryWriter('./log')
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9,
+                            weight_decay=0.0001)
+    ceriterion = nn.CrossEntropyLoss()
+    step = 1
+    for epoch in range(1, MAX_EPOCH + 1):
+        if epoch == 80 or epoch == 120:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] *= 0.1
 
+        data_time = AverageMeter()
+        batch_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
 
-class ResNet(nn.Module):
+        model.train()
+        end = time.time()
 
-    def __init__(
-            self,
-            depth,
-            residual_not=True,
-            batch_norm_not=True,
-            base_channel=16,
-            num_classes=10):
-        super(ResNet, self).__init__()
-        # Model type specifies number of layers for CIFAR-10 model
-        assert (depth - 2) % 6 == 0, 'depth should be 6n+2'
-        n = (depth - 2) // 6
+        for ind, (x, label) in enumerate(train_loader):
+            data_time.update(time.time()-end)
+            if USE_CUDA:
+                x, label = x.cuda(), label.cuda()
+            vx, vl = Variable(x), Variable(label)
 
-        # block = Bottleneck if depth >=44 else BasicBlock
-        block = BasicBlock
+            score = model(vx)
+            loss = ceriterion(score, vl)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            step += 1
 
-        self.base_channel = int(base_channel)
-        self.residual_not = residual_not
-        self.batch_norm_not = batch_norm_not
-        self.inplanes = self.base_channel * ALPHA_
-        self.conv1 = nn.Conv2d(
-            3,
-            self.base_channel *
-            ALPHA_,
-            kernel_size=3,
-            padding=1,
-            bias=False)
-        if self.batch_norm_not:
-            self.bn1 = nn.BatchNorm2d(self.base_channel * ALPHA_)
-        self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(
-            block,
-            self.base_channel *
-            ALPHA_,
-            n,
-            self.residual_not,
-            self.batch_norm_not)
-        self.layer2 = self._make_layer(
-            block,
-            self.base_channel *
-            2 *
-            ALPHA_,
-            n,
-            self.residual_not,
-            self.batch_norm_not,
-            stride=2)
-        self.layer3 = self._make_layer(
-            block,
-            self.base_channel *
-            4 *
-            ALPHA_,
-            n,
-            self.residual_not,
-            self.batch_norm_not,
-            stride=2)
-        self.avgpool = nn.AvgPool2d(8)
-        self.fc = nn.Linear(
-            self.base_channel *
-            4 *
-            ALPHA_ *
-            block.expansion,
-            num_classes)
+            batch_time.update(time.time()-end)
+            prec1 = accuracy(score.data, label)
 
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+            losses.update(loss.data[0], x.size(0))
+            top1.update(prec1[0][0], x.size(0))
 
-    def _make_layer(
-            self,
-            block,
-            planes,
-            blocks,
-            residual_not,
-            batch_norm_not,
-            stride=1):
-        downsample = None
-        if (stride != 1 or self.inplanes != planes *
-                block.expansion) and (residual_not):
-            if batch_norm_not:
-                downsample = nn.Sequential(
-                    nn.Conv2d(self.inplanes, planes * block.expansion,
-                              kernel_size=1, stride=stride, bias=False),
-                    nn.BatchNorm2d(planes * block.expansion),
-                )
-            else:
-                downsample = nn.Sequential(
-                    nn.Conv2d(self.inplanes, planes * block.expansion,
-                              kernel_size=1, stride=stride, bias=False),
-                )
+            writer.add_scalar('train_loss', loss.data[0], step)
+            writer.add_scalar('train_acc', prec1[0][0], step)
 
-        layers = nn.ModuleList()
-        layers.append(
-            block(
-                self.inplanes,
-                planes,
-                residual_not,
-                batch_norm_not,
-                stride,
-                downsample))
-        self.inplanes = planes * block.expansion
-        for i in range(1, blocks):
-            layers.append(
-                block(
-                    self.inplanes,
-                    planes,
-                    residual_not,
-                    batch_norm_not))
+            if (ind+1) % PRINT_FREQUENCY == 0:
+                print('Epoch: [{0}][{1}/{2}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'.format(
+                      epoch, ind+1, len(train_loader), batch_time=batch_time,
+                      data_time=data_time, loss=losses, top1=top1))
+            end = time.time()
+        top1, test_loss = validate(model, ceriterion)
+        writer.add_scalar('test_loss', test_loss, step)
+        writer.add_scalar('test_acc', top1, step)
 
-        # return nn.Sequential(*layers)
-        return layers
-
-    def forward(self, x):
-        output_list = []
-        x = self.conv1(x)
-        if self.batch_norm_not:
-            x = self.bn1(x)
-        x = self.relu(x)    # 32x32
-        output_list.append(x.view(x.size(0), -1))
-
-        for layer in self.layer1:
-            x = layer(x)  # 32x32
-            output_list.append(x.view(x.size(0), -1))
-        for layer in self.layer2:
-            x = layer(x)  # 16x16
-            output_list.append(x.view(x.size(0), -1))
-        for layer in self.layer3:
-            x = layer(x)  # 8x8
-            output_list.append(x.view(x.size(0), -1))
-
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        output_list.append(x.view(x.size(0), -1))
-
-        # return output_list, x
-        return x
+        if epoch % 30 == 0:
+            torch.save({'state_dcit': model.state_dict(),
+                        'accuracy': top1},
+                        f'epoch-{epoch}-model_{model_id}.pt')
 
 
-def resnet(**kwargs):
-    """
-    Constructs a ResNet model.
-    """
-    return ResNet(**kwargs)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+                        prog='train_resnet_cifar10_endpoints',
+                        description='Trains a ResNet164-Bottleneck on CIFAR10',
+                        epilog='Sucks to suck')
+
+    parser.add_argument('-id', '--model_id')
+    parser.add_argument('-s', '--seed')
+
+    args = parser.parse_args()
+
+    model = get_model(10, int(args.seed))
+
+    train(model, int(args.model_id))

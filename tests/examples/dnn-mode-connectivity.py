@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
-from resnet import *
+from resnet_old import *
 from torchpathdiffeq import\
     steps,\
     get_parallel_RK_solver,\
@@ -573,19 +573,20 @@ w2 = parameters_to_vector(model_w2_params) # flattened params
 # curve = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
 # curve_out = eval_curve(curve, plain_model, num_points=135)
 
-line_out = eval_line(w1, w2, plain_model, num_points=135)
+# line_out = eval_line(w1, w2, plain_model, num_points=135)
 
-y_tensor = torch.load('mode_test_y_t_detached_correct.pt')
-t_tensor = torch.load('mode_test_t_pruned_t_detached_correct.pt')
-integral_tensor = torch.load()
+# y_tensor = torch.load('mode_test_y_t_detached_correct.pt')
+# t_tensor = torch.load('mode_test_t_pruned_t_detached_correct.pt')
+integral_tensor = torch.load('mode_test_integral_list.pt')
 
 # Flatten the tensors
-y_flat = y_tensor.flatten().numpy()
-t_flat = t_tensor.flatten().numpy()
+# y_flat = y_tensor.flatten().numpy()
+# t_flat = t_tensor.flatten().numpy()
 
-plt.plot(t_flat, y_flat, label='Integrator', color='blue')
+# plt.plot(t_flat, y_flat, label='Integrator', color='blue')
 # plt.plot(curve_out['t'], curve_out['loss'], label='Untrained curve', color='blue')
-plt.plot(line_out['t'], line_out['loss'], label='Straight line', color='red')
+# plt.plot(line_out['t'], line_out['loss'], label='Straight line', color='red')
+plt.plot(list(range(100)), integral_tensor, label='Straight line', color='red')
 plt.xlabel('Time')
 plt.ylabel('Loss value')
 plt.title('Loss Value vs Time')
