@@ -3,6 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.multiprocessing as mp
 import torch.optim as optim
 from torch.nn.utils import vector_to_parameters, parameters_to_vector
 import matplotlib.pyplot as plt
@@ -599,38 +600,38 @@ plt.show()
 # train_mlp_mnist('Adam', 'CE')
 # train_mlp_mnist('Adam', 'CE', False)
 
-# if args.train_curve is None:
-#     parallel_integrator = get_parallel_RK_solver(
-#         test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
-#         rtol=test_config['rtol'], remove_cut=0.1, dtype=torch.float
-#     ) # instantiating the integrator
+if args.train_curve is None:
+    parallel_integrator = get_parallel_RK_solver(
+        test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
+        rtol=test_config['rtol'], remove_cut=0.1, dtype=torch.float
+    ) # instantiating the integrator
 
-#     t_init = torch.tensor([0]).to(test_config['device'])
-#     t_final = torch.tensor([1]).to(test_config['device'])
+    t_init = torch.tensor([0]).to(test_config['device'])
+    t_final = torch.tensor([1]).to(test_config['device'])
 
-#     # This is what we will load weights into and use for evaluating the loss
-#     if test_config['dataset'] == 'mnist':
-#         plain_model = MNISTMLP()
-#     else:
-#         plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
+    # This is what we will load weights into and use for evaluating the loss
+    if test_config['dataset'] == 'mnist':
+        plain_model = MNISTMLP()
+    else:
+        plain_model = resnet(num_classes=10, depth=test_config['resnet_depth']).to(test_config['device'])
 
-#     model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
-#     model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
+    model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
+    model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
 
-#     # names of subset of parameters to grab from state_dict
-#     param_names = {name for name, _ in plain_model.named_parameters()}
+    # names of subset of parameters to grab from state_dict
+    param_names = {name for name, _ in plain_model.named_parameters()}
 
-#     model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
-#     w1 = parameters_to_vector(model_w1_params) # flattened params
+    model_w1_params = [param for name, param in model_w1['model_state_dict'].items() if name in param_names]
+    w1 = parameters_to_vector(model_w1_params) # flattened params
 
-#     model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
-#     w2 = parameters_to_vector(model_w2_params) # flattened params
+    model_w2_params = [param for name, param in model_w2['model_state_dict'].items() if name in param_names]
+    w2 = parameters_to_vector(model_w2_params) # flattened params
 
-#     path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
-#     path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
+    path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
+    path_loss = CurveNetLoss(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
 
 
-#     train_path('Adam', path, path_loss, parallel_integrator)
+    train_path('Adam', path, path_loss, parallel_integrator)
 # else:
 #     t_init = torch.tensor([0], dtype=torch.float).to(test_config['device'])
 #     t_final = torch.tensor([1], dtype=torch.float).to(test_config['device'])
