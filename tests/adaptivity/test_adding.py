@@ -30,9 +30,9 @@ def test_adding():
     uniform_dopri5_integrator = RKParallelUniformAdaptiveStepsizeSolver(
         method='dopri5', ode_fxn=integrand, atol=atol, rtol=rtol
     )
-    variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
-        method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
-    )
+    #variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
+    #    method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
+    #)
     #loop = zip(
     #    ['Uniform', 'Uniform', 'Variable'],
     #    ['adaptive_heun', 'dopri5', 'generic3'],

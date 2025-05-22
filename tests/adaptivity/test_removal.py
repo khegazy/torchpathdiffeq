@@ -13,9 +13,9 @@ def test_removal():
     uniform_integrator = RKParallelUniformAdaptiveStepsizeSolver(
         method='dopri5', ode_fxn=integrand, atol=atol, rtol=rtol
     )
-    variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
-        method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
-    )
+    #variable_integrator = RKParallelVariableAdaptiveStepsizeSolver(
+    #    method='generic3', ode_fxn=integrand, atol=atol, rtol=rtol
+    #)
     #for type, integrator in zip(['Uniform', 'Variable'], [uniform_integrator, variable_integrator]):
     for type, integrator in zip(['Uniform'], [uniform_integrator]):
         t = dense_t
