@@ -113,27 +113,53 @@ UNIFORM_METHODS = {
 #####  Variable Sampling Adaptive Methods #####
 ###############################################
 
-class _VARIABLE_SECOND_ORDER():
+class _VariableSubclass():
+    def __init__(self, device):
+        self.device = device
+    
+    def to_device(self, device):
+        raise NotImplementedError
+    
+    def to_dtype(self, dtype):
+        raise NotImplementedError
+
+class _VARIABLE_SECOND_ORDER(_VariableSubclass):
     order = 2
     n_tableau_c = 2
     
     def __init__(self, device=None) -> None:
+        super().__init__(device)
         self.device = device
-        self.tableau = _tableau_to_device(_ADAPTIVE_HEUN.tableau, self.device)
+        self.tableau = _ADAPTIVE_HEUN.tableau
     
+    def to_device(self, device):
+        self.tableau.to_device(device)
+    
+    def to_dtype(self, dtype):
+        self.tableau.to(dtype)
+
     def tableau_b(self, c):
         b = self.tableau.b
         b_error = self.tableau.b_error
         return b, b_error
 
 
-class _VARIABLE_THIRD_ORDER():
+class _VARIABLE_THIRD_ORDER(_VariableSubclass):
     order = 3
     n_tableau_c = 3
     
     def __init__(self, device=None) -> None:
+        super().__init__(device)
         self.device = device
-        self.b_delta = torch.tensor([[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device) 
+        self.b_delta = torch.tensor(
+            [[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device
+        )
+    
+    def to_device(self, device):
+        self.b_delta = self.b_delta.to(device)
+    
+    def to_dtype(self, dtype):
+        self.b_delta = self.b_delta.to(dtype)
     
     def _b0(self, a):
         return 0.5 - 1./(6*a)
