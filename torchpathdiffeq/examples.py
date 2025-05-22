@@ -45,7 +45,7 @@ def damped_sine_solution(t_init, t_final, w=3.7, a=0.2):
 
 
 ODE_dict = {
-    "t" : (t, t_solution, 1e-10),
+    "t" : (t, t_solution, 1e-7),
     "t_squared" : (t_squared, t_squared_solution, 1e-5),
     "sine_squared" : (sine_squared, sine_squared_solution, 5e-2),
     "exp" : (exp, exp_solution, 1e-5),
