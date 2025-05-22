@@ -9,6 +9,9 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
+    def _set_solver_dtype(self, dtype):
+        pass
+    
     def integrate(
             self,
             ode_fxn=None,
