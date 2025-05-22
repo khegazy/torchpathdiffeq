@@ -12,6 +12,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
     def __init__(
             self,
             remove_cut=0.1,
+            max_batch=None,
+            total_mem_usage=0.9,
             max_path_change=None,
             use_absolute_error_ratio=True, 
             error_calc_idx=None, 
@@ -29,6 +31,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         super().__init__(*args, **kwargs)
         assert remove_cut < 1.
         self.remove_cut = remove_cut
+        self.max_batch = max_batch
         self.max_path_change = max_path_change
         self.use_absolute_error_ratio = use_absolute_error_ratio
 
@@ -36,9 +39,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.order = None
         self.C = None
         self.Cm1 = None
-        self.t_step_barriers_previous = None
-        self.previous_ode_fxn = None
         self.error_calc_idx = error_calc_idx
+        self.total_mem_usage = total_mem_usage
 
 
     def _initial_t_steps(
@@ -169,7 +171,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         N_t_add = torch.sum(remove_mask)
         t_step_barriers_new = torch.nan*torch.ones(
             (N_t_add + len(t_step_barriers), t_step_barriers.shape[-1]),
-            dtype=t_step_barriers.dtype,
+            dtype=self.dtype,
             device=self.device
         )
         t_step_trackers_new = torch.ones(
@@ -229,7 +231,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t: [N, C, T]
             error_ratios_2steps: [N-1]
         """
-            
+        
         if len(error_ratios_2steps) == 0:
             return t, sum_steps, sum_step_errors
         # Since error ratios encompasses 2 RK steps each neighboring element shares
@@ -434,7 +436,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         add_shape = (len(record) + len(result), *record.shape[1:])
         old_record = record.clone()
         record = torch.nan*torch.ones(
-            add_shape, device=self.device, dtype=old_record.dtype
+            add_shape, device=self.device, dtype=self.dtype
         )
         record[record_idxs] = old_record
         record[result_idxs] = result
@@ -541,7 +543,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             self.ode_unit_mem_size = 2.1*max(0, (mem_before[0] - mem_after[0])/float(N))
             eval_time = time.time() - t0
             N = 10*N
-            max_evals = self._get_max_ode_evals(1.0)
+            max_evals = self._get_max_ode_evals(0.8)
         print("Ending unit memory search")
 
     def _get_usable_memory(self, total_mem_usage): 
@@ -563,7 +565,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             N_init_steps=13,
             ode_args=(),
             take_gradient=None,
-            total_mem_usage=0.9,
+            total_mem_usage=None,
             loss_fxn=None,
             max_batch=None,
             verbose=False,
@@ -598,9 +600,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             of integration will remain [t[0], t[-1]]. If t is 2 dimensional the 
             intermediate time points will be calculated.
         """
+
+        # Set dtype based on input
+        self.set_dtype_by_input(t=t, t_init=t_init, t_final=t_init)
+
         # If t is given it must be consistent with given t_init and t_final
-        t_init = t_init if t_init is None else t_init.to(self.dtype)
-        t_final = t_final if t_final is None else t_final.to(self.dtype)
+        t_init = self.t_init if t_init is None else t_init.to(self.dtype)
+        t_final = self.t_final if t_final is None else t_final.to(self.dtype)
+
+        # Replace max_batch if default it given
+        max_batch = self.max_batch if max_batch is None else max_batch
 
         if t is not None:
             assert len(t.shape) == 2
@@ -633,6 +642,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ode_fxn, t_init, t_final, y0
         )
         assert t_init < t_final, "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
+        total_mem_usage = self.total_mem_usage if total_mem_usage is None\
+            else total_mem_usage
         assert total_mem_usage <= 1.0 and total_mem_usage > 0,\
             "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
         same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
@@ -658,11 +669,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             mask = (self.t_step_barriers_previous[:,0] <= t_final[0])\
                 + (self.t_step_barriers_previous[:,0] >= t_init[0])
             t_step_barriers = self.t_step_barriers_previous[mask]
-            if not np.all(t_step_barriers[0] == t_init):
+            if not torch.all(t_step_barriers[0] == t_init):
                 t_step_barriers = torch.concatenate(
                     [t_init.unsqueeze(0), t_step_barriers], dim=0
                 )
-            if not np.all(t_step_barriers[-1] == t_final):
+            if not torch.all(t_step_barriers[-1] == t_final):
                 t_step_barriers = torch.concatenate(
                     [t_step_barriers, t_init.unsqueeze(0)], dim=0
                 )
@@ -717,7 +728,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             # Evaluate integral
             t0 = time.time()
             method_output = self._calculate_integral(
-                t_step_eval, y_step_eval, y0=torch.zeros(1, device=self.device)
+                t_step_eval,
+                y_step_eval,
+                y0=torch.zeros(1, device=self.device, dtype=self.dtype)
             )
             if len(record) == 0:
                 current_integral = method_output.integral.detach()
@@ -832,14 +845,21 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._setup_method(self.dtype)
+
+    def _setup_method(self, dtype):
         error_message = f"Cannot find method '{self.method_name}' in supported method: {list(UNIFORM_METHODS.keys())}"
         assert self.method_name in UNIFORM_METHODS, error_message
-        self.method = _get_method(steps.ADAPTIVE_UNIFORM, self.method_name, self.device)# UNIFORM_METHODS[self.method_name].to(self.device)
+        self.method = _get_method(
+            steps.ADAPTIVE_UNIFORM, self.method_name, self.device, dtype
+        )# UNIFORM_METHODS[self.method_name].to(self.device)
         self.order = self.method.order
         self.C = len(self.method.tableau.c)
         self.Cm1 = self.C - 1
- 
-
+    
+    def _set_solver_dtype(self, dtype):
+        self._setup_method(dtype)
+    
     """
     def _initial_t_steps(self,
             t,
@@ -938,6 +958,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         t_replace = self._t_step_interpolate(
             t[remove_idxs,0], t[remove_idxs+1,-1]
         )
+
         sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs+1]
         sum_step_errors_replace = sum_step_errors[remove_idxs] + sum_step_errors[remove_idxs+1]
 
@@ -961,7 +982,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert>= 0)
-        
+
         return t_pruned, sum_steps_pruned, sum_step_errors_pruned
     
 
