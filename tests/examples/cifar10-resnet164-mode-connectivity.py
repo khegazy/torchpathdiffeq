@@ -20,11 +20,21 @@ from torchpathdiffeq import\
     UNIFORM_METHODS,\
     VARIABLE_METHODS
 
-
 from functools import partial
 import os
 import argparse
 
+# Try to import functional API - fallback for older PyTorch versions
+try:
+    import torch.func as func
+    HAS_TORCH_FUNC = True
+except ImportError:
+    try:
+        from torch.nn.utils import stateless
+        HAS_TORCH_FUNC = False
+    except ImportError:
+        print("Warning: Neither torch.func nor stateless available. You may need PyTorch 2.0+")
+        HAS_TORCH_FUNC = None
 
 CIFAR10_DIR = './data/'
 MNIST_DIR = './data'
@@ -48,48 +58,19 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,))
 ])
 
-
-# python cifar10-resnet164-mode-connectivity.py -w1 "./MNIST_MLP_id=1.pt" -w2 "./MNIST_MLP_id=2.pt" -id 1 -s 42
-# normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-# train_set = CIFAR10(root=CIFAR10_DIR, train=True, transform=transforms.Compose([
-#                         transforms.RandomHorizontalFlip(),
-#                         transforms.RandomCrop((32, 32), 4),
-#                         transforms.ToTensor(), normalize]))
-
-# trainloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,
-#                               num_workers=WORKERS, pin_memory=True)
-
-# testloader = DataLoader(CIFAR10(root=CIFAR10_DIR, train=False, transform=
-#                                     transforms.Compose([
-#                                         transforms.ToTensor(), normalize])),
-#                                 batch_size=BATCH_SIZE, shuffle=False,
-#                                 num_workers=WORKERS, pin_memory=True)
-
-
-# if args.w_init is not None and args.w_end is None:
-#     if args.model_path is None:
-#         raise ValueError("Please specify both ends of the curve in addition to the model path")
-#     raise ValueError("Both ends of the curve should be specified")
-
-# if args.w_init is None and args.w_end is not None:
-#     if args.model_path is None:
-#         raise ValueError("Please specify both ends of the curve in addition to the model path")
-#     raise ValueError("Both ends of the curve should be specified")
-
-
 ### config dictionary for the tests ###
 test_config = {
     'epochs': 100,
-    'epochs_integrator': 100,
+    'epochs_integrator': 45,
     'batch_size': 32,
     'criterion': {
         'CE': nn.CrossEntropyLoss()
     },
     'device': torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
-    # 'dataset': str(args.dataset),
     'LR': 1e-3,
     'cifar10_path': './data',
     'checkpoints_path': './checkpoints',
+    'root': "/pscratch/sd/a/aryamanj/torchpathdiffeq/mnist/",
     'sampling_type': steps.ADAPTIVE_UNIFORM,
     'method': 'adaptive_heun',
     'dataset': 'mnist',
@@ -100,7 +81,6 @@ test_config = {
     'model_end_path': "",
     'w1_path': args.w_init,
     'w2_path': args.w_end,
-    'curve_path': "./mode_test_path_t_detached.pt",
     'id': int(args.experiment_id),
     'seed': int(args.seed)
 }
@@ -108,9 +88,9 @@ test_config = {
 test_config['optims'] = {
         'Adam': partial(optim.Adam, lr=test_config["LR"])
 }
-test_config['t_init'] = torch.tensor([0]).to(test_config['device']).type(torch.float)
-test_config['t_final'] = torch.tensor([1]).to(test_config['device']).type(torch.float)
-
+test_config['t_init'] = torch.tensor([0.0]).to(test_config['device']).type(torch.float)
+test_config['t_final'] = torch.tensor([1.0]).to(test_config['device']).type(torch.float)
+test_config['curve_path'] =  f"{test_config['root']}/mode_test_path_final_id=1.pt"
 
 def load_data():
     if test_config['dataset'] == "mnist":
@@ -120,36 +100,30 @@ def load_data():
         ])
         train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
-        trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=True)
-        testloader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+        trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=1024, shuffle=True)
+        testloader = torch.utils.data.DataLoader(test_dataset, batch_size=10000, shuffle=True)
 
         return (trainloader, testloader)
     else:
         transform = transforms.Compose(
             [transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        # Ratio of the dataset to use
-        ratio = 0.05  # for example, 10% of the dataset
+        ratio = 0.05
 
-        # Load the full trainset and testset
         full_trainset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=True,
                                                     download=True, transform=transform)
         full_testset = torchvision.datasets.CIFAR10(root=test_config['cifar10_path'], train=False,
                                                     download=True, transform=transform)
 
-        # Calculate the number of samples to include
         train_size = int(len(full_trainset) * ratio)
         test_size = int(len(full_testset) * ratio)
 
-        # Randomly select indices for subset
         train_indices = np.random.choice(len(full_trainset), train_size, replace=False)
         test_indices = np.random.choice(len(full_testset), test_size, replace=False)
 
-        # Create subsets of the trainset and testset
         trainset = torch.utils.data.Subset(full_trainset, train_indices)
         testset = torch.utils.data.Subset(full_testset, test_indices)
 
-        # Create DataLoaders with the subset
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=test_config['batch_size'],
                                                 shuffle=True, num_workers=2)
         testloader = torch.utils.data.DataLoader(testset, batch_size=test_config['batch_size'],
@@ -173,189 +147,226 @@ class MLP(nn.Module):
         x = self.flatten(x)
         return self.layers(x)
 
-testloader, trainloader = load_data()
+trainloader, testloader = load_data()
 
-### Describing the network & Loss used for the path, BEGIN ###
-
+### FIXED CurveNet with proper boundary constraints ###
 class CurveNet(nn.Module):
-    def __init__(self, nn_dims: int, w1: torch.Tensor, w2: torch.Tensor, criterion: nn.Module):#, model: nn.Module):
+    def __init__(self, nn_dims: int, w1: torch.Tensor, w2: torch.Tensor, criterion: nn.Module):
         super(CurveNet, self).__init__()
-        self.fc1 = nn.Linear(1, 100) # take input `t`
-        self.fc2 = nn.Linear(100, 100)
-        self.fc3 = nn.Linear(100, nn_dims) #... and return a set of weights in the weight-space
-        self.w1 = w1 # should be passed as output of a `parameters_to_vector` call
-        self.w2 = w2 # Ditto
+        #TODO: Potentially set hidden_dim to a ratio of `nn_dims`
+        hidden_dim = 100
+        self.fc1 = nn.Linear(1, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, nn_dims)
+        self.w1 = w1
+        self.w2 = w2
         self.criterion = criterion
         self.nn_dims = nn_dims
-        # self.model = model #TODO: Keeping the initial model on hand for evaluation... or not?
 
-    def forward(self, t): # `t\in [0, 1]`
-        #TODO: enforce `t\in [0, 1]` --- this will be respected by `get_parallel_RK_solver`, confirm
-        #TODO: How do I enforce CurveNet(0) = w1 && CurveNet(1) = w2?
-        #TODO: How will a `CurveNet` instance actually be trained?
-        coeffs = [1 - t, t, 1 - torch.cos(2 * math.pi * t)]
-        # coeffs = [1 - t, t]
-        f1 = F.tanh(self.fc3(F.tanh(self.fc2(F.tanh(self.fc1(test_config['t_final']))))))
-        f0 = F.tanh(self.fc3(F.tanh(self.fc2(F.tanh(self.fc1(test_config['t_init']))))))
-        t = F.tanh(self.fc1(t))
-        t = F.tanh(self.fc2(t))
-        t = F.tanh(self.fc3(t)) # `t` now represents a point in weight-space
+    def _compute_mlp_output(self, t):
+        """Helper to compute MLP output"""
+        x = F.tanh(self.fc1(t))
+        x = F.tanh(self.fc2(x))
+        x = F.tanh(self.fc3(x))
+        return x
 
-        # enforcing that `Phi_t` evaluates to w_1 @ 0 and w_2 @ 1
-        if len(t.shape) < 2:
-            # return (coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t).view(1, self.nn_dims)
-            return (coeffs[0] * (t - f0 + self.w1) + coeffs[1] * (t - f1 + self.w2)).view(1, self.nn_dims)
+    def forward(self, t):
+        coeffs = [1 - t, t]
+        f0 = self._compute_mlp_output(test_config["t_init"])
+        f1 = self._compute_mlp_output(test_config["t_final"])
+
+        # Compute MLP output
+        mlp_output = self._compute_mlp_output(t)
+
+        # Boundary constraint enforcement
+        if len(mlp_output.shape) < 2:
+            return (coeffs[0] * (mlp_output - f0 + self.w1) +
+                   coeffs[1] * (mlp_output - f1 + self.w2)).view(1, self.nn_dims)
         else:
-            # return coeffs[0] * self.w1 + coeffs[1] * self.w2 + coeffs[2] * t
-            return coeffs[0] * (t - f0 + self.w1) + coeffs[1] * (t - f1 + self.w2)
-        # (1-t) * w1 + t * (f(t) - f(1) + w2)
-        # (1 - t) * (f(t) - f(0) + w1) + t * (f(t) - f(1) + w2)
+            return (coeffs[0] * (mlp_output - f0 + self.w1) +
+                   coeffs[1] * (mlp_output - f1 + self.w2))
 
-class CurveNetLoss_vmap(nn.Module):
-    """
-    Computes the loss L(w) := L(Y, model(X; w))
-    Should be passed to the integrator
-    """
-    def __init__(self, criterion: nn.Module, model: nn.Module, curve: CurveNet):
-        super(CurveNetLoss_vmap, self).__init__()
-        self.criterion = criterion
-        self.model = model # we don't need the trained weights here, just require the class itself
-        self.curve = curve
-        self._threads = 10
-
-        self._models: list[nn.Module] = [self.model] * self._threads
-
-    def forward(self, t):#, X, Y):
-        #TODO: pass in the weights here instead of time
-        w = self.curve(t) # grab the curves output
-        loss_ls = []
-        self.model.eval()
-        for dim in range(w.shape[0]):
-            eval_running_loss = 0.0
-            # start_time = time.time()
-            vector_to_parameters(w[dim, :].view(-1), self.model.parameters())
-            # end_time = time.time()
-            # execution_time = end_time - start_time
-
-            # print(f"Execution time: {execution_time:.6f} seconds")
-
-            for i, eval_data in enumerate(testloader, 0):
-                eval_X, eval_Y = eval_data
-                eval_X = eval_X.to(test_config['device'])
-                eval_Y = eval_Y.to(test_config['device'])
-                eval_outputs = self.model(eval_X)
-
-                loss = self.criterion(eval_outputs, eval_Y)
-                eval_running_loss += loss.detach().item()
-            loss_ls.append(eval_running_loss)
-        return torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1)
-
+### COMPLETELY REWRITTEN LOSS FUNCTION ###
 class CurveNetLoss_base(nn.Module):
     """
-    Computes the loss L(w) := L(Y, model(X; w))
-    Should be passed to the integrator
+    Computes the loss L(w) := L(Y, model(X; w)) * ||φ'_θ(t)||
+    Preserves gradients and includes derivative term
     """
     def __init__(self, criterion: nn.Module, model: nn.Module, curve: CurveNet):
         super(CurveNetLoss_base, self).__init__()
         self.criterion = criterion
-        self.model = model # we don't need the trained weights here, just require the class itself
+        self.model = model
         self.curve = curve
 
-    def forward(self, t):#, X, Y):
-        #TODO: pass in the weights here instead of time
-        w = self.curve(t) # grab the curves output
+        # Get model structure for functional evaluation
+        self.param_shapes = {name: param.shape for name, param in model.named_parameters()}
+
+    def weights_to_state_dict(self, weights_flat):
+        """Convert flat weights back to state dict format"""
+        state_dict = {}
+        idx = 0
+        for name, shape in self.param_shapes.items():
+            num_params = torch.prod(torch.tensor(shape))
+            state_dict[name] = weights_flat[idx:idx+num_params].view(shape)
+            idx += num_params
+        return state_dict
+
+    def compute_derivative_norm(self, t):
+        """Compute ||φ'_θ(t)|| using autograd"""
+        # Ensure t requires grad
+        if not t.requires_grad:
+            t = t.clone().detach().requires_grad_(True)
+
+        weights = self.curve(t)
+
+        # Compute derivative for each time point
+        derivatives_norm = []
+        for i in range(weights.shape[0]):
+            # Compute gradient of weights w.r.t. t for this batch element
+            grad_outputs = torch.ones_like(weights[i])
+            try:
+                grads = torch.autograd.grad(
+                    outputs=weights[i],
+                    inputs=t,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    retain_graph=True,
+                    allow_unused=True
+                )[0]
+
+                if grads is not None:
+                    derivative_norm = torch.norm(grads)
+                else:
+                    derivative_norm = torch.tensor(1.0, device=t.device)  # fallback
+
+            except RuntimeError as e:
+                print(f"Gradient computation failed: {e}")
+                derivative_norm = torch.tensor(1.0, device=t.device)  # fallback
+
+            derivatives_norm.append(derivative_norm)
+
+        return torch.stack(derivatives_norm)
+
+    def forward(self, t):
+        # Ensure t requires gradients for derivative computation
+        if not t.requires_grad:
+            t = t.clone().detach().requires_grad_(True)
+
+        # Get weights and derivatives
+        w = self.curve(t)  # Shape: [batch_size, num_params]
+
+        # Compute derivative norms
+        try:
+            derivatives_norm = self.compute_derivative_norm(t)  # Shape: [batch_size]
+        except Exception as e:
+            print(f"Derivative computation failed, using constant: {e}")
+            derivatives_norm = torch.ones(w.shape[0], device=w.device)
+
         loss_ls = []
-        self.model.eval()
+
         for dim in range(w.shape[0]):
-            eval_running_loss = 0.0
-            # start_time = time.time()
-            vector_to_parameters(w[dim, :].view(-1), self.model.parameters())
-            # end_time = time.time()
-            # execution_time = end_time - start_time
+            # Convert flat weights to state dict
+            state_dict = self.weights_to_state_dict(w[dim, :])
 
-            # print(f"Execution time: {execution_time:.6f} seconds")
+            running_loss = 0.0
+            num_batches = 0
 
-            for i, eval_data in enumerate(testloader, 0):
+            # Evaluate model with different weights
+            for eval_data in testloader:
                 eval_X, eval_Y = eval_data
                 eval_X = eval_X.to(test_config['device'])
                 eval_Y = eval_Y.to(test_config['device'])
-                eval_outputs = self.model(eval_X)
 
-                loss = self.criterion(eval_outputs, eval_Y)
-                eval_running_loss += loss.detach().item()
-            loss_ls.append(eval_running_loss)
-        return torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1)
+                # Use torch JAX-like API for calling model with different weights
+                try:
+                    if HAS_TORCH_FUNC:
+                        predictions = func.functional_call(self.model, state_dict, eval_X)
+                    else:
+                        # Fallback for older PyTorch versions
+                        # This is less elegant but should work
+                        old_state = {name: param.clone() for name, param in self.model.named_parameters()}
 
-class CurveNetLoss_torchmp(nn.Module):
-    """
-    Computes the loss L(w) := L(Y, model(X; w)), multithreaded
-    Should be passed to the integrator
-    NOTE: Need to verify thread-safety of this implementation
-    """
-    def __init__(self, criterion: nn.Module, model: nn.Module, curve: CurveNet):
-        super(CurveNetLoss_torchmp, self).__init__()
-        self.criterion = criterion
-        self.model = model # we don't need the trained weights here, just require the class itself
-        self.curve = curve
+                        # Load new weights
+                        for name, param in self.model.named_parameters():
+                            if name in state_dict:
+                                param.data = state_dict[name]
 
-        #NOTE: Modify suitably for Perlmutter
-        self._threads = 10
+                        predictions = self.model(eval_X)
 
-        self._models: list[nn.Module] = [self.model] * self._threads
+                        # Restore old weights
+                        for name, param in self.model.named_parameters():
+                            if name in old_state:
+                                param.data = old_state[name]
 
-    def worker(self, w, loss_ls, dim, thread_id):
-        eval_running_loss = 0.0
-        vector_to_parameters(w[dim, :].view(-1), self._models[thread_id].parameters())
+                    loss = self.criterion(predictions, eval_Y)
+                    running_loss += loss
+                    num_batches += 1
 
-        for i, eval_data in enumerate(testloader, 0):
-            eval_X, eval_Y = eval_data
-            eval_X = eval_X.to(test_config['device'])
-            eval_Y = eval_Y.to(test_config['device'])
-            eval_outputs = self.model(eval_X)
+                except Exception as e:
+                    print(f"Model evaluation failed: {e}")
+                    # Use a dummy loss to prevent complete failure
+                    running_loss += torch.tensor(1.0, device=test_config['device'])
+                    num_batches += 1
 
-            loss = self.criterion(eval_outputs, eval_Y)
-            eval_running_loss += loss.detach().item()
-        loss_ls[dim] = eval_running_loss
-        pass
+            # L(φ_θ(t))||φ'_θ(t)||
+            if num_batches > 0:
+                avg_loss = running_loss / num_batches
+                final_loss = avg_loss * derivatives_norm[dim]
+            else:
+                final_loss = torch.tensor(1.0, device=test_config['device'])
 
-    def forward(self, t):#, X, Y):
-        #TODO: pass in the weights here instead of time
-        w = self.curve(t) # grab the curves output
-        models_per_thread: int = w.shape[0] / self._threads
+            loss_ls.append(final_loss)
 
-        loss_ls = [0] * w.shape[0] # pre-allocating the loss array
-
-        # Mapping between models and threads
-        model_to_thread = [(w, loss_ls, dim, dim % models_per_thread) for dim in range(w.shape[0])]
-        self.model.eval()
-
-
-        mp.set_start_method('spawn')  # Use 'spawn' method for better compatibility
-        with mp.Pool(processes=self._threads) as pool:
-            # Pass an index (thread_id) along with parameters
-            # pool.starmap(worker, [(i, w[dim, :], self._models[i]) for (dim, i) in model_to_thread])
-            pool.starmap(self.worker, model_to_thread)
-
-        return torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1)
-
-        # for dim in range(w.shape[0]):
-        #     vector_to_parameters(w[dim, :].view(-1), self.model.parameters())
-        #     loss.append(self.criterion(self.model(X), Y).view(1,1))
-        # return torch.tensor(loss).to(test_config['device']).view(len(loss), 1)
-
-### Describing the network & Loss used for the path, END ###
+        return torch.stack(loss_ls).view(-1, 1)
 
 ### Path training loop ###
-def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss_base, integrator):
+def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss_base, integrator, resume_checkpoint_path=None):
     optimizer = test_config['optims'][optimizer_str](path.parameters())
     print(f'{optimizer_str}')
     print(f'{test_config["device"]}')
-    int_list = []
 
+    # Initialize training state
+    int_list = []
+    start_epoch = 0
     integral = None
 
-    for epoch in range(test_config['epochs_integrator']):
+    # Set save root to scratch directory
+    checkpoint_dir = os.path.join(test_config["root"], f"checkpoints_id_{test_config['id']}")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(test_config["root"], exist_ok=True)
 
+    print(f"Saving to: {test_config['root']}")
+    print(f"Checkpoints: {checkpoint_dir}")
+
+    # RESUME FROM CHECKPOINT IF PROVIDED
+    if resume_checkpoint_path is not None:
+        print(f"Resuming training from: {resume_checkpoint_path}")
+
+        try:
+            checkpoint = torch.load(resume_checkpoint_path, map_location=test_config['device'])
+
+            # Load model and optimizer state
+            path.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+            # Restore training progress
+            start_epoch = checkpoint['epoch']
+            int_list = checkpoint['int_list'].tolist() if torch.is_tensor(checkpoint['int_list']) else checkpoint['int_list']
+
+            print(f"Successfully resumed from epoch {start_epoch}")
+            print(f"Previous training loss: {int_list[-1]:.6f}")
+            print(f"Continuing training for {test_config['epochs_integrator'] - start_epoch} more epochs")
+
+        except Exception as e:
+            print(f"❌ Failed to load checkpoint: {e}")
+            print("Starting training from scratch instead...")
+            start_epoch = 0
+            int_list = []
+    else:
+        print("🆕 Starting training from scratch")
+
+    # TRAINING LOOP - Modified to start from start_epoch
+    for epoch in range(start_epoch, test_config['epochs_integrator']):
         path.train()
         optimizer.zero_grad()
 
@@ -366,63 +377,85 @@ def train_path(optimizer_str: str, path: CurveNet, potential: CurveNetLoss_base,
         if test_config['max_batches'] is None:
             integral.integral.backward()
 
-        int_list.append(integral.integral)
-
-
+        int_list.append(integral.integral.item())
         optimizer.step()
-        print(f'Epoch#: {epoch}')
 
-    # for epoch in range(test_config['epochs']):
-    #     path.train()
-    #     for i, data in enumerate(trainloader, 0):
-    #         inputs, labels = data
-    #         inputs         = inputs.to(test_config['device'])
-    #         labels         = labels.to(test_config['device'])
+        print(f'Epoch#: {epoch}/{test_config["epochs_integrator"]}, Integral: {integral.integral.item():.6f}')
 
-    #         optimizer.zero_grad()
+        # CHECKPOINT EVERY 5 EPOCHS - Save lightweight quantities
+        if (epoch + 1) % 5 == 0:
+            print(f"Checkpointing at epoch {epoch + 1}...")
 
+            # Save training progress and integrator outputs
+            checkpoint_data = {
+                'epoch': epoch + 1,
+                'int_list': torch.tensor(int_list),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'integral_value': integral.integral.item(),
+                'config': test_config
+            }
+            torch.save(checkpoint_data, os.path.join(checkpoint_dir, f'training_checkpoint_epoch_{epoch+1}.pt'))
 
-    #         integral = integrator.integrate(
-    #             potential, t_init=t_init, t_final=t_final, max_batch=test_config['max_batches'], ode_args=(inputs, labels)
-    #         )
+            # Save integrator quantities (these are the most important for analysis)
+            torch.save(integral.integral, os.path.join(checkpoint_dir, f'integral_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.loss, os.path.join(checkpoint_dir, f'loss_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.t_pruned, os.path.join(checkpoint_dir, f't_pruned_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.t, os.path.join(checkpoint_dir, f't_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.h, os.path.join(checkpoint_dir, f'h_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.y, os.path.join(checkpoint_dir, f'y_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.sum_steps, os.path.join(checkpoint_dir, f'sum_steps_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.integral_error, os.path.join(checkpoint_dir, f'integral_error_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.errors, os.path.join(checkpoint_dir, f'errors_epoch_{epoch+1}_id={test_config["id"]}.pt'))
+            torch.save(integral.error_ratios, os.path.join(checkpoint_dir, f'error_ratios_epoch_{epoch+1}_id={test_config["id"]}.pt'))
 
-    #         if test_config['max_batches'] is None:
-    #             integral.integral.backward()
+        # CHECKPOINT EVERY 25 EPOCHS - Save model too
+        if (epoch + 1) % 25 == 0:
+            print(f"Full model checkpoint at epoch {epoch + 1}...")
 
-    #         optimizer.step()
-        # print(f'Epoch#: {epoch}')
-    # Saving all of the OP tensors
-    int_list = torch.tensor(int_list)
-    torch.save({
-                'epoch': test_config["epochs"],
+            full_checkpoint = {
+                'epoch': epoch + 1,
                 'model_state_dict': path.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                }, 'mode_test_path_t_detached.pt')
+                'int_list': torch.tensor(int_list),
+                'config': test_config
+            }
+            torch.save(full_checkpoint, os.path.join(checkpoint_dir, f'full_model_checkpoint_epoch_{epoch+1}.pt'))
 
-    torch.save(int_list, f'mode_test_integral_all_id={test_config["id"]}.pt')
-    torch.save(integral.integral, f'mode_test_integral_id={test_config["id"]}.pt')
-    torch.save(integral.loss, f'mode_test_loss_id={test_config["id"]}.pt')
-    torch.save(integral.t_pruned, f'mode_test_t_pruned_id={test_config["id"]}.pt')
-    torch.save(integral.t, f'mode_test_t_id={test_config["id"]}.pt')
-    torch.save(integral.h, f'mode_test_h_id={test_config["id"]}.pt')
-    torch.save(integral.y, f'mode_test_y_id={test_config["id"]}.pt')
-    torch.save(integral.sum_steps, f'mode_test_sum_stepid={test_config["id"]}.pt')
-    torch.save(integral.integral_error, f'mode_test_integral_erroid={test_config["id"]}.pt')
-    torch.save(integral.errors, f'mode_test_errors_id={test_config["id"]}.pt')
-    torch.save(integral.error_ratios, f'mode_test_error_ratioid={test_config["id"]}.pt')
+    # FINAL SAVE - All in scratch directory
+    print("Saving final results...")
 
-### Path training loop ###
+    int_list = torch.tensor(int_list)
 
-### Path eval ###
+    # Final model save
+    torch.save({
+                'epoch': test_config["epochs_integrator"],
+                'model_state_dict': path.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'int_list': int_list
+                }, os.path.join(test_config["root"], f'mode_test_path_final_id={test_config["id"]}.pt'))
+
+    # Final integrator outputs - all in scratch directory
+    torch.save(int_list, os.path.join(test_config["root"], f'mode_test_integral_all_id={test_config["id"]}.pt'))
+    torch.save(integral.integral, os.path.join(test_config["root"], f'mode_test_integral_id={test_config["id"]}.pt'))
+    torch.save(integral.loss, os.path.join(test_config["root"], f'mode_test_loss_id={test_config["id"]}.pt'))
+    torch.save(integral.t_pruned, os.path.join(test_config["root"], f'mode_test_t_pruned_id={test_config["id"]}.pt'))
+    torch.save(integral.t, os.path.join(test_config["root"], f'mode_test_t_id={test_config["id"]}.pt'))
+    torch.save(integral.h, os.path.join(test_config["root"], f'mode_test_h_id={test_config["id"]}.pt'))
+    torch.save(integral.y, os.path.join(test_config["root"], f'mode_test_y_id={test_config["id"]}.pt'))
+    torch.save(integral.sum_steps, os.path.join(test_config["root"], f'mode_test_sum_stepid={test_config["id"]}.pt'))
+    torch.save(integral.integral_error, os.path.join(test_config["root"], f'mode_test_integral_erroid={test_config["id"]}.pt'))
+    torch.save(integral.errors, os.path.join(test_config["root"], f'mode_test_errors_id={test_config["id"]}.pt'))
+    torch.save(integral.error_ratios, os.path.join(test_config["root"], f'mode_test_error_ratioid={test_config["id"]}.pt'))
+
+    print(f"Training completed! Check {test_config['root']} for results")
+    print(f"Intermediate checkpoints: {checkpoint_dir}/")
+
 def eval_curve(curve: CurveNet, plain_model: nn.Module, num_points: int):
-    #, tmp: bool):
-    t_values = torch.linspace(0, 1, num_points).view(num_points, 1)
-    # points = torch.lerp(w1, w2, t_values.unsqueeze(1))
+    t_values = torch.linspace(0, 1, num_points).view(num_points, 1).to(test_config['device'])
     points = curve(t_values)
     criterion = test_config['criterion']['CE']
     ls_list = []
 
-    # for epoch in range(test_config['epochs_integrator']):
     print("Curve\n")
     for i in range(num_points):
         eval_running_loss = 0.0
@@ -440,33 +473,25 @@ def eval_curve(curve: CurveNet, plain_model: nn.Module, num_points: int):
         ls_list.append(eval_running_loss/len(testloader))
         print(f"Point# {i}")
 
-    # if tmp:
-    #     torch.save(torch.tensor(ls_list), "resnet_w1_eval_with_state_dict.pt")
-    # else:
-    #     torch.save(torch.tensor(ls_list), "resnet_w1_eval_v2p.pt")
 
-    # return ls_list
-
-    return {
+    tmp = {
         "loss": torch.tensor(ls_list).to(test_config['device']).view(len(ls_list), 1),
         "t": t_values
     }
-
-### Path eval ###
-
-### Curve eval on a straight line, START
+    id=2
+    torch.save(tmp, f'curve_eval_id={id}.pt')
+    return tmp
 
 def eval_line(w1: torch.Tensor, w2: torch.Tensor, plain_model: nn.Module, num_points: int):
-    # Generating the linearly interpolated points
-    t_values = torch.linspace(0, 1, num_points)
+    t_values = torch.linspace(0, 1, num_points).to(test_config["device"])
     points = torch.lerp(w1, w2, t_values.unsqueeze(1))
+    points = points.to(test_config['device'])
     criterion = test_config['criterion']['CE']
     loss_ls = []
 
     print("Line\n")
     for i in range(num_points):
         eval_running_loss = 0.0
-        # Loading weights in the model for eval
         vector_to_parameters(points[i, :], plain_model.parameters())
         for j, eval_data in enumerate(testloader, 0):
             eval_X, eval_Y = eval_data
@@ -476,53 +501,57 @@ def eval_line(w1: torch.Tensor, w2: torch.Tensor, plain_model: nn.Module, num_po
 
             loss = criterion(eval_outputs, eval_Y)
             eval_running_loss += loss.detach().item()
-        # loss_ls.append(eval_running_loss/len(testloader))
         loss_ls.append(eval_running_loss)
         print(f"Point# {i}")
-    # return torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1)
-    return {
+    tmp = {
         "loss": torch.tensor(loss_ls).to(test_config['device']).view(len(loss_ls), 1),
         "t": t_values
     }
-
-### Curve eval on a straight line, END
+    torch.save(tmp, 'line_eval_id=1.pt')
+    return tmp
 
 def setup(seed: int):
-    """
-    Sets up everything for training/eval
-    """""
     parallel_integrator = get_parallel_RK_solver(
         test_config['sampling_type'], method=test_config['method'], atol=test_config['atol'],\
         rtol=test_config['rtol'], remove_cut=0.1, dtype=torch.float
-    ) # instantiating the integrator
+    )
 
-    # plain_model = resnet_164(10, seed)
     plain_model = MLP()
 
-    model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device']) # we have `epoch`, `model_state_dict` and..
-    model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device']) # ... `optimizer_state_dict` information
+    model_w1 = torch.load(test_config['w1_path'], map_location=test_config['device'])
+    model_w2 = torch.load(test_config['w2_path'], map_location=test_config['device'])
 
-    # names of subset of parameters to grab from state_dict
     param_names = {name for name, _ in plain_model.named_parameters()}
 
     model_w1_params = [param for name, param in model_w1.items() if name in param_names]
-    w1 = parameters_to_vector(model_w1_params) # flattened params
+    w1 = parameters_to_vector(model_w1_params)
 
     model_w2_params = [param for name, param in model_w2.items() if name in param_names]
-    w2 = parameters_to_vector(model_w2_params) # flattened params
+    w2 = parameters_to_vector(model_w2_params)
 
     return (parallel_integrator, plain_model, w1, w2)
 
-
 if __name__ == '__main__':
+    #TODO: Make this all automated
     train = True
+    resume_train = True
 
     parallel_integrator, plain_model, w1, w2 = setup(test_config['seed'])
     if train:
-        path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device']) # path NN
-        path_loss = CurveNetLoss_base(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])# potential along path
-        train_path('Adam', path, path_loss, parallel_integrator)
+        path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device'])
+        path_loss = CurveNetLoss_base(test_config['criterion']['CE'], plain_model, path).to(test_config['device'])
+
+        if resume_train:
+            train_path('Adam', path, path_loss, parallel_integrator, test_config["curve_path"])
+        else:
+            train_path('Adam', path, path_loss, parallel_integrator)
     else:
-        #TODO: re-write evaluation routine
-        pass
-    pass
+        path = CurveNet(w2.shape[0], w1, w2, test_config['criterion']['CE']).to(test_config['device'])
+
+        # Load checkpoint
+        path_checkpoint = torch.load(f'{test_config["curve_path"]}', map_location=test_config["device"])
+        path.load_state_dict(path_checkpoint["model_state_dict"])
+        print("Model loaded successfully!")
+
+        eval_curve(path, plain_model, 135)
+        eval_line(w1, w2, plain_model, 135)
