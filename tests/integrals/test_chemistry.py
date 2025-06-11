@@ -9,22 +9,30 @@ from torchpathdiffeq import\
 
 WS_min_init = torch.tensor([1.133, -1.486])
 WS_min_final = torch.tensor([-1.166, 1.477])
-def wolf_schlegel(t, y=None):
-    assert torch.all(t) >= 0 and torch.all(t) <= 1
-    while len(t.shape) < 2:
-        t = t.unsqueeze(0)
+class wolf_schlegel(nn.Module):
+    def __init__(self):
+        self.nn_path = do this
 
-    interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
-    x = interpolate[:,0].unsqueeze(-1)
-    y = interpolate[:,1].unsqueeze(-1)
+    def forward(self, t, y=None):
+        assert torch.all(t) >= 0 and torch.all(t) <= 1
+        while len(t.shape) < 2:
+            t = t.unsqueeze(0)
 
-    return 10*(x**4 + y**4 - 2*x**2 - 4*y**2\
-        + x*y + 0.2*x + 0.1*y)
+        """
+        interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
+        x = interpolate[:,0].unsqueeze(-1)
+        y = interpolate[:,1].unsqueeze(-1)
+        """
+        x, y = self.nn_path(t)
+
+        return 10*(x**4 + y**4 - 2*x**2 - 4*y**2\
+            + x*y + 0.2*x + 0.1*y)
 
 class wf():
     def __init__(self):
         self.calls = 0
-    def __call__(self, t, y=None):
+    
+    def forward(self, t, y=None):
         assert torch.all(t) >= 0 and torch.all(t) <= 1
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
