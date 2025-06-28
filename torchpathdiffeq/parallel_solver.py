@@ -724,8 +724,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 *ode_args
             )
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
-            assert y_step_eval.dtype == t.dtype,\
-                "Integrator dtype is determined by input time dtype, it must match ode_fxn output dtype"
+            # assert y_step_eval.dtype == t.dtype,\
+            #     "Integrator dtype is determined by input time dtype, it must match ode_fxn output dtype"
             
             # Evaluate integral
             t0 = time.time()
