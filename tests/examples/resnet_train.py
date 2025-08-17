@@ -1,201 +1,182 @@
-## training script for CIFAR10
-import os, shutil, time
-from itertools import count
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.autograd import Variable
 import torchvision
-from torchvision.datasets import CIFAR10
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-
-from model import resnet_164
 import argparse
+import os
+from tqdm import tqdm
 
-CIFAR10_DIR = './data/'
+# Assuming the compatible model definition is saved in a file named 'models.py'
+# You would need to have the file from the previous step saved as models.py
+# in the same directory as this training script.
+from model import resnet_164
 
-WORKERS = 4
-BATCH_SIZE = 128
-USE_CUDA = torch.cuda.is_available()
-MAX_EPOCH = 150
-PRINT_FREQUENCY = 100
-
-if USE_CUDA:
-    import torch.backends.cudnn as cudnn
-    cudnn.benchmark = True
-# load data
-if not os.path.exists(CIFAR10_DIR):
-    raise RuntimeError('Cannot find CIFAR10 directory')
-
-normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-train_set = CIFAR10(root=CIFAR10_DIR, train=True, transform=transforms.Compose([
-                        transforms.RandomHorizontalFlip(),
-                        transforms.RandomCrop((32, 32), 4),
-                        transforms.ToTensor(), normalize]))
-
-train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,
-                              num_workers=WORKERS, pin_memory=True)
-
-val_loader = DataLoader(CIFAR10(root=CIFAR10_DIR, train=False, transform=
-                                    transforms.Compose([
-                                        transforms.ToTensor(), normalize])),
-                                batch_size=BATCH_SIZE, shuffle=False,
-                                num_workers=WORKERS, pin_memory=True)
-# get resnet-164
-def get_model(output_classes: int, seed: int):
-    model = resnet_164(output_classes, seed)
-    if USE_CUDA:
-        model = model.cuda()
-    return model
-
-# remove existing log directory
-def remove_log():
-    if os.path.exists('./log'):
-        shutil.rmtree('./log')
-        os.mkdir('./log')
-
-# Metric
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-# top-k accuracy
-def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
-    batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-        res.append(correct_k.mul_(100.0 / batch_size))
-    return res
-
-# validation
-def validate(model, ceriterion):
-    model.eval()
-
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-
-    end = time.time()
-    for ind, (x, label) in enumerate(val_loader):
-        if USE_CUDA:
-            x, label = x.cuda(), label.cuda()
-        vx, vl = Variable(x, volatile=True), Variable(label, volatile=True)
-
-        score = model(vx)
-        loss = ceriterion(score, vl)
-        prec1 = accuracy(score.data, label)
-
-        losses.update(loss.data, x.size(0))
-        top1.update(prec1[0][0], x.size(0))
-
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-    print('Test: [{0}/{0}]\t'
-          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'.format(
-          len(val_loader), batch_time=batch_time, loss=losses, top1=top1))
-
-    return top1.avg, losses.avg
-
-# train
-def train(model, model_id: int):
-    remove_log()
-    writer = SummaryWriter('./log')
-    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9,
-                            weight_decay=0.0001)
-    ceriterion = nn.CrossEntropyLoss()
-    step = 1
-    for epoch in range(1, MAX_EPOCH + 1):
-        if epoch == 80 or epoch == 120:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] *= 0.1
-
-        data_time = AverageMeter()
-        batch_time = AverageMeter()
-        losses = AverageMeter()
-        top1 = AverageMeter()
-
-        model.train()
-        end = time.time()
-
-        for ind, (x, label) in enumerate(train_loader):
-            data_time.update(time.time()-end)
-            if USE_CUDA:
-                x, label = x.cuda(), label.cuda()
-            vx, vl = Variable(x), Variable(label)
-
-            score = model(vx)
-            loss = ceriterion(score, vl)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            step += 1
-
-            batch_time.update(time.time()-end)
-            prec1 = accuracy(score.data, label)
-
-            print(loss.data, x.size(0))
-            losses.update(loss.data, x.size(0))
-            top1.update(prec1[0][0], x.size(0))
-
-            writer.add_scalar('train_loss', loss.data, step)
-            writer.add_scalar('train_acc', prec1[0][0], step)
-
-            if (ind+1) % PRINT_FREQUENCY == 0:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'.format(
-                      epoch, ind+1, len(train_loader), batch_time=batch_time,
-                      data_time=data_time, loss=losses, top1=top1))
-            end = time.time()
-        top1, test_loss = validate(model, ceriterion)
-        writer.add_scalar('test_loss', test_loss, step)
-        writer.add_scalar('test_acc', top1, step)
-
-        if epoch % 30 == 0:
-            torch.save({'state_dcit': model.state_dict(),
-                        'accuracy': top1},
-                        f'epoch-{epoch}-model_{model_id}.pt')
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-                        prog='train_resnet_cifar10_endpoints',
-                        description='Trains a ResNet164-Bottleneck on CIFAR10',
-                        epilog='Sucks to suck')
-
-    parser.add_argument('-id', '--model_id')
-    parser.add_argument('-s', '--seed')
-
+def main():
+    # --- 1. Argument Parsing ---
+    # Sets up command-line arguments to control the training process.
+    parser = argparse.ArgumentParser(description='CIFAR-10 Training for ResNet-164')
+    parser.add_argument('--seed', type=int, required=True,
+                        help='Random seed for model initialization and training.')
+    parser.add_argument('--exp_id', type=str, required=True,
+                        help='Experiment ID for naming the saved model file.')
+    parser.add_argument('--batch_size', type=int, default=128,
+                        help='Input batch size for training (default: 128)')
+    parser.add_argument('--epochs', type=int, default=164,
+                        help='Number of epochs to train (default: 164)')
+    parser.add_argument('--lr', type=float, default=0.1,
+                        help='Learning rate (default: 0.1)')
+    parser.add_argument('--data_dir', type=str, default='./data',
+                        help='Directory to download CIFAR-10 data')
+    parser.add_argument('--save_dir', type=str, default='./saved_models',
+                        help='Directory to save trained models')
     args = parser.parse_args()
 
-    model = get_model(10, int(args.seed))
+    print("Training script started with the following arguments:")
+    print(args)
 
-    train(model, int(args.model_id))
+    # --- 2. Reproducibility and Device Setup ---
+    # Ensure that the results are reproducible and set the device to GPU if available.
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # --- 3. Data Preparation ---
+    # Define data augmentations and create data loaders for CIFAR-10.
+    print("Preparing CIFAR-10 dataset...")
+
+    # Normalization values for CIFAR-10
+    normalize = transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
+                                     std=[0.2023, 0.1994, 0.2010])
+
+    # Data augmentation for the training set
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ])
+
+    # Only normalization for the validation set
+    transform_val = transforms.Compose([
+        transforms.ToTensor(),
+        normalize,
+    ])
+
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=args.data_dir, train=True, download=True, transform=transform_train)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+
+    val_dataset = torchvision.datasets.CIFAR10(
+        root=args.data_dir, train=False, download=True, transform=transform_val)
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    print("Dataset prepared successfully.")
+
+    # --- 4. Model, Loss, and Optimizer Setup ---
+    # Initialize the model, define the loss function, optimizer, and learning rate scheduler.
+    print(f"Initializing resnet_164 model with seed: {args.seed}")
+    # CIFAR-10 has 10 classes
+    model = resnet_164(output_classes=10, seed=args.seed).to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=args.lr,
+                          momentum=0.9, weight_decay=1e-4)
+
+    # A common learning rate schedule for training ResNets on CIFAR-10
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[82, 122], gamma=0.1)
+
+    # --- 5. Training Loop ---
+    best_val_accuracy = 0.0
+
+    print("\nStarting training...")
+    for epoch in range(args.epochs):
+        # --- Training Phase ---
+        model.train()
+        running_loss = 0.0
+        correct_train = 0
+        total_train = 0
+
+        # Using tqdm for a progress bar
+        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]")
+        for inputs, labels in train_pbar:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total_train += labels.size(0)
+            correct_train += predicted.eq(labels).sum().item()
+
+            # Update progress bar description
+            train_pbar.set_postfix({
+                'Loss': f'{running_loss/total_train:.4f}',
+                'Acc': f'{100.*correct_train/total_train:.2f}%'
+            })
+
+        train_loss = running_loss / len(train_loader)
+        train_accuracy = 100. * correct_train / total_train
+
+        # --- Validation Phase ---
+        model.eval()
+        val_loss = 0.0
+        correct_val = 0
+        total_val = 0
+
+        val_pbar = tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
+        with torch.no_grad():
+            for inputs, labels in val_pbar:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total_val += labels.size(0)
+                correct_val += predicted.eq(labels).sum().item()
+
+                val_pbar.set_postfix({
+                    'Loss': f'{val_loss/total_val:.4f}',
+                    'Acc': f'{100.*correct_val/total_val:.2f}%'
+                })
+
+        validation_loss = val_loss / len(val_loader)
+        validation_accuracy = 100. * correct_val / total_val
+
+        # Print epoch summary
+        print(f"Epoch {epoch+1}/{args.epochs} Summary | "
+              f"Train Loss: {train_loss:.4f}, Train Acc: {train_accuracy:.2f}% | "
+              f"Val Loss: {validation_loss:.4f}, Val Acc: {validation_accuracy:.2f}%")
+
+        # --- Save Best Model ---
+        if validation_accuracy > best_val_accuracy:
+            print(f"New best validation accuracy: {validation_accuracy:.2f}%. Saving model...")
+            best_val_accuracy = validation_accuracy
+
+            # Create save directory if it doesn't exist
+            if not os.path.isdir(args.save_dir):
+                os.makedirs(args.save_dir)
+
+            save_path = os.path.join(args.save_dir, f'resnet164_cifar10_{args.exp_id}.pt')
+            torch.save(model.state_dict(), save_path)
+            print(f"Model saved to {save_path}")
+
+        # Step the scheduler
+        scheduler.step()
+
+    print("\nTraining finished.")
+    print(f"Best validation accuracy achieved: {best_val_accuracy:.2f}%")
+
+if __name__ == '__main__':
+    main()

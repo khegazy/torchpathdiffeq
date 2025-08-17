@@ -61,7 +61,7 @@ transform = transforms.Compose([
 ### config dictionary for the tests ###
 test_config = {
     'epochs': 100,
-    'epochs_integrator': 45,
+    'epochs_integrator': 125,
     'batch_size': 32,
     'criterion': {
         'CE': nn.CrossEntropyLoss()
@@ -70,7 +70,7 @@ test_config = {
     'LR': 1e-3,
     'cifar10_path': './data',
     'checkpoints_path': './checkpoints',
-    'root': "/pscratch/sd/a/aryamanj/torchpathdiffeq/mnist/",
+    'root': "/home/aryaman/Documents/code/torchpathdiffeq/results",
     'sampling_type': steps.ADAPTIVE_UNIFORM,
     'method': 'adaptive_heun',
     'dataset': 'mnist',
@@ -90,7 +90,7 @@ test_config['optims'] = {
 }
 test_config['t_init'] = torch.tensor([0.0]).to(test_config['device']).type(torch.float)
 test_config['t_final'] = torch.tensor([1.0]).to(test_config['device']).type(torch.float)
-test_config['curve_path'] =  f"{test_config['root']}/mode_test_path_final_id=1.pt"
+test_config['curve_path'] =  f"{test_config['root']}/full_model_checkpoint_epoch_100.pt"
 
 def load_data():
     if test_config['dataset'] == "mnist":
@@ -101,7 +101,7 @@ def load_data():
         train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=1024, shuffle=True)
-        testloader = torch.utils.data.DataLoader(test_dataset, batch_size=10000, shuffle=True)
+        testloader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=True)
 
         return (trainloader, testloader)
     else:
