@@ -1,5 +1,4 @@
 import torch
-
 from torchpathdiffeq import\
     steps,\
     get_parallel_RK_solver,\
@@ -10,7 +9,7 @@ from torchpathdiffeq import\
     ODE_dict
 
 
-def test_integrals():
+def test_data_type():
     atol = 1e-9
     rtol = 1e-7
     t_init = torch.tensor([0], dtype=torch.float64)
@@ -25,22 +24,25 @@ def test_integrals():
         [UNIFORM_METHODS],
         [steps.ADAPTIVE_UNIFORM]
     )
+    ode_name = "damped_sine"
     for sampling_name, sampling, sampling_type in loop_items:
         for method in sampling.keys():
             #if method != 'fehlberg2':
             #    continue
-            for name, (ode, solution, cutoff) in ODE_dict.items():
-                print("INTEGRAL", method, name, sampling_name)
-                correct = solution(t_init=t_init, t_final=t_final)
-                parallel_integrator = get_parallel_RK_solver(
-                    sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1
-                )
+            ode, solution, cutoff = ODE_dict[ode_name]
+            correct = solution(t_init=t_init, t_final=t_final)
+            parallel_integrator = get_parallel_RK_solver(
+                sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1
+            )
+            for dtype in [torch.float32, torch.float64]:
                 integral_output = parallel_integrator.integrate(
-                    ode, t_init=t_init, t_final=t_final
+                    ode,
+                    t_init=torch.tensor([0], dtype=dtype),
+                    t_final=torch.tensor([1], dtype=dtype)
                 )
                 #cutoff = 10000*10**(-1*parallel_integrator.order)
                 
-                error_string = f"{sampling_name} {method} failed to properly integrate {name}, calculated {integral_output.integral.item()} but expected {correct.item()}"
+                error_string = f"{sampling_name} {method} failed to properly integrate {ode_name}, calculated {integral_output.integral.item()} but expected {correct.item()}"
                 t_flat = torch.flatten(integral_output.t[:,:,0])
                 t_flat_unique = torch.flatten(integral_output.t[:,1:,0])
                 """

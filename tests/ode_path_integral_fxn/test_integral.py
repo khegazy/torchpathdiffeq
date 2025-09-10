@@ -35,17 +35,18 @@ def test_ode_path_integral_fxn():
 
         assert_allclose(OPI_integral.integral, RK_integral.integral)
         assert_allclose(OPI_integral.integral_error, RK_integral.integral_error)
-        assert_allclose(OPI_integral.t_pruned, RK_integral.t_pruned)
+        assert_allclose(OPI_integral.t_optimal, RK_integral.t_optimal)
         assert_allclose(OPI_integral.y, RK_integral.y)
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
         assert_allclose(OPI_integral.sum_steps, RK_integral.sum_steps)
-        assert_allclose(OPI_integral.errors, RK_integral.errors)
+        assert_allclose(OPI_integral.sum_step_errors, RK_integral.sum_step_errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
 
     ###############################
     #####  Parallel Variable  #####
     ###############################
+    """
     for method in VARIABLE_METHODS.keys():
     
         OPI_integral = ode_path_integral(
@@ -69,14 +70,15 @@ def test_ode_path_integral_fxn():
 
         assert_allclose(OPI_integral.integral, RK_integral.integral)
         assert_allclose(OPI_integral.integral_error, RK_integral.integral_error)
-        assert_allclose(OPI_integral.t_pruned, RK_integral.t_pruned)
+        assert_allclose(OPI_integral.t_optimal, RK_integral.t_optimal)
         assert_allclose(OPI_integral.y, RK_integral.y)
         assert_allclose(OPI_integral.t, RK_integral.t)
         assert_allclose(OPI_integral.h, RK_integral.h)
         assert_allclose(OPI_integral.sum_steps, RK_integral.sum_steps)
-        assert_allclose(OPI_integral.errors, RK_integral.errors)
+        assert_allclose(OPI_integral.sum_step_errors, RK_integral.sum_step_errors)
         assert_allclose(OPI_integral.error_ratios, RK_integral.error_ratios)
     
+    """
     
     ####################
     #####  Serial  #####

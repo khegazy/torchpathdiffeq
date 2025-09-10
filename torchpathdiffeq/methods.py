@@ -9,32 +9,47 @@ class _Tableau():
     c: torch.Tensor
     b: torch.Tensor
     b_error: torch.Tensor
+    
+    def to_dtype(self, dtype):
+        self.c = self.c.to(dtype)
+        self.b = self.b.to(dtype)
+        self.b_error = self.b_error.to(dtype)
+    
+    def to_device(self, device):
+        self.c = self.c.to(device) 
+        self.b = self.b.to(device) 
+        self.b_error = self.b_error.to(device)
 
-@dataclass
+
 class MethodClass():
     order: int
     tableau: _Tableau
 
-def _tableau_to_device(tableau, device):
-    tableau.c = tableau.c.to(device) 
-    tableau.b = tableau.b.to(device) 
-    tableau.b_error = tableau.b_error.to(device)
+    def __init__(self, order, tableau):
+        self.order = order
+        self.tableau = tableau
+    
+    def to_dtype(self, dtype):
+        self.tableau.to_dtype(dtype)
+    
+    def to_device(self, device):
+        self.tableau.to_device(device)
 
-    return tableau
+
 
 _ADAPTIVE_HEUN = MethodClass(
     order = 2,
     tableau = _Tableau(
-        c = torch.tensor([0.0, 1.0]),
-        b = torch.tensor([[0.5, 0.5]]),
-        b_error = torch.tensor([[0.5, -0.5]])
+        c = torch.tensor([0.0, 1.0], dtype=torch.float64),
+        b = torch.tensor([[0.5, 0.5]], dtype=torch.float64),
+        b_error = torch.tensor([[0.5, -0.5]], dtype=torch.float64)
     )
 )
 
 _FEHLBERG2 = MethodClass(
     order = 2,
     tableau = _Tableau(
-        c = torch.tensor([0.0, 0.5, 1.0]),
+        c = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64),
         b = torch.tensor([1 / 512, 255 / 256, 1 / 512], dtype=torch.float64),
         b_error = torch.tensor([-1 / 512, 0, 1 / 512], dtype=torch.float64)
     )
@@ -43,7 +58,7 @@ _FEHLBERG2 = MethodClass(
 _BOGACKI_SHAMPINE = MethodClass(
     order = 3,
     tableau = _Tableau(
-        c = torch.tensor([0.0, 0.5, 0.75, 1.0]),
+        c = torch.tensor([0.0, 0.5, 0.75, 1.0], dtype=torch.float64),
         b = torch.tensor([2 / 9, 1 / 3, 4 / 9, 0.], dtype=torch.float64),
         b_error = torch.tensor(
             [2 / 9 - 7 / 24, 1 / 3 - 1 / 4, 4 / 9 - 1 / 3, -1 / 8],
@@ -98,27 +113,53 @@ UNIFORM_METHODS = {
 #####  Variable Sampling Adaptive Methods #####
 ###############################################
 
-class _VARIABLE_SECOND_ORDER():
+class _VariableSubclass():
+    def __init__(self, device):
+        self.device = device
+    
+    def to_device(self, device):
+        raise NotImplementedError
+    
+    def to_dtype(self, dtype):
+        raise NotImplementedError
+
+class _VARIABLE_SECOND_ORDER(_VariableSubclass):
     order = 2
     n_tableau_c = 2
     
     def __init__(self, device=None) -> None:
+        super().__init__(device)
         self.device = device
-        self.tableau = _tableau_to_device(_ADAPTIVE_HEUN.tableau, self.device)
+        self.tableau = _ADAPTIVE_HEUN.tableau
     
+    def to_device(self, device):
+        self.tableau.to_device(device)
+    
+    def to_dtype(self, dtype):
+        self.tableau.to(dtype)
+
     def tableau_b(self, c):
         b = self.tableau.b
         b_error = self.tableau.b_error
         return b, b_error
 
 
-class _VARIABLE_THIRD_ORDER():
+class _VARIABLE_THIRD_ORDER(_VariableSubclass):
     order = 3
     n_tableau_c = 3
     
     def __init__(self, device=None) -> None:
+        super().__init__(device)
         self.device = device
-        self.b_delta = torch.tensor([[0.5, 0.0, 0.5]], device=self.device) 
+        self.b_delta = torch.tensor(
+            [[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device
+        )
+    
+    def to_device(self, device):
+        self.b_delta = self.b_delta.to(device)
+    
+    def to_dtype(self, dtype):
+        self.b_delta = self.b_delta.to(dtype)
     
     def _b0(self, a):
         return 0.5 - 1./(6*a)
@@ -156,11 +197,13 @@ VARIABLE_METHODS = {
 }
 
 
-def _get_method(sampling_type, method_name, device):
+def _get_method(sampling_type, method_name, device, dtype):
     if sampling_type == steps.ADAPTIVE_UNIFORM:
         method = UNIFORM_METHODS[method_name]
-        method.tableau = _tableau_to_device(method.tableau, device) 
+        #method.tableau = _tableau_to_device(method.tableau, device) 
     else:
         method = VARIABLE_METHODS[method_name](device)
-    
+
+    method.to_device(device)
+    method.to_dtype(dtype) 
     return method

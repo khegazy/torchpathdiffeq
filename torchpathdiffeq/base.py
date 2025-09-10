@@ -4,9 +4,6 @@ from enum import Enum
 
 from .distributed import DistributedEnvironment
 
-ATOL_ASSERT=1e-15*1e10
-RTOL_ASSERT=1e-7*1e3
-
 class steps(Enum):
     FIXED = 0
     ADAPTIVE_UNIFORM = 1
@@ -29,14 +26,18 @@ def get_sampling_type(sampling_type : str):
 class IntegralOutput():
     integral: torch.Tensor
     loss: torch.Tensor = None
-    t_pruned: torch.Tensor = None
+    gradient_taken: bool = None
+    t_optimal: torch.Tensor = None
     t: torch.Tensor = None
     h: torch.Tensor = None
     y: torch.Tensor = None
     sum_steps: torch.Tensor = None
     integral_error: torch.Tensor = None
-    errors: torch.Tensor = None
+    sum_step_errors: torch.Tensor = None
     error_ratios: torch.Tensor = None
+    t_init: torch.Tensor = None
+    t_final: torch.Tensor = None
+    y0: torch.Tensor = None
 
 @dataclass
 class MethodOutput():
@@ -58,6 +59,7 @@ class SolverBase(DistributedEnvironment):
             t_init=torch.tensor([0], dtype=torch.float64),
             t_final=torch.tensor([1], dtype=torch.float64),
             dtype=torch.float64,
+            eval=False,
             device=None,
             *args,
             **kwargs
@@ -68,10 +70,53 @@ class SolverBase(DistributedEnvironment):
         self.atol = atol
         self.rtol = rtol
         self.ode_fxn = ode_fxn
+        self.y0 = y0.to(self.device)
+        self.t_init = t_init.to(self.device)
+        self.t_final = t_final.to(self.device)
+        self.training = not eval
+        self.t_step_barriers_previous = None
+        self.previous_ode_fxn = None
+
+        self._set_dtype(dtype)
+   
+    def _set_dtype(self, dtype):
+        """
+        Set integrator data type if different from type
+        """
+        if hasattr(self, "dtype") and dtype == self.dtype:
+            return
+        
         self.dtype = dtype
-        self.y0 = y0.to(self.dtype).to(self.device)
-        self.t_init = t_init.to(self.dtype).to(self.device)
-        self.t_final = t_final.to(self.dtype).to(self.device)
+        self.y0 = self.y0.to(self.dtype)
+        self.t_init = self.t_init.to(self.dtype)
+        self.t_final = self.t_final.to(self.dtype)
+        if self.t_step_barriers_previous is not None:
+            self.t_step_barriers_previous = self.t_step_barriers_previous.to(self.dtype)
+        
+        if self.dtype == torch.float64:
+            self.atol_assert = 1e-15
+            self.rtol_assert = 1e-7
+        elif self.dtype == torch.float32:
+            self.atol_assert = 1e-7
+            self.rtol_assert = 1e-5
+        elif self.dtype == torch.float16:
+            self.atol_assert = 1e-3
+            self.rtol_assert = 1e-1
+        else:
+            raise ValueError("Given dtype must be torch.float64, torch.float32, or torch.float16")
+        
+        self._set_solver_dtype(self.dtype)
+ 
+    def set_dtype_by_input(self, t=None, t_init=None, t_final=None):
+        if t is not None:
+            self._set_dtype(t.dtype)
+        elif t_init is not None:
+            self._set_dtype(t_init.dtype)
+        elif t_final is not None:
+            self._set_dtype(t_final.dtype)
+    
+    def _set_solver_dtype(self, dtype):
+        raise NotImplementedError
 
 
     def _check_variables(self, ode_fxn=None, t_init=None, t_final=None, y0=None):
@@ -88,6 +133,12 @@ class SolverBase(DistributedEnvironment):
         if y0 is not None:
             y0 = y0.to(self.dtype).to(self.device)
         return ode_fxn, t_init, t_final, y0
+
+    def train(self):
+        self.training = True
+    
+    def eval(self):
+        self.training = False
 
 
     def _calculate_integral(self, t, y, y0=torch.tensor([0], dtype=torch.float64)):
@@ -109,8 +160,8 @@ class SolverBase(DistributedEnvironment):
         raise NotImplementedError
 
     def _integral_loss(self, integral, *args, **kwargs):
-        return integral
-
+        return integral.integral
+    
     def integrate(
             self,
             ode_fxn,

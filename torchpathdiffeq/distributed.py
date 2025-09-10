@@ -1,7 +1,7 @@
 import os
-import hostlist
 import torch
 import torch.distributed as dist
+#import hostlist
 
 ###########################################################################################
 # Slurm environment setup for distributed training.
@@ -80,7 +80,9 @@ class DistributedEnvironment():
 
 
     def init_slurm_environment(self):
-        hostname = hostlist.expand_hostlist(os.environ['SLURM_JOB_NODELIST'])[0]
+        #hostname = hostlist.expand_hostlist(os.environ['SLURM_JOB_NODELIST'])[0]
+        hostname="UNKNOWN"
+        raise ValueError("Find new way to get hostname, hostlist package uses deprecated dependencies")
         os.environ['MASTER_ADDR'] = hostname
         os.environ['MASTER_PORT'] = os.environ.get('MASTER_PORT', '33333')
         os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']

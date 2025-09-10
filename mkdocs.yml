@@ -1,5 +1,5 @@
 site_name: torchpathdiffeq
-site_author: YourName
+site_author: Kareem Hegazy
 site_description: >-
   This is the torchpathdiffeq package!
 nav:
@@ -33,7 +33,7 @@ nav:
       - example_docs/about/conduct.md
       - example_docs/about/license.md
 
-repo_url: https://github.com/Quantum-Accelerators/torchpathdiffeq/
+repo_url: https://github.com/khegazy/torchpathdiffeq/
 edit_uri: blob/main/docs/
 
 theme:
