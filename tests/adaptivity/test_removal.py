@@ -31,5 +31,5 @@ def test_removal():
             t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
             t_optimal_flat = torch.flatten(t_optimal, start_dim=0, end_dim=1)
             assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
-            assert np.allclose(integral_output.t[:-1,-1,:], integral_output.t[1:,0,:])
+            assert torch.allclose(integral_output.t[:-1,-1,:], integral_output.t[1:,0,:])
             t = t_optimal

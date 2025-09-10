@@ -55,7 +55,7 @@ def test_integrals():
                 )
                 print("SERIAL", serial_integral.integral, torch.abs((serial_integral.integral - correct)/correct))
                 """
-                assert torch.abs((integral_output.integral - correct)/correct) < cutoff, error_string
+                assert torch.abs((integral_output.integral.cpu() - correct)/correct) < cutoff, error_string
 
                 t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
                 t_optimal_flat = torch.flatten(integral_output.t_optimal, start_dim=0, end_dim=1)

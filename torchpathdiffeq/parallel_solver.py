@@ -540,15 +540,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             result = ode_fxn(t_input, *ode_args)
             mem_after = self._get_memory()
             del result
-            self.ode_unit_mem_size = max(0, (mem_before[0] - mem_after[0])/float(N))
+            self.ode_unit_mem_size = 2.1*max(0, (mem_before[0] - mem_after[0])/float(N))
             eval_time = time.time() - t0
             N = 10*N
             max_evals = self._get_max_ode_evals(0.8)
-        print("Ending unit memory search", self.ode_unit_mem_size)
+        print("Ending unit memory search")
 
     def _get_usable_memory(self, total_mem_usage): 
         free, total = self._get_memory()
-        return total_mem_usage*free
+        buffer = (1 - total_mem_usage)*total
+        return max(0, free - buffer)
     
     def _get_max_ode_evals(self, total_mem_usage):
         usable = self._get_usable_memory(total_mem_usage)
@@ -603,38 +604,30 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         # Set dtype based on input
         self.set_dtype_by_input(t=t, t_init=t_init, t_final=t_init)
 
-        # If t is given it must be consistent with given t_init and t_final
-        t_init = self.t_init if t_init is None else t_init.to(self.dtype)
-        t_final = self.t_final if t_final is None else t_final.to(self.dtype)
+        # If t is given set t_init and t_final, else use input, else use save values
+        if t is not None:
+            assert len(t.shape) == 2
+            t = t.to(self.dtype).to(self.device)
+            if t_init is not None or t_final is not None:
+                assert t_init is not None and t_final is not None,\
+                    "Must provide both 't_init' and 't_final' or leave them both as None"
+                t_init = t_init.to(self.dtype).to(self.device)
+                t_final = t_final.to(self.dtype).to(self.device)
+                assert torch.allclose(t[0], t_init, atol=self.atol_assert, rtol=self.rtol_assert)
+                assert torch.allclose(t[-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert)
+            t_init = t[0]
+            t_final = t[-1]
+            assert t_init < t_final,\
+                "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider effects to your ode_fxn."
+        else:
+            t_init = self.t_init if t_init is None else t_init
+            t_final = self.t_final if t_final is None else t_final
+        t_init = t_init.to(self.dtype).to(self.device)
+        t_final = t_final.to(self.dtype).to(self.device)
 
         # Replace max_batch if default it given
         max_batch = self.max_batch if max_batch is None else max_batch
 
-        if t is not None:
-            assert len(t.shape) == 2
-            #TODO: Do I need below for the variable case, it should not be in the uniform case. Check rest of if statement for both cases. Might need to remove above assert
-            """
-            if len(t.shape) == 2:
-                assert torch.all(t[1:] + self.atol_assert > t[:-1])
-                if self.Cm1 > 1:
-                    error_message = f"When giving t (with 2 dims) the first dimension (N) must satisfy N % {self.Cm1} = 1 in order to be properly divided into integration steps for the {self.method_name} method."
-                    assert len(t) % self.Cm1 == 1, error_message
-            if len(t.shape) == 3:
-                error_message = f"When giving t (with 3 dims) the second dimension must match the integration method's number of samples per step. For {self.method_name} it's {self.C}"
-                assert t.shape[1] == self.C, error_message
-                assert torch.all(
-                    torch.flatten(t, 0, 1)[1:] + self.atol_assert >= torch.flatten(t, 0, 1)[:-1]
-                )
-            """
-            if t_init is None:
-                t_init = t[0]
-            else:
-                assert torch.allclose(t[0], t_init, atol=self.atol_assert, rtol=self.rtol_assert)
-            if t_final is None:
-                t_final = t[-1]
-            else:
-                assert torch.allclose(t[-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert)
-        #assert t_init < t_final, "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
         
         # Get variables or populate with default values, send to correct device
         ode_fxn, t_init, t_final, y0 = self._check_variables(
@@ -648,9 +641,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
         if not same_ode_fxn and max_batch is None:
             self._setup_memory_checks(ode_fxn, t_init, ode_args=ode_args)
-
-            assert self._get_max_ode_evals(total_mem_usage) > (2*self.Cm1 + 1),\
-                "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        assert self._get_max_ode_evals(total_mem_usage) > (2*self.Cm1 + 1),\
+            "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
 
         # Make sure ode_fxn exists and provides the correct output
@@ -724,8 +716,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 *ode_args
             )
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
-            assert y_step_eval.dtype == t.dtype,\
-                "Integrator dtype is determined by input time dtype, it must match ode_fxn output dtype"
             
             # Evaluate integral
             t0 = time.time()

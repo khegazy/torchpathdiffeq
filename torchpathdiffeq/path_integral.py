@@ -19,7 +19,7 @@ def ode_path_integral(
         remove_cut=0.1,
         total_mem_usage=0.9,
         use_absolute_error_ratio=True,
-        device='cpu',
+        device=None,
         **kwargs
     ):
     """

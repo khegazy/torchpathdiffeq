@@ -14,7 +14,7 @@ def wolf_schlegel(t, y=None):
     while len(t.shape) < 2:
         t = t.unsqueeze(0)
 
-    interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
+    interpolate = WS_min_init.to(t.device) + t*(WS_min_final - WS_min_init).to(t.device)
     x = interpolate[:,0].unsqueeze(-1)
     y = interpolate[:,1].unsqueeze(-1)
 
@@ -29,7 +29,7 @@ class wf():
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
 
-        interpolate = WS_min_init + (WS_min_final - WS_min_init)*t
+        interpolate = WS_min_init.to(t.device) + t*(WS_min_final - WS_min_init).to(t.device)
         x = interpolate[:,0].unsqueeze(-1)
         y = interpolate[:,1].unsqueeze(-1)
 
@@ -72,7 +72,6 @@ def test_chemistry():
 
             parallel_integral = parallel_integrator.integrate()
             serial_integral = serial_integrator.integrate()
-            print("USING METHOD", method, serial_method)
 
             error = torch.abs(parallel_integral.integral - serial_integral.integral)
             error_tolerance = atol + rtol*torch.abs(serial_integral.integral)

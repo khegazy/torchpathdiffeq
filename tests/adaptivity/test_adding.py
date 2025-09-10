@@ -47,7 +47,7 @@ def test_adding():
         t = torch.linspace(0, 1., integrator.Cm1+1).unsqueeze(1)
         for idx in range(3):
             integral_output = integrator.integrate(t=t)
-            assert (integral_output.integral - correct)/correct < atol
+            assert (integral_output.integral.cpu() - correct)/correct < atol
             t_optimal = integral_output.t_optimal
             if idx < 1:
                 error_message = f"For {type} integrator method {method}: length of t {t.shape} shoud be < to t_optimal {t_optimal.shape}"
@@ -58,5 +58,5 @@ def test_adding():
             t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
             t_optimal_flat = torch.flatten(t_optimal, start_dim=0, end_dim=1)
             assert torch.all(t_flat[1:] - t_flat[:-1] >= 0)
-            assert np.allclose(integral_output.t[:-1,-1,:], integral_output.t[1:,0,:])
+            assert torch.allclose(integral_output.t[:-1,-1,:], integral_output.t[1:,0,:])
             t = t_optimal
