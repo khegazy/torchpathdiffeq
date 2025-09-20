@@ -490,7 +490,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 record[key] = record[key][sorted_idxs]
         all_ascending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] > 0)
         all_descending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] < 0)
-        assert all_ascending or all_descending
+        assert all_ascending or all_descending, "Times are required to be either in ascending or descending order"
         return record
 
     def _get_cpu_memory(self):
@@ -564,7 +564,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_final=None,
             N_init_steps=13,
             ode_args=(),
-            take_gradient=None,
+            take_gradient=False,
             total_mem_usage=None,
             loss_fxn=None,
             max_batch=None,
@@ -971,7 +971,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         
         # Check that t is ordered and first/last match
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
+        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0) #DEBUG, hit this error
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert>= 0)
 
