@@ -1,12 +1,90 @@
+import os
 import torch
 import numpy as np
 from torch import nn
 import torchpathdiffeq as tpd
+from torchdiffeq import odeint
+import matplotlib.pyplot as plt
 
+experiments = {
+    "exp_test_sol" : {
+        'problem' : 'exp_test_sol',
+        'model' : {
+            'activation' : nn.Tanh(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-6,
+                'rtol' : 1e-5
+            },
+            'loss_type' : 'solution',
+            'loss_fxn' : 'relative_MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-2, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 10,
+            'N_epochs': 100000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-6
+        },
+        'dtype' : torch.float64
+    },
+    "exp_test" : {
+        'problem' : 'exp_test',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-7,
+                'rtol' : 1e-6
+            },
+            'loss_type' : 'ode',
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 3e-4, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 10,
+            'N_epochs': 100000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-3
+        },
+        'dtype' : torch.float64
+    },
+    "x_squared_sol" : {
+        'problem' : 'x_squared',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-6,
+                'rtol' : 1e-5
+            },
+            'loss_type' : 'solution',
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 10,
+            'N_epochs': 1000000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-4
+        },
+        'dtype' : torch.float64
+    },    
+}
 
 class BaseODE():
-    def __init__(self, N_dims):
+    def __init__(self, N_dims, dtype=torch.float64):
         self.N_dims = N_dims
+        self.dtype = dtype
     
     def __call__(self, t):
         raise NotImplementedError
@@ -14,22 +92,52 @@ class BaseODE():
 class linear(BaseODE):
     def __init__(self):
         super().__init__(1)
-
-    def __call__(self, t):
+        self.__name__ = 'linear' 
+    
+    def __call__(self, t, y):
         return t
 
 class quadratic(BaseODE):
-    def __init__(self):
-        super().__init__(1)
+    def __init__(self, **kwargs):
+        super().__init__(1, **kwargs)
+        self.__name__ = 'quadratic'
+        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
+        self.t_init = 0.0
     
-    def __call__(self, t):
+    def __call__(self, t, y):
         return t**2
 
+class exp_test(BaseODE):
+    __name__ = 'exp_test'
+    def __init__(self, **kwargs):
+        super().__init__(1, **kwargs)
+        self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
+        self.t_init = 0.0
+    
+    def __call__(self, t, y):
+        return torch.exp(-2 * t) - 3 * y
+
+class exp_test_sol(BaseODE):
+    __name__ = 'exp_test_sol'
+    def __init__(self, **kwargs):
+        super().__init__(1, **kwargs)
+        self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
+        self.t_init = 0.0
+    
+    def __call__(self, t, y=None):
+        return torch.exp(-2 * t) + 3 * torch.exp(-3 * t)
+
+def get_problem(name, dtype=torch.float64):
+    if 'x_squared' in name:
+        return quadratic(dtype=dtype)
+    elif name == 'exp_test':
+        return exp_test(dtype=dtype)
+    elif name == 'exp_test_sol':
+        return exp_test_sol(dtype=dtype)
 
 class CurriculumClass():
-    def __init__(self, curr_type, t_pred, config, N_epochs=None):
+    def __init__(self, curr_type, t_pred, t_max, config, dtype=torch.float64, N_epochs=None):
         self.curr_type = curr_type
-        self.t_pred = t_pred
         self.config = config
         self.N_epochs = N_epochs
         self.previous_loss = 0
@@ -37,8 +145,10 @@ class CurriculumClass():
         self.N_history = 10
         self.loss_history = torch.zeros(self.N_history)
         self._idx = 0
+        self.dtype = dtype
 
-
+        self.t_pred = torch.tensor(t_pred, dtype=self.dtype)
+        self.t_max = torch.tensor(t_max, dtype=self.dtype)
         if self.curr_type is not None:
             self._is_curriculum_available(self.curr_type)
             self._update_curriculum = getattr(self, self.curr_type)
@@ -80,7 +190,12 @@ class CurriculumClass():
         self._idx = (self._idx + 1) % self.N_history
         self.loss_std_ratio = torch.std(self.loss_history)/torch.abs(torch.mean(self.loss_history))
 
-        return self._update_curriculum(epoch)
+        if self.t_pred != self.t_max:
+            t_update = self._update_curriculum(epoch)
+            t_update = torch.minimum(t_update, self.t_max)
+            self.t_pred = t_update
+            return self.t_pred
+        
     
     def _pass(self, *args, **kwargs):
         pass
@@ -103,7 +218,7 @@ class CurriculumClass():
             raise ValueError(f"Cannot handle metric type {self.config['metric']}")
 
         if update:
-            self.t_pred = self.t_pred*(1 + self.config['scale'])
+            return self.t_pred*(1 + self.config['scale'])
         return self.t_pred
 
     def __exponential(self, epoch, **kwargs):
@@ -145,17 +260,26 @@ class CurriculumClass():
 class DenseNet(nn.Module):
     def __init__(
             self,
+            t_init,
+            initial_condition,
             layers,
+            N_output_dims,
             dtype=torch.float64,
+            activation=nn.GELU(),
             output_activation=None,
             normalize=False
         ):
         super().__init__()
 
-        self.n_layers = len(layers) - 1
+        self.initial_condition = initial_condition
+        self.t_init = t_init
+        
+        self.n_layers = len(layers)
         assert self.n_layers >= 1
+        layers.append(N_output_dims)
         self.dtype=dtype
-        self.activation = nn.GELU()
+        self.activation = activation
+        #self.activation = nn.GELU()
         #self.activation = nn.Tanh()
         #self.activation = nn.ELU()
         
@@ -172,41 +296,82 @@ class DenseNet(nn.Module):
             self.layers.append(nn.GELU())
     
     def forward(self, x):
+        x = x - self.t_init
         x = torch.movedim(x, 1, -1)
         for l in self.layers:
             x = l(x)
         x = torch.movedim(x, -1, 1)
-        return x
+        return x + self.initial_condition
 
 class Trainer(CurriculumClass):
     def __init__(
             self,
             model,
             integrator_config,
+            loss_type='ode',
+            loss_fxn='MSE',
             lr=1e-3,
             N_epochs=None,
-            t_max=None,
+            t_max=torch.inf,
             t_pred=0.1,
             t_init=0.0,
             curr_type=None,
-            curr_config=None
+            curr_config=None,
+            dtype=torch.float64
         ) -> None:
-        super().__init__(curr_type=curr_type, t_pred=t_pred, config=curr_config)
-        self.dtype = model.dtype
+        super().__init__(curr_type=curr_type, t_pred=t_pred, t_max=t_max, config=curr_config, dtype=dtype)
         self.model = model
+        self.sub_dir = os.path.join(loss_type, loss_fxn)
+        self.plot_colors = ['k', 'b', 'r', 'g']
 
         assert N_epochs is not None or t_max is not None
         self.N_epochs = np.inf if N_epochs is None else N_epochs
-        self.t_max = np.inf if t_max is None else t_max
 
 
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, weight_decay=1e-5)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
-        #self.loss_fxn = self._relative_MSE
-        self.loss_fxn = self._relative_MSE
+        if loss_fxn == 'MSE':
+            self.loss_fxn = self._MSE
+        elif loss_fxn == 'relative_MSE':
+            self.loss_fxn = self._relative_MSE
+        else:
+            raise ValueError(f"Can't get loss {loss_fxn}")
 
+        if loss_type.lower() == 'ode':
+            self.loss_integrad = self.ode_integrad
+        else:
+            self.loss_integrad = self.solution_integrad
+        
         self.integrator = tpd.RKParallelUniformAdaptiveStepsizeSolver(
             **integrator_config
+        )
+
+    def plot_results(self, time, pred, solution, epoch):
+        N_vars = pred.shape[-1]
+        fig, axes = plt.subplots(2, 1)
+        for i in range(N_vars):
+            for j in range(2):
+                axes[j].plot(time[:,0], solution[:,i], color=self.plot_colors[i], alpha=0.5)
+                axes[j].plot(time[:,0], pred[:,i].detach().numpy(), color=self.plot_colors[i], linestyle=":")
+        axes[1].set_yscale('log')
+        fig.tight_layout()
+        fig.savefig(os.path.join(self.plot_dir, f"training_{epoch}.png"))
+
+    def eval_results(self, t_init, epoch_count):
+        t_eval_max = self.t_pred if self.t_max == np.inf else self.t_max
+        t_eval = torch.linspace(
+            t_init, t_eval_max, 1000, dtype=self.dtype
+        ).unsqueeze(-1)
+        eval_output = odeint(
+            self.ode_fxn, 
+            self.ode_fxn.initial_condition[0], 
+            t_eval[:,0]
+        )
+        self.plot_results(
+            t_eval,
+            self.model(t_eval),
+            eval_output,
+            epoch_count
         )
 
     @staticmethod
@@ -231,32 +396,44 @@ class Trainer(CurriculumClass):
     def _MSE_combined(self, pred, target):
         return self._MSE(pred, target) + self._relative_MSE(pred, target)
 
-    def loss_integrad(self, t, model, verbose=False):
-        jac = model(t)
-        """
+    def solution_integrad(self, t, model, verbose=False):
+        pred = model(t)
+        
+        #TODO: use guassian instead and t_init
+        #scale = torch.exp(-1*t)
+        #scale /= 1.0 - torch.exp(-1*torch.tensor(self.t_pred))
+        if verbose:
+            print("pred", pred)
+            print("targ", self.ode_fxn(t, pred))
+            #print("scale", scale)
+        return self.loss_fxn(pred, self.ode_fxn(t, pred))
+  
+    def ode_integrad(self, t, model, verbose=False):
         jac = torch.autograd.functional.jacobian(
             lambda t: torch.sum(model(t), axis=0),
             t,
             create_graph=True,
             vectorize=True,
         ).transpose(0, 1)[:, :, 0]
-        """
         
         #TODO: use guassian instead and t_init
-        scale = torch.exp(-1*t)
+        #scale = torch.exp(-1*t)
         #scale /= 1.0 - torch.exp(-1*torch.tensor(self.t_pred))
         if verbose:
             print("pred", jac)
-            print("targ", self.ode_fxn(t))
+            print("targ", self.ode_fxn(t, model(t)))
             #print("scale", scale)
-        return self.loss_fxn(jac, self.ode_fxn(t))*scale
-    
+        return self.loss_fxn(jac, self.ode_fxn(t, model(t)))
+  
 
     def train(self, ode_fxn, initial_condition, t_init=0.0):
         self.ode_fxn = ode_fxn
-        t_init = torch.tensor([t_init], requires_grad=True, dtype=self.dtype).unsqueeze(-1)
+        self.plot_dir = os.path.join("plots", self.ode_fxn.__name__, self.sub_dir)
+        os.makedirs(self.plot_dir, exist_ok=True)
+        t_init = t_init 
+        t_init_eval = torch.tensor([t_init], requires_grad=True, dtype=self.dtype).unsqueeze(-1)
         self.model.train()
-        self.model.compile()
+        #self.model.compile()
 
         print("Optimizer Parameters:")
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -273,7 +450,7 @@ class Trainer(CurriculumClass):
                     print(f"  {key}: {value}")
         # Train t0
         loss_ratio, error_ratio, t0_count = 1, 1e10, 0
-        print(self.model(t_init), self.ode_fxn(t_init))
+        print(self.model(t_init_eval), self.ode_fxn(t_init_eval, self.model(t_init_eval)))
         prev_loss = 1.0
         pred = torch.ones(1)
         print("Training initial conditions")
@@ -281,7 +458,7 @@ class Trainer(CurriculumClass):
             if t0_count % 100 == 0:
                 print(f"T0 count {t0_count} | loss ratio: {loss_ratio} / error ratio: {error_ratio} / prediction: {torch.squeeze(pred).item()}")
             self.optimizer.zero_grad()
-            pred = self.model(t_init) 
+            pred = self.model(t_init_eval) 
             loss = torch.mean(
                 self.loss_fxn(pred, initial_condition)
             )
@@ -300,21 +477,25 @@ class Trainer(CurriculumClass):
             t0_count += 1
         print("Finished training initial conditions", loss_ratio, error_ratio)
 
-        times, epoch_count = t_init, 0
+        times, epoch_count = t_init_eval, 0
         train_criteria = True
+        integral_output = None
         while train_criteria:
-            if epoch_count % 250 == 0:
+            if epoch_count % 1000 == 0:
                 print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()}")
-                print("INIT", torch.squeeze(t_init).item(), torch.squeeze(self.model(t_init)).item())
+                print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).item())
                 self.loss_integrad(torch.arange(10, dtype=self.dtype).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True)
-                self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
+                #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
+                if integral_output is not None:
+                    print(integral_output.t[:,0,0])
+                self.eval_results(t_init, epoch_count)
             self.optimizer.zero_grad()
             self.update_curriculum(epoch_count, loss)
             if times[-1] < self.t_pred:
                 times = torch.concatenate(
                     [times, torch.tensor([self.t_pred]).unsqueeze(-1)], dim=0
                 )
-            times = torch.tensor([t_init, self.t_pred]).unsqueeze(-1)
+            times = torch.tensor([t_init, self.t_pred], dtype=self.dtype).unsqueeze(-1)
             #print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
             integral_output = self.integrator.integrate(
                 ode_fxn=self.loss_integrad, t=times, ode_args=(self.model,)
@@ -334,10 +515,10 @@ class Trainer(CurriculumClass):
             loss.backward()
             """
             # T0 loss
-            init_loss = 10000*torch.mean(
-                self.loss_fxn(self.model(t_init), initial_condition)
+            init_loss = torch.mean(
+                self.loss_fxn(self.model(t_init_eval), initial_condition)
             )
-            #init_loss.backward()
+            init_loss.backward()
             #print("GRAD", self.model.layers[0].weight.grad[:5]*1e5)
             self.optimizer.step()
             #print("AFTER", self.model.layers[0].weight.data[:5])
@@ -346,19 +527,30 @@ class Trainer(CurriculumClass):
             #times.requires_grad_(True)
 
             epoch_count += 1
-            train_criteria = self.N_epochs is not None and epoch_count < self.N_epochs
-            train_criteria *= self.t_max is not None and times[-1,0] < self.t_max
+            if self.N_epochs is not None:
+                train_criteria = epoch_count < self.N_epochs
+            else:
+                train_criteria = times[-1,0] < self.t_max
 
+        self.eval_results(t_init, epoch_count)
 
         
 
 if __name__ == "__main__":
+    config = experiments['exp_test']
     # Get ODE
     #ode_fxn = linear()
-    ode_fxn = quadratic()
+    #ode_fxn = quadratic()
+    ode_fxn = get_problem(config['problem'], dtype=config['dtype'])
 
     # Get Model
-    model = DenseNet([1, 32, 64, 32, ode_fxn.N_dims])
+    model = DenseNet(
+        t_init=ode_fxn.t_init,
+        initial_condition=ode_fxn.initial_condition,
+        N_output_dims=ode_fxn.N_dims,
+        **config['model'],
+        dtype=config['dtype']
+    )
 
     # Get Integrator
     
@@ -369,21 +561,27 @@ if __name__ == "__main__":
     # Setup Trainer
     trainer = Trainer(
         model=model,
-        integrator_config={
-            'method' : 'dopri5',
-            'atol' : 1e-5,
-            'rtol' : 1e-3
-        },
-        curr_type='exponential',
-        curr_config={'metric' : 'loss', 'cut_off' : 1e-4, 'scale' : 0.05},
-        t_pred=1e-3,
-        t_max=100,
-        #t_init_lr=1e-10,
-        lr=1e-5
+        **config['trainer'],
+        dtype=config['dtype']
     )
+    """
+        integrator_config={
+            'method' : 'adaptive_heun',
+            'atol' : 1e-5,
+            'rtol' : 1e-4
+        },
+        curr_type=None,#'exponential',
+        curr_config={'metric' : 'loss', 'cut_off' : 1e-4, 'scale' : 0.05},
+        t_pred=10,
+        t_max=100,
+        N_epochs=100000,
+        #t_init_lr=1e-10,
+        lr=1e-5#1e-5
+    )
+    """
 
     # Solve ODE
-    trainer.train(ode_fxn, initial_condition=torch.zeros((1,1)))
+    trainer.train(ode_fxn, initial_condition=ode_fxn.initial_condition)#torch.zeros((1,1)))
 
     # Evaluate Solver
 
