@@ -4,6 +4,7 @@ import numpy as np
 from torch import nn
 import torchpathdiffeq as tpd
 from torchdiffeq import odeint
+from scipy.integrate import solve_bvp
 import matplotlib.pyplot as plt
 
 experiments = {
@@ -19,7 +20,6 @@ experiments = {
                 'atol' : 1e-6,
                 'rtol' : 1e-5
             },
-            'loss_type' : 'solution',
             'loss_fxn' : 'relative_MSE',
             'curr_type': 'exponential',
             'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-2, 'scale' : 0.05},
@@ -43,7 +43,6 @@ experiments = {
                 'atol' : 1e-7,
                 'rtol' : 1e-6
             },
-            'loss_type' : 'ode',
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
             'curr_config' : {'metric' : 'loss', 'cut_off' : 3e-4, 'scale' : 0.05},
@@ -67,7 +66,6 @@ experiments = {
                 'atol' : 1e-6,
                 'rtol' : 1e-5
             },
-            'loss_type' : 'solution',
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
             'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
@@ -79,6 +77,98 @@ experiments = {
         },
         'dtype' : torch.float64
     },    
+    "linear" : {
+        'problem' : 'linear',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-7,
+                'rtol' : 1e-6
+            },
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 25,
+            'N_epochs': 100000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-3
+        },
+        'dtype' : torch.float64
+    },
+    "quadratic" : {
+        'problem' : 'quadratic',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-7,
+                'rtol' : 1e-6
+            },
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 25,
+            'N_epochs': 100000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-3
+        },
+        'dtype' : torch.float64
+    },
+    "lotka_volterra" : {
+        'problem' : 'lotka_volterra',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-7,
+                'rtol' : 1e-6
+            },
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 3e-4, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 20,
+            'N_epochs': 100000000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 5e-3
+        },
+        'dtype' : torch.float64
+    },
+    "poisson" : {
+        'problem' : 'poisson',
+        'model' : {
+            'activation' : nn.GELU(),
+            'layers' : [1, 64, 64] 
+        },
+        'trainer' :{
+            'integrator_config' : {
+                'method' : 'dopri5',
+                'atol' : 1e-7,
+                'rtol' : 1e-6
+            },
+            'loss_fxn' : 'MSE',
+            'curr_type': 'exponential',
+            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            't_pred' : 0.1,
+            't_max': 25,
+            'N_epochs': 100000,
+            #'t_init_lr' : 1e-10,
+            'lr' : 1e-3
+        },
+        'dtype' : torch.float64
+    },
 }
 
 class BaseODE():
@@ -86,26 +176,59 @@ class BaseODE():
         self.N_dims = N_dims
         self.dtype = dtype
     
-    def __call__(self, t):
+    def ode(self, t, y):
         raise NotImplementedError
 
-class linear(BaseODE):
-    def __init__(self):
-        super().__init__(1)
-        self.__name__ = 'linear' 
-    
-    def __call__(self, t, y):
-        return t
+    def solve_ode(self, t_max):
+        self.sol_times = torch.arange(self.t_init, t_max)
+        self.solution = odeint(
+            self.ode, 
+            self.initial_condition[0], 
+            self.sol_times
+        )
 
-class quadratic(BaseODE):
+    def first_derivative(self, model, t):
+        return torch.autograd.functional.jacobian(
+            lambda t: torch.sum(model(t), axis=0),
+            t,
+            create_graph=True,
+            vectorize=True,
+        ).transpose(0, 1)[:, :, 0]
+    
+    def second_derivative(self, model, t):
+        return torch.autograd.functional.jacobian(
+            self.first_derivative(model, t),
+            t,
+            create_graph=True,
+            vectorize=True,
+        ).transpose(0, 1)[:, :, 0]
+
+
+class linear(BaseODE):
+    __init__ = 'linear'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
-        self.__name__ = 'quadratic'
         self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
         self.t_init = 0.0
     
-    def __call__(self, t, y):
+    def ode(self, t, y):
+        return t
+    
+    def train_eval(self, model, t):
+        return self.first_derivative(model, t), self.ode(t, model(t))
+
+class quadratic(BaseODE):
+    __name__ = 'quadratic'
+    def __init__(self, **kwargs):
+        super().__init__(1, **kwargs)
+        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
+        self.t_init = 0.0
+    
+    def ode(self, t, y):
         return t**2
+
+    def train_eval(self, model, t):
+        return self.first_derivative(model, t), self.ode(t, model(t))
 
 class exp_test(BaseODE):
     __name__ = 'exp_test'
@@ -114,8 +237,11 @@ class exp_test(BaseODE):
         self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
         self.t_init = 0.0
     
-    def __call__(self, t, y):
+    def ode(self, t, y):
         return torch.exp(-2 * t) - 3 * y
+    
+    def train_eval(self, model, t):
+        return self.first_derivative(model, t), self.ode(t, model(t))
 
 class exp_test_sol(BaseODE):
     __name__ = 'exp_test_sol'
@@ -124,16 +250,61 @@ class exp_test_sol(BaseODE):
         self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
         self.t_init = 0.0
     
-    def __call__(self, t, y=None):
+    def ode(self, t, y=None):
         return torch.exp(-2 * t) + 3 * torch.exp(-3 * t)
+    
 
-def get_problem(name, dtype=torch.float64):
-    if 'x_squared' in name:
+class LotkaVolterra(BaseODE):
+    __name__ = 'lotka_volterra'
+    def __init__(self, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0, conservation_weight=0.1, dtype=torch.float64):
+        super().__init__(2, dtype=dtype)
+        self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
+        self.t_init = torch.tensor(0.0, dtype=self.dtype)
+        self.initial_condition = torch.tensor([1, 2], dtype=self.dtype).unsqueeze(0) #DEBUG
+        print("DO NOT KNOW INIT CONDITIONS, FIX!!!!!!!!!!!!!!!!!!!!!!")
+
+    def ode(self, t, state_vec):
+        if len(state_vec.shape) > 1:
+            x, y = state_vec[:, 0], state_vec[:, 1]
+        else:
+            x, y = state_vec
+        dx_dt = self.alpha * x - self.beta * x * y
+        dy_dt = self.delta * x * y - self.gamma * y
+        return torch.stack([dx_dt, dy_dt], dim=-1)
+
+    def train_eval(self, model, t):
+        return self.first_derivative(model, t), self.ode(t, model(t))
+
+class Poisson(BaseODE):
+    __name__ = "poisson"
+    def __init__(self, N_dims, force_type, dtype=torch.float64):
+        super().__init__(N_dims, dtype=dtype)
+
+        self.ode = getattr(self, f"_{force_type}")
+    
+    def _source_analytical(self, t, y):
+        return -torch.sin(torch.pi * t)
+
+    def _source_numerical(self, t, y):
+        return torch.tanh(5 * (t - 0.5)) - torch.cos(10 * t)
+    
+    def train_eval(self, model, t):
+        return self.second_derivative(model, t), self.ode(t, model(t))
+    
+
+
+
+def get_problem(name, dtype=torch.float64, **kwargs):
+    if 'quadratic' in name:
         return quadratic(dtype=dtype)
     elif name == 'exp_test':
         return exp_test(dtype=dtype)
     elif name == 'exp_test_sol':
         return exp_test_sol(dtype=dtype)
+    elif name == 'lotka_volterra':
+        return LotkaVolterra(dtype=dtype, **kwargs)
+    else:
+        raise ValueError(f"Cannot get find problem {name}")
 
 class CurriculumClass():
     def __init__(self, curr_type, t_pred, t_max, config, dtype=torch.float64, N_epochs=None):
@@ -308,11 +479,10 @@ class Trainer(CurriculumClass):
             self,
             model,
             integrator_config,
-            loss_type='ode',
+            t_max,
             loss_fxn='MSE',
             lr=1e-3,
             N_epochs=None,
-            t_max=torch.inf,
             t_pred=0.1,
             t_init=0.0,
             curr_type=None,
@@ -321,7 +491,7 @@ class Trainer(CurriculumClass):
         ) -> None:
         super().__init__(curr_type=curr_type, t_pred=t_pred, t_max=t_max, config=curr_config, dtype=dtype)
         self.model = model
-        self.sub_dir = os.path.join(loss_type, loss_fxn)
+        self.loss_fxn_name = loss_fxn
         self.plot_colors = ['k', 'b', 'r', 'g']
 
         assert N_epochs is not None or t_max is not None
@@ -337,22 +507,57 @@ class Trainer(CurriculumClass):
         else:
             raise ValueError(f"Can't get loss {loss_fxn}")
 
-        if loss_type.lower() == 'ode':
-            self.loss_integrad = self.ode_integrad
-        else:
-            self.loss_integrad = self.solution_integrad
-        
         self.integrator = tpd.RKParallelUniformAdaptiveStepsizeSolver(
             **integrator_config
         )
 
     def plot_results(self, time, pred, solution, epoch):
+
+        plt.figure(figsize=(10, 7))
+        colors = ['red', 'green', 'purple', 'orange']
+        plt.plot(time[:,0].detach().numpy(), pred[:,0].detach().numpy(), label=f'Predicted x', color=colors[0], lw=2.5)
+        plt.plot(time[:,0].detach().numpy(), pred[:,1].detach().numpy(), label=f'Predicted y', color=colors[1], lw=2.5)
+        plt.plot(time[:,0].detach().numpy(), solution[:,0].detach().numpy(), label=f'Ground Truth x', color=colors[2], linestyle='--', lw=2, alpha=0.8)
+        plt.plot(time[:,0].detach().numpy(), solution[:,1].detach().numpy(), label=f'Ground Truth y', color=colors[3], linestyle='--', lw=2, alpha=0.8)
+        #plt.title('Lotka-Volterra learned ODE', fontsize=16)
+        plt.ylabel('Prey/Predator Population (x/y)', fontsize=16), plt.xlabel('Time (t)', fontsize=16)
+        plt.legend(fontsize=13), plt.grid(True) #plt.axis('equal')
+        plt.xticks(fontsize=13) # Sets x-axis tick label font size
+        plt.yticks(fontsize=13) # Sets y-axis tick label font size
+        plt.xlim(0,20)
+        plt.ylim(0,3)
+        
+        plt.savefig(os.path.join(self.plot_dir, f"ppr_training_{epoch}.pdf"))
+
+
+    def _plot_results(self, time, pred, solution, epoch):
         N_vars = pred.shape[-1]
         fig, axes = plt.subplots(2, 1)
+        y_max, y_min = -np.inf, np.inf
         for i in range(N_vars):
+            if torch.amax(solution[:,i]) > y_max:
+                y_max = torch.amax(solution[:,i])
+            if torch.amax(solution[:,i]) < y_min:
+                y_min = torch.amin(solution[:,i])
             for j in range(2):
                 axes[j].plot(time[:,0], solution[:,i], color=self.plot_colors[i], alpha=0.5)
                 axes[j].plot(time[:,0], pred[:,i].detach().numpy(), color=self.plot_colors[i], linestyle=":")
+        y_delta = 0.05*np.abs(y_max - y_min)
+        if y_delta > 0.1*np.abs(y_max):
+            y_max += y_delta
+        else:
+            y_max += 0.1*np.abs(y_max)
+        
+        if y_delta > 0.1*np.abs(y_min):
+            y_min -= y_delta
+        else:
+            y_min += 0.1*np.abs(y_min)
+
+        for i in range(2):
+            axes[i].set_xlim(time[0], time[-1])
+        
+        axes[0].set_ylim(y_min, y_max)
+        axes[1].set_ylim(np.maximum(y_min, 1e-9), y_max)
         axes[1].set_yscale('log')
         fig.tight_layout()
         fig.savefig(os.path.join(self.plot_dir, f"training_{epoch}.png"))
@@ -363,7 +568,7 @@ class Trainer(CurriculumClass):
             t_init, t_eval_max, 1000, dtype=self.dtype
         ).unsqueeze(-1)
         eval_output = odeint(
-            self.ode_fxn, 
+            self.ode_fxn.ode, 
             self.ode_fxn.initial_condition[0], 
             t_eval[:,0]
         )
@@ -408,29 +613,27 @@ class Trainer(CurriculumClass):
             #print("scale", scale)
         return self.loss_fxn(pred, self.ode_fxn(t, pred))
   
-    def ode_integrad(self, t, model, verbose=False):
-        jac = torch.autograd.functional.jacobian(
-            lambda t: torch.sum(model(t), axis=0),
-            t,
-            create_graph=True,
-            vectorize=True,
-        ).transpose(0, 1)[:, :, 0]
+    def _integrad(self, t, model, verbose=False):
+        pred, target = ode_fxn.train_eval(model, t)
         
         #TODO: use guassian instead and t_init
         #scale = torch.exp(-1*t)
         #scale /= 1.0 - torch.exp(-1*torch.tensor(self.t_pred))
+        """
         if verbose:
             print("pred", jac)
             print("targ", self.ode_fxn(t, model(t)))
             #print("scale", scale)
-        return self.loss_fxn(jac, self.ode_fxn(t, model(t)))
+        """
+        return self.loss_fxn(pred, target)
   
 
-    def train(self, ode_fxn, initial_condition, t_init=0.0):
+    def train(self, ode_fxn):
         self.ode_fxn = ode_fxn
-        self.plot_dir = os.path.join("plots", self.ode_fxn.__name__, self.sub_dir)
+        self.ode_fxn.solve_ode(self.t_max)
+        self.plot_dir = os.path.join("plots", self.ode_fxn.__name__, self.loss_fxn_name)
         os.makedirs(self.plot_dir, exist_ok=True)
-        t_init = t_init 
+        t_init = self.ode_fxn.t_init 
         t_init_eval = torch.tensor([t_init], requires_grad=True, dtype=self.dtype).unsqueeze(-1)
         self.model.train()
         #self.model.compile()
@@ -449,18 +652,17 @@ class Trainer(CurriculumClass):
                 else:
                     print(f"  {key}: {value}")
         # Train t0
-        loss_ratio, error_ratio, t0_count = 1, 1e10, 0
-        print(self.model(t_init_eval), self.ode_fxn(t_init_eval, self.model(t_init_eval)))
+        loss_ratio, error_ratio, t0_count = 1, torch.tensor([1e10]), 0
         prev_loss = 1.0
         pred = torch.ones(1)
         print("Training initial conditions")
-        while error_ratio > 1e-3:
+        while torch.any(error_ratio > 1e-3):
             if t0_count % 100 == 0:
                 print(f"T0 count {t0_count} | loss ratio: {loss_ratio} / error ratio: {error_ratio} / prediction: {torch.squeeze(pred).item()}")
             self.optimizer.zero_grad()
             pred = self.model(t_init_eval) 
             loss = torch.mean(
-                self.loss_fxn(pred, initial_condition)
+                self.loss_fxn(pred, self.ode_fxn.initial_condition)
             )
             #print("LOSS 0", loss.shape, loss)
             #print(self.model(t_init), self.ode_fxn(t_init))
@@ -469,8 +671,9 @@ class Trainer(CurriculumClass):
             #print("GRAD", self.model.layers[0].bias.grad[:5]*1e5)
             self.optimizer.step()
             loss_ratio = torch.abs(prev_loss - loss)/prev_loss
-            error_ratio = torch.abs(pred - initial_condition)/(torch.abs(initial_condition) + 1e-9)
+            error_ratio = torch.abs(pred - self.ode_fxn.initial_condition)/(torch.abs(self.ode_fxn.initial_condition) + 1e-9)
             error_ratio = torch.squeeze(error_ratio)
+            print("WTF", self.ode_fxn.initial_condition.shape, pred.shape, error_ratio.shape)
             prev_loss = loss
             #print("AFTER", self.model.layers[0].bias.data[:5])
             #print(t0_count, self.t_pred, loss, loss_ratio)
@@ -483,8 +686,8 @@ class Trainer(CurriculumClass):
         while train_criteria:
             if epoch_count % 1000 == 0:
                 print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()}")
-                print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).item())
-                self.loss_integrad(torch.arange(10, dtype=self.dtype).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True)
+                #print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
+                self._integrad(torch.arange(10, dtype=self.dtype).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True)
                 #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                 if integral_output is not None:
                     print(integral_output.t[:,0,0])
@@ -498,7 +701,7 @@ class Trainer(CurriculumClass):
             times = torch.tensor([t_init, self.t_pred], dtype=self.dtype).unsqueeze(-1)
             #print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
             integral_output = self.integrator.integrate(
-                ode_fxn=self.loss_integrad, t=times, ode_args=(self.model,)
+                ode_fxn=self._integrad, t=times, ode_args=(self.model,)
             )
             loss = integral_output.loss
             #print("BEFORE", self.model.layers[0].weight.data[:5])
@@ -516,7 +719,7 @@ class Trainer(CurriculumClass):
             """
             # T0 loss
             init_loss = torch.mean(
-                self.loss_fxn(self.model(t_init_eval), initial_condition)
+                self.loss_fxn(self.model(t_init_eval), self.ode_fxn.initial_condition)
             )
             init_loss.backward()
             #print("GRAD", self.model.layers[0].weight.grad[:5]*1e5)
@@ -537,12 +740,13 @@ class Trainer(CurriculumClass):
         
 
 if __name__ == "__main__":
-    config = experiments['exp_test']
+    config = experiments['lotka_volterra']
     # Get ODE
     #ode_fxn = linear()
     #ode_fxn = quadratic()
     ode_fxn = get_problem(config['problem'], dtype=config['dtype'])
 
+    print("ODE", ode_fxn)
     # Get Model
     model = DenseNet(
         t_init=ode_fxn.t_init,
@@ -581,7 +785,7 @@ if __name__ == "__main__":
     """
 
     # Solve ODE
-    trainer.train(ode_fxn, initial_condition=ode_fxn.initial_condition)#torch.zeros((1,1)))
+    trainer.train(ode_fxn)#torch.zeros((1,1)))
 
     # Evaluate Solver
 
