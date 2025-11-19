@@ -180,12 +180,13 @@ class BaseODE():
         raise NotImplementedError
 
     def solve_ode(self, t_max):
-        self.sol_times = torch.arange(self.t_init, t_max)
+        self.sol_times = torch.linspace(self.t_init, t_max, 1000)
         self.solution = odeint(
             self.ode, 
             self.initial_condition[0], 
             self.sol_times
         )
+        self.sol_times = torch.unsqueeze(self.sol_times, dim=-1)
 
     def first_derivative(self, model, t):
         return torch.autograd.functional.jacobian(
@@ -205,7 +206,7 @@ class BaseODE():
 
 
 class linear(BaseODE):
-    __init__ = 'linear'
+    __name__ = 'linear'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
         self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
@@ -295,7 +296,9 @@ class Poisson(BaseODE):
 
 
 def get_problem(name, dtype=torch.float64, **kwargs):
-    if 'quadratic' in name:
+    if 'linear' in name:
+        return linear(dtype=dtype)
+    elif 'quadratic' in name:
         return quadratic(dtype=dtype)
     elif name == 'exp_test':
         return exp_test(dtype=dtype)
@@ -709,6 +712,8 @@ class Trainer(CurriculumClass):
             if not integral_output.gradient_taken:
                 #print("taking gradients")
                 loss.backward()
+            else:
+                print("PASSED GRAD ACCUME")
             """
             
             t_eval = torch.arange(100).unsqueeze(1)*self.t_pred/99
