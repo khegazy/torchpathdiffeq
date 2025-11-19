@@ -127,7 +127,7 @@ experiments = {
         'problem' : 'lotka_volterra',
         'model' : {
             'activation' : nn.GELU(),
-            'layers' : [1, 64, 64] 
+            'layers' : [1, 64, 64, 64] 
         },
         'trainer' :{
             'integrator_config' : {
@@ -137,12 +137,18 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 3e-4, 'scale' : 0.05},
+            'curr_config' : {
+                'metric' : 'loss',
+                'scale' : 0.05,
+                'cut_off' : 1e-2,
+                'cut_off_patience': 100,
+                'cut_off_scale': 0.5
+            },
             't_pred' : 0.1,
             't_max': 20,
             'N_epochs': 100000000,
             #'t_init_lr' : 1e-10,
-            'lr' : 5e-3
+            'lr' : 1e-2#5e-3
         },
         'dtype' : torch.float64
     },
@@ -329,6 +335,14 @@ class CurriculumClass():
         else:
             self._update_curriculum = self._pass
         
+        self.curr_patience = None
+        if 'cut_off_patience' in self.config:
+            assert 'cut_off' in self.config
+            if 'cut_off_scale' not in self.config:
+                self.config['cut_off_scale'] = 0.5
+            assert self.config['cut_off_scale'] < 1.0
+            self.curr_patience = 0
+        
         """
         if curriculum_config is not None:
             self.curr_type = curriculum_config['type']
@@ -365,6 +379,15 @@ class CurriculumClass():
         self.loss_std_ratio = torch.std(self.loss_history)/torch.abs(torch.mean(self.loss_history))
 
         if self.t_pred != self.t_max:
+            # Increase the cut_off is trianing stagnates and t_max has not been reached
+            if self.curr_patience is not None:
+                if self.loss > self.config['cut_off']:
+                    self.curr_patience += 1
+                    if self.curr_patience >= self.config['cut_off_patience']:
+                        self.config['cut_off'] = self.config['cut_off']*self.config['cut_off_scale']
+                        self.curr_patience = 0
+                else:
+                    self.curr_patience = 0
             t_update = self._update_curriculum(epoch)
             t_update = torch.minimum(t_update, self.t_max)
             self.t_pred = t_update
