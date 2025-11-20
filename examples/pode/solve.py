@@ -148,7 +148,9 @@ experiments = {
             't_max': 20,
             'N_epochs': 100000000,
             #'t_init_lr' : 1e-10,
-            'lr' : 1e-2#5e-3
+            'lr' : 1e-2, #5e-3
+            'lr_patience' : 1000,
+            'lr_scale' : 0.5
         },
         'dtype' : torch.float64
     },
@@ -263,7 +265,7 @@ class exp_test_sol(BaseODE):
 
 class LotkaVolterra(BaseODE):
     __name__ = 'lotka_volterra'
-    def __init__(self, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0, conservation_weight=0.1, dtype=torch.float64):
+    def __init__(self, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0, dtype=torch.float64):
         super().__init__(2, dtype=dtype)
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
         self.t_init = torch.tensor(0.0, dtype=self.dtype)
@@ -513,6 +515,8 @@ class Trainer(CurriculumClass):
             t_init=0.0,
             curr_type=None,
             curr_config=None,
+            lr_patience=None,
+            lr_scale=None,
             dtype=torch.float64
         ) -> None:
         super().__init__(curr_type=curr_type, t_pred=t_pred, t_max=t_max, config=curr_config, dtype=dtype)
@@ -523,6 +527,11 @@ class Trainer(CurriculumClass):
         assert N_epochs is not None or t_max is not None
         self.N_epochs = np.inf if N_epochs is None else N_epochs
 
+        lr_check = lr_patience is not None and lr_scale is not None
+        lr_check = lr_check or (lr_patience is None and lr_scale is None)
+        assert lr_check, "Must specify both 'lr_scal' and 'lr_patience'"
+        self.lr_patience = lr_patience
+        self.lr_scale = lr_scale
 
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, weight_decay=1e-5)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
@@ -756,6 +765,17 @@ class Trainer(CurriculumClass):
             #times = integral_output.t_optimal.clone()
             #times = integral_output.t_optimal.detach()
             #times.requires_grad_(True)
+
+            # Update learning rate
+            if self.t_pred == self.t_max and self.lr_patience is not None:
+                if loss < prev_loss:
+                    patience = 0
+                else:
+                    patience += 1
+                    if patience >= self.lr_patience:
+                        self.optimizer.lr = self.optimizer.lr*self.lr_scale
+                        patience = 0
+                prev_loss = loss.detach().item()
 
             epoch_count += 1
             if self.N_epochs is not None:
