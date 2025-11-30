@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 experiments = {
     "exp_test_sol" : {
         'problem' : 'exp_test_sol',
+        'ode' : {},
         'model' : {
             'activation' : nn.Tanh(),
             'layers' : [1, 64, 64] 
@@ -22,7 +23,7 @@ experiments = {
             },
             'loss_fxn' : 'relative_MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-2, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 1e-2, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 10,
             'N_epochs': 100000,
@@ -33,6 +34,7 @@ experiments = {
     },
     "exp_test" : {
         'problem' : 'exp_test',
+        'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
             'layers' : [1, 64, 64] 
@@ -45,7 +47,7 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 3e-4, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 3e-4, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 10,
             'N_epochs': 100000,
@@ -56,6 +58,7 @@ experiments = {
     },
     "x_squared_sol" : {
         'problem' : 'x_squared',
+        'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
             'layers' : [1, 64, 64] 
@@ -68,7 +71,7 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 1e-3, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 10,
             'N_epochs': 1000000,
@@ -79,6 +82,7 @@ experiments = {
     },    
     "linear" : {
         'problem' : 'linear',
+        'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
             'layers' : [1, 64, 64] 
@@ -91,7 +95,7 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 1e-3, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 25,
             'N_epochs': 100000,
@@ -102,6 +106,7 @@ experiments = {
     },
     "quadratic" : {
         'problem' : 'quadratic',
+        'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
             'layers' : [1, 64, 64] 
@@ -114,7 +119,7 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 1e-3, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 25,
             'N_epochs': 100000,
@@ -125,30 +130,35 @@ experiments = {
     },
     "lotka_volterra" : {
         'problem' : 'lotka_volterra',
+        'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
-            'layers' : [1, 64, 64, 64] 
+            'layers' : [1, 64, 64] 
         },
         'trainer' :{
             'integrator_config' : {
                 'method' : 'dopri5',
-                'atol' : 1e-7,
-                'rtol' : 1e-6
+                #'atol' : 1e-7,
+                #'rtol' : 1e-6
+                'atol' : 1e-5,
+                'rtol' : 1e-4
             },
-            'loss_fxn' : 'MSE',
+            #'loss_fxn' : 'MSE_MAE',
+            'loss_fxn' : 'relative_MSE',
             'curr_type': 'exponential',
             'curr_config' : {
                 'metric' : 'loss',
                 'scale' : 0.05,
-                'cut_off' : 1e-2,
-                'cut_off_patience': 100,
-                'cut_off_scale': 0.5
+                'cutoff' : 1e-2,
+                #'cutoff_patience': 1000,
+                #'cutoff_scale': 1.2
             },
             't_pred' : 0.1,
             't_max': 20,
             'N_epochs': 100000000,
             #'t_init_lr' : 1e-10,
-            'lr' : 1e-2, #5e-3
+            #'lr' : 1e-2, #5e-3
+            'lr' : 1e-6,
             'lr_patience' : 1000,
             'lr_scale' : 0.5
         },
@@ -156,6 +166,10 @@ experiments = {
     },
     "poisson" : {
         'problem' : 'poisson',
+        'ode' : {
+            'N_dims' : 1,
+            'force_type' : 'source_analytical'
+        },
         'model' : {
             'activation' : nn.GELU(),
             'layers' : [1, 64, 64] 
@@ -168,7 +182,7 @@ experiments = {
             },
             'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
-            'curr_config' : {'metric' : 'loss', 'cut_off' : 1e-3, 'scale' : 0.05},
+            'curr_config' : {'metric' : 'loss', 'cutoff' : 1e-3, 'scale' : 0.05},
             't_pred' : 0.1,
             't_max': 25,
             'N_epochs': 100000,
@@ -261,7 +275,6 @@ class exp_test_sol(BaseODE):
     
     def ode(self, t, y=None):
         return torch.exp(-2 * t) + 3 * torch.exp(-3 * t)
-    
 
 class LotkaVolterra(BaseODE):
     __name__ = 'lotka_volterra'
@@ -283,37 +296,61 @@ class LotkaVolterra(BaseODE):
 
     def train_eval(self, model, t):
         return self.first_derivative(model, t), self.ode(t, model(t))
-
+    
 class Poisson(BaseODE):
     __name__ = "poisson"
     def __init__(self, N_dims, force_type, dtype=torch.float64):
         super().__init__(N_dims, dtype=dtype)
+        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
+        self.t_init = 0.0
+        self.bc = [0.0, 0.0]
 
         self.ode = getattr(self, f"_{force_type}")
+        self.ode_np = getattr(self, f"_{force_type}_np")
     
     def _source_analytical(self, t, y):
         return -torch.sin(torch.pi * t)
+    
+    def _source_analytical_np(self, t, y):
+        return -np.sin(np.pi * t)
 
     def _source_numerical(self, t, y):
         return torch.tanh(5 * (t - 0.5)) - torch.cos(10 * t)
     
+    def _source_numerical_np(self, t, y):
+        return np.tanh(5 * (t - 0.5)) - np.cos(10 * t)
+    
+    def solve_ode(self, t_max):
+        def ode_system(x, y):
+            return np.vstack((y[1], self.ode_np(x, None)))
+
+        def bc(ya, yb):
+            return np.array([ya[0] - self.bc[0], yb[0] - self.bc[-1]])
+        self.sol_times = np.linspace(self.t_init, t_max, 100)
+        y_guess = np.zeros((2, 100))
+        self.solution = solve_bvp(ode_system, bc, self.sol_times, y_guess)
+        self.sol_times = np.expand_dims(self.solution.x, -1)
+        self.solution = np.expand_dims(self.solution.y[0], -1)
+        self.sol_times = torch.tensor(self.sol_times)
+        self.solution = torch.tensor(self.solution)
+
     def train_eval(self, model, t):
         return self.second_derivative(model, t), self.ode(t, model(t))
-    
-
 
 
 def get_problem(name, dtype=torch.float64, **kwargs):
     if 'linear' in name:
-        return linear(dtype=dtype)
+        return linear(dtype=dtype, **kwargs)
     elif 'quadratic' in name:
-        return quadratic(dtype=dtype)
+        return quadratic(dtype=dtype, **kwargs)
     elif name == 'exp_test':
-        return exp_test(dtype=dtype)
+        return exp_test(dtype=dtype, **kwargs)
     elif name == 'exp_test_sol':
-        return exp_test_sol(dtype=dtype)
+        return exp_test_sol(dtype=dtype, **kwargs)
     elif name == 'lotka_volterra':
         return LotkaVolterra(dtype=dtype, **kwargs)
+    elif name == 'poisson':
+        return Poisson(dtype=dtype, **kwargs)
     else:
         raise ValueError(f"Cannot get find problem {name}")
 
@@ -338,12 +375,14 @@ class CurriculumClass():
             self._update_curriculum = self._pass
         
         self.curr_patience = None
-        if 'cut_off_patience' in self.config:
-            assert 'cut_off' in self.config
-            if 'cut_off_scale' not in self.config:
-                self.config['cut_off_scale'] = 0.5
-            assert self.config['cut_off_scale'] < 1.0
+        if 'cutoff_patience' in self.config:
+            assert 'cutoff' in self.config
+            if 'cutoff_scale' not in self.config:
+                self.config['cutoff_scale'] = 1.2
+            assert self.config['cutoff_scale'] > 1.0
             self.curr_patience = 0
+
+            self.config['default_cutoff'] = self.config['cutoff']
         
         """
         if curriculum_config is not None:
@@ -381,19 +420,23 @@ class CurriculumClass():
         self.loss_std_ratio = torch.std(self.loss_history)/torch.abs(torch.mean(self.loss_history))
 
         if self.t_pred != self.t_max:
-            # Increase the cut_off is trianing stagnates and t_max has not been reached
+            # Increase the cutoff is trianing stagnates and t_max has not been reached
             if self.curr_patience is not None:
-                if self.loss > self.config['cut_off']:
+                if self.loss > self.config['cutoff']:
                     self.curr_patience += 1
-                    if self.curr_patience >= self.config['cut_off_patience']:
-                        self.config['cut_off'] = self.config['cut_off']*self.config['cut_off_scale']
+                    if self.curr_patience >= self.config['cutoff_patience']:
+                        self.config['cutoff'] = self.config['cutoff']*self.config['cutoff_scale']
+                        print(f"Hit curriculum patience limit, increasing cutoff to {self.config['cutoff']}")
                         self.curr_patience = 0
                 else:
+                    #if self.curr_patience < self.config['cutoff_patience']/2:
+                    #    self.config['cutoff'] = self.config['cutoff']/self.config['cutoff_scale']
+                    self.config['cutoff'] = self.config['default_cutoff']
                     self.curr_patience = 0
-            t_update = self._update_curriculum(epoch)
+            t_update, updated_t = self._update_curriculum(epoch)
             t_update = torch.minimum(t_update, self.t_max)
             self.t_pred = t_update
-            return self.t_pred
+            return updated_t and t_update < self.t_max
         
     
     def _pass(self, *args, **kwargs):
@@ -410,15 +453,15 @@ class CurriculumClass():
     
     def exponential(self, epoch):
         if self.config['metric'] == 'loss':
-            update = self.loss < self.config['cut_off']
+            update = self.loss < self.config['cutoff']
         elif self.config['metric'] == 'loss_std_ratio':
-            update = self.loss_std_ratio < self.config['cut_off']
+            update = self.loss_std_ratio < self.config['cutoff']
         else:
             raise ValueError(f"Cannot handle metric type {self.config['metric']}")
 
         if update:
-            return self.t_pred*(1 + self.config['scale'])
-        return self.t_pred
+            return self.t_pred*(1 + self.config['scale']), True
+        return self.t_pred, False
 
     def __exponential(self, epoch, **kwargs):
         # Smooth exponential progression
@@ -535,12 +578,9 @@ class Trainer(CurriculumClass):
 
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, weight_decay=1e-5)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
-        if loss_fxn == 'MSE':
-            self.loss_fxn = self._MSE
-        elif loss_fxn == 'relative_MSE':
-            self.loss_fxn = self._relative_MSE
-        else:
-            raise ValueError(f"Can't get loss {loss_fxn}")
+        
+        assert hasattr(self, f"_{loss_fxn}")
+        self.loss_fxn = getattr(self, f"_{loss_fxn}")
 
         self.integrator = tpd.RKParallelUniformAdaptiveStepsizeSolver(
             **integrator_config
@@ -562,7 +602,7 @@ class Trainer(CurriculumClass):
         plt.xlim(0,20)
         plt.ylim(0,3)
         
-        plt.savefig(os.path.join(self.plot_dir, f"ppr_training_{epoch}.pdf"))
+        plt.savefig(os.path.join(self.plot_dir, f"ppr_training_{epoch}.png"))
 
 
     def _plot_results(self, time, pred, solution, epoch):
@@ -620,7 +660,14 @@ class Trainer(CurriculumClass):
         target = torch.flatten(target, start_dim=1)
         mse = torch.sum((pred - target)**2, dim=1, keepdim=True)
         return mse
-    
+
+    @staticmethod
+    def _MAE(pred, target):
+        pred = torch.flatten(pred, start_dim=1)
+        target = torch.flatten(target, start_dim=1)
+        mse = torch.sum(torch.abs(pred - target), dim=1, keepdim=True)
+        return mse
+
     @staticmethod
     def _relative_MSE(pred, target):
         pred = torch.flatten(pred, start_dim=1)
@@ -629,12 +676,15 @@ class Trainer(CurriculumClass):
         #print("pred", pred)
         #print("targ", target)
         return torch.sum(
-            ((pred - target)/(torch.abs(target) + 1e-10))**2, #TODO: make eps smaller
+            ((pred - target)/(torch.abs(target) + 1e-4))**2, #TODO: make eps smaller
             dim=1, keepdim=True
         )
     
     def _MSE_combined(self, pred, target):
         return self._MSE(pred, target) + self._relative_MSE(pred, target)
+
+    def _MSE_MAE(self, pred, target):
+        return self._MSE(pred, target) + self._MAE(pred, target)
 
     def solution_integrad(self, t, model, verbose=False):
         pred = model(t)
@@ -720,32 +770,38 @@ class Trainer(CurriculumClass):
         integral_output = None
         while train_criteria:
             if epoch_count % 1000 == 0:
-                print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()}")
                 #print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
                 self._integrad(torch.arange(10, dtype=self.dtype).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True)
-                #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                 if integral_output is not None:
-                    print(integral_output.t[:,0,0])
-                self.eval_results(t_init, epoch_count)
+                    print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(integral_output.t)}")
+                #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
+                #if integral_output is not None:
+                #    print(integral_output.t[:,0,0])
+                if epoch_count % 5000 == 0:
+                    self.eval_results(t_init, epoch_count)
+                    if integral_output is not None:
+                        print(integral_output.y[0,:,0])
             self.optimizer.zero_grad()
-            self.update_curriculum(epoch_count, loss)
-            if times[-1] < self.t_pred:
-                times = torch.concatenate(
-                    [times, torch.tensor([self.t_pred]).unsqueeze(-1)], dim=0
-                )
-            times = torch.tensor([t_init, self.t_pred], dtype=self.dtype).unsqueeze(-1)
+            updated_curr = self.update_curriculum(epoch_count, loss)
+            if updated_curr or integral_output is None:
+                if times[-1] < self.t_pred:
+                    times = torch.concatenate(
+                        [times, torch.tensor([self.t_pred]).unsqueeze(-1)], dim=0
+                    )
+                times = torch.tensor([t_init, self.t_pred], dtype=self.dtype).unsqueeze(-1)
+            else:
+                times = integral_output.t_optimal
             #print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
             integral_output = self.integrator.integrate(
                 ode_fxn=self._integrad, t=times, ode_args=(self.model,)
             )
+            #print(epoch_count, integral_output.t.shape)
             loss = integral_output.loss
             #print("BEFORE", self.model.layers[0].weight.data[:5])
             #print("OUTPUT", integral_output)
             if not integral_output.gradient_taken:
                 #print("taking gradients")
                 loss.backward()
-            else:
-                print("PASSED GRAD ACCUME")
             """
             
             t_eval = torch.arange(100).unsqueeze(1)*self.t_pred/99
@@ -767,8 +823,8 @@ class Trainer(CurriculumClass):
             #times.requires_grad_(True)
 
             # Update learning rate
-            if self.t_pred == self.t_max and self.lr_patience is not None:
-                if loss < prev_loss:
+            if self.t_pred != self.t_max and self.lr_patience is not None:
+                if loss < prev_loss or updated_curr:
                     patience = 0
                 else:
                     patience += 1
@@ -792,7 +848,7 @@ if __name__ == "__main__":
     # Get ODE
     #ode_fxn = linear()
     #ode_fxn = quadratic()
-    ode_fxn = get_problem(config['problem'], dtype=config['dtype'])
+    ode_fxn = get_problem(config['problem'], dtype=config['dtype'], **config['ode'])
 
     print("ODE", ode_fxn)
     # Get Model
@@ -823,7 +879,7 @@ if __name__ == "__main__":
             'rtol' : 1e-4
         },
         curr_type=None,#'exponential',
-        curr_config={'metric' : 'loss', 'cut_off' : 1e-4, 'scale' : 0.05},
+        curr_config={'metric' : 'loss', 'cutoff' : 1e-4, 'scale' : 0.05},
         t_pred=10,
         t_max=100,
         N_epochs=100000,
