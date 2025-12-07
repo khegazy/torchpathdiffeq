@@ -194,9 +194,10 @@ experiments = {
 }
 
 class BaseODE():
-    def __init__(self, N_dims, dtype=torch.float64):
+    def __init__(self, N_dims, device, dtype=torch.float64):
         self.N_dims = N_dims
         self.dtype = dtype
+        self.device = device
     
     def ode(self, t, y):
         raise NotImplementedError
@@ -231,8 +232,10 @@ class linear(BaseODE):
     __name__ = 'linear'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
-        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
-        self.t_init = 0.0
+        self.initial_condition = torch.tensor(
+            [0], dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
+        self.t_init = torch.tensor(0.0, dtype=self.dtype, device=self.device) 
     
     def ode(self, t, y):
         return t
@@ -244,8 +247,10 @@ class quadratic(BaseODE):
     __name__ = 'quadratic'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
-        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
-        self.t_init = 0.0
+        self.initial_condition = torch.tensor(
+            [0], dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
+        self.t_init = torch.tensor(0.0, dtype=self.dtype, device=self.device)
     
     def ode(self, t, y):
         return t**2
@@ -257,8 +262,10 @@ class exp_test(BaseODE):
     __name__ = 'exp_test'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
-        self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
-        self.t_init = 0.0
+        self.initial_condition = torch.tensor(
+            [4], dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
+        self.t_init = torch.tensor(0.0, dtype=self.dtype, device=self.device)
     
     def ode(self, t, y):
         return torch.exp(-2 * t) - 3 * y
@@ -270,19 +277,25 @@ class exp_test_sol(BaseODE):
     __name__ = 'exp_test_sol'
     def __init__(self, **kwargs):
         super().__init__(1, **kwargs)
-        self.initial_condition = torch.tensor([4], dtype=self.dtype).unsqueeze(-1)
-        self.t_init = 0.0
+        self.initial_condition = torch.tensor(
+            [4], dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
+        self.t_init = torch.tensor(0.0, dtype=self.dtype, device=self.device)
     
     def ode(self, t, y=None):
         return torch.exp(-2 * t) + 3 * torch.exp(-3 * t)
 
 class LotkaVolterra(BaseODE):
     __name__ = 'lotka_volterra'
-    def __init__(self, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0, dtype=torch.float64):
-        super().__init__(2, dtype=dtype)
+    def __init__(self, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0, **kwargs):
+        super().__init__(2, **kwargs)
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
-        self.t_init = torch.tensor(0.0, dtype=self.dtype)
-        self.initial_condition = torch.tensor([1, 2], dtype=self.dtype).unsqueeze(0) #DEBUG
+        self.t_init = torch.tensor(
+            0.0, dtype=self.dtype, device=self.device
+        )
+        self.initial_condition = torch.tensor(
+            [1, 2], dtype=self.dtype, device=self.device
+        ).unsqueeze(0) #DEBUG
         print("DO NOT KNOW INIT CONDITIONS, FIX!!!!!!!!!!!!!!!!!!!!!!")
 
     def ode(self, t, state_vec):
@@ -301,8 +314,10 @@ class Poisson(BaseODE):
     __name__ = "poisson"
     def __init__(self, N_dims, force_type, dtype=torch.float64):
         super().__init__(N_dims, dtype=dtype)
-        self.initial_condition = torch.tensor([0], dtype=self.dtype).unsqueeze(-1)
-        self.t_init = 0.0
+        self.initial_condition = torch.tensor(
+            [0], dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
+        self.t_init = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         self.bc = [0.0, 0.0]
 
         self.ode = getattr(self, f"_{force_type}")
@@ -506,19 +521,21 @@ class DenseNet(nn.Module):
             initial_condition,
             layers,
             N_output_dims,
+            device,
             dtype=torch.float64,
             activation=nn.GELU(),
             output_activation=None,
-            normalize=False
+            normalize=False,
         ):
         super().__init__()
 
         self.initial_condition = initial_condition
-        self.t_init = t_init
+        self.t_init = t_init.to(device)
         
         self.n_layers = len(layers)
         assert self.n_layers >= 1
         layers.append(N_output_dims)
+        self.device=device
         self.dtype=dtype
         self.activation = activation
         #self.activation = nn.GELU()
@@ -527,7 +544,11 @@ class DenseNet(nn.Module):
         
         self.layers = torch.nn.ModuleList()
         for i in range(self.n_layers):
-            self.layers.append(nn.Linear(layers[i], layers[i+1], dtype=dtype, bias=False))
+            self.layers.append(
+                nn.Linear(
+                    layers[i], layers[i+1], dtype=dtype, bias=False, device=self.device
+                )
+            )
             if i != self.n_layers - 1:
                 if normalize:
                     raise NotImplementedError
@@ -560,12 +581,14 @@ class Trainer(CurriculumClass):
             curr_config=None,
             lr_patience=None,
             lr_scale=None,
-            dtype=torch.float64
+            dtype=torch.float64,
+            device='cuda'
         ) -> None:
         super().__init__(curr_type=curr_type, t_pred=t_pred, t_max=t_max, config=curr_config, dtype=dtype)
         self.model = model
         self.loss_fxn_name = loss_fxn
         self.plot_colors = ['k', 'b', 'r', 'g']
+        self.device = device
 
         assert N_epochs is not None or t_max is not None
         self.N_epochs = np.inf if N_epochs is None else N_epochs
@@ -583,11 +606,15 @@ class Trainer(CurriculumClass):
         self.loss_fxn = getattr(self, f"_{loss_fxn}")
 
         self.integrator = tpd.RKParallelUniformAdaptiveStepsizeSolver(
-            **integrator_config
+            **integrator_config, device=self.device
         )
 
     def plot_results(self, time, pred, solution, epoch):
 
+        device = pred.device
+        pred = pred.cpu()
+        solution = solution.cpu()
+        time = time.cpu()
         plt.figure(figsize=(10, 7))
         colors = ['red', 'green', 'purple', 'orange']
         plt.plot(time[:,0].detach().numpy(), pred[:,0].detach().numpy(), label=f'Predicted x', color=colors[0], lw=2.5)
@@ -603,6 +630,8 @@ class Trainer(CurriculumClass):
         plt.ylim(0,3)
         
         plt.savefig(os.path.join(self.plot_dir, f"ppr_training_{epoch}.png"))
+        pred.to(device)
+        solution.to(device)
 
 
     def _plot_results(self, time, pred, solution, epoch):
@@ -640,7 +669,7 @@ class Trainer(CurriculumClass):
     def eval_results(self, t_init, epoch_count):
         t_eval_max = self.t_pred if self.t_max == np.inf else self.t_max
         t_eval = torch.linspace(
-            t_init, t_eval_max, 1000, dtype=self.dtype
+            t_init, t_eval_max, 1000, dtype=self.dtype, device=self.device
         ).unsqueeze(-1)
         eval_output = odeint(
             self.ode_fxn.ode, 
@@ -719,7 +748,9 @@ class Trainer(CurriculumClass):
         self.plot_dir = os.path.join("plots", self.ode_fxn.__name__, self.loss_fxn_name)
         os.makedirs(self.plot_dir, exist_ok=True)
         t_init = self.ode_fxn.t_init 
-        t_init_eval = torch.tensor([t_init], requires_grad=True, dtype=self.dtype).unsqueeze(-1)
+        t_init_eval = torch.tensor(
+            [t_init], requires_grad=True, dtype=self.dtype, device=self.device
+        ).unsqueeze(-1)
         self.model.train()
         #self.model.compile()
 
@@ -771,13 +802,17 @@ class Trainer(CurriculumClass):
         while train_criteria:
             if epoch_count % 1000 == 0:
                 #print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
-                self._integrad(torch.arange(10, dtype=self.dtype).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True)
                 if integral_output is not None:
                     print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(integral_output.t)}")
                 #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                 #if integral_output is not None:
                 #    print(integral_output.t[:,0,0])
                 if epoch_count % 5000 == 0:
+                    self._integrad(
+                        torch.arange(
+                            10, dtype=self.dtype, device=self.device
+                        ).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True
+                    )
                     self.eval_results(t_init, epoch_count)
                     if integral_output is not None:
                         print(integral_output.y[0,:,0])
@@ -786,9 +821,9 @@ class Trainer(CurriculumClass):
             if updated_curr or integral_output is None:
                 if times[-1] < self.t_pred:
                     times = torch.concatenate(
-                        [times, torch.tensor([self.t_pred]).unsqueeze(-1)], dim=0
+                        [times, torch.tensor([self.t_pred], device=self.device).unsqueeze(-1)], dim=0
                     )
-                times = torch.tensor([t_init, self.t_pred], dtype=self.dtype).unsqueeze(-1)
+                times = torch.tensor([t_init, self.t_pred], dtype=self.dtype, device=self.device).unsqueeze(-1)
             else:
                 times = integral_output.t_optimal
             #print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
@@ -845,10 +880,13 @@ class Trainer(CurriculumClass):
 
 if __name__ == "__main__":
     config = experiments['lotka_volterra']
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # Get ODE
     #ode_fxn = linear()
     #ode_fxn = quadratic()
-    ode_fxn = get_problem(config['problem'], dtype=config['dtype'], **config['ode'])
+    ode_fxn = get_problem(
+        config['problem'], dtype=config['dtype'], **config['ode'], device=device
+    )
 
     print("ODE", ode_fxn)
     # Get Model
@@ -857,7 +895,8 @@ if __name__ == "__main__":
         initial_condition=ode_fxn.initial_condition,
         N_output_dims=ode_fxn.N_dims,
         **config['model'],
-        dtype=config['dtype']
+        dtype=config['dtype'],
+        device=device
     )
 
     # Get Integrator
@@ -870,7 +909,8 @@ if __name__ == "__main__":
     trainer = Trainer(
         model=model,
         **config['trainer'],
-        dtype=config['dtype']
+        dtype=config['dtype'],
+        device=device
     )
     """
         integrator_config={
