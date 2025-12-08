@@ -11,8 +11,8 @@ from torchpathdiffeq import\
 
 
 def test_integrals():
-    atol = 1e-9
-    rtol = 1e-7
+    atol = 1e-10
+    rtol = 1e-8
     t_init = torch.tensor([0], dtype=torch.float64)
     t_final = torch.tensor([1], dtype=torch.float64)
     #loop_items = zip(
@@ -26,10 +26,14 @@ def test_integrals():
         [steps.ADAPTIVE_UNIFORM]
     )
     for sampling_name, sampling, sampling_type in loop_items:
-        for method in sampling.keys():
+        for method, method_class in sampling.items():
+            if method_class.order <= 2:
+                cutoff = 1e-4
+            else:
+                cutoff = 1e-6
             #if method != 'fehlberg2':
             #    continue
-            for name, (ode, solution, cutoff) in ODE_dict.items():
+            for name, (ode, solution) in ODE_dict.items():
                 print("INTEGRAL", method, name, sampling_name)
                 correct = solution(t_init=t_init, t_final=t_final)
                 parallel_integrator = get_parallel_RK_solver(
