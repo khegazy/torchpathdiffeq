@@ -36,7 +36,7 @@ def exp_solution(t_init, t_final, a=5):
 def damped_sine(t, w=3.7, a=5, y=None):
     return torch.exp(-a*t)*torch.sin(w*t*2*torch.pi)
 
-def damped_sine_solution(t_init, t_final, w=3.7, a=0.2):
+def damped_sine_solution(t_init, t_final, w=3.7, a=5):
     _w = 2*torch.pi*w
     def numerator(t, w, a):
         t = torch.tensor([t])
