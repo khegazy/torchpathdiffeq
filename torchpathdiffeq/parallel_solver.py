@@ -336,10 +336,12 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         if self.error_calc_idx is not None:
             sum_step_errors = sum_step_errors[:,self.error_calc_idx, None]
             integral = integral[self.error_calc_idx, None]
+            #y = y[:,:,self.error_calc_idx, None]
             if sum_steps is not None:
                 sum_steps = sum_steps[:,self.error_calc_idx, None]
             if cum_sum_steps is not None:
                 cum_sum_steps = cum_sum_steps[:,self.error_calc_idx, None]
+                #DEBUG: add y0 to cum_steps to get get integral values at different times?
 
         if self.use_absolute_error_ratio:
             return self._compute_error_ratios_absolute(
@@ -350,7 +352,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 sum_step_errors, sum_steps=sum_steps, cum_sum_steps=cum_sum_steps
             )
     
-    
+
     def _compute_error_ratios_absolute(self, sum_step_errors, integral):
         """
         Computes the ratio of the difference between chosen method of order p
@@ -671,12 +673,23 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 )
             
         if t is None:
+            #TODO: set random seed during tests for reproducability
             t_is_given = False
-            t_step_barriers = t_init\
-                + (t_final - t_init)/N_init_steps*torch.arange(
-                    N_init_steps+1, device=self.device
-                ).unsqueeze(-1)
-            #TODO: Reuse get_initial_t_steps
+            N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(torch.int)
+            dt = (t_final - t_init)/N_even_t
+            t_step_barriers = t_init + dt * torch.arange(N_even_t, device=self.device)[:,None,None] #TODO: this assumes time is 1d
+
+            random_ts = dt*torch.rand(
+                (N_even_t, N_even_t + 1, 1), device=self.device
+            )
+            random_ts = torch.sort(random_ts, dim=1)[0]
+            t_step_barriers = t_step_barriers + random_ts
+            t_step_barriers[0] += t_init - t_step_barriers[0,0]
+            t_step_barriers[-1] += t_final - t_step_barriers[-1,-1]
+            t_step_barriers = torch.flatten(t_step_barriers, start_dim=0, end_dim=1)
+            t_step_barriers[0] = t_init
+            t_step_barriers[-1] = t_final
+            assert torch.all(t_step_barriers[1:] - t_step_barriers[:-1] > 0)
         else:
             t_is_given = True
             t_step_barriers = t
