@@ -24,7 +24,7 @@ def sine_squared(t, w=3.7, y=None):
 def sine_squared_solution(t_init, t_final, w=3.7):
     _w = 4*torch.pi*w
     return (t_final - t_init)/2.\
-        + (torch.sin(torch.tensor([_w*t_final])) - torch.sin(torch.tensor([_w*t_init])))/(2*_w)
+        - (torch.sin(torch.tensor([_w*t_final])) - torch.sin(torch.tensor([_w*t_init])))/(2*_w)
 
 def exp(t, a=5, y=None):
     return torch.exp(a*t)
@@ -36,18 +36,18 @@ def exp_solution(t_init, t_final, a=5):
 def damped_sine(t, w=3.7, a=5, y=None):
     return torch.exp(-a*t)*torch.sin(w*t*2*torch.pi)
 
-def damped_sine_solution(t_init, t_final, w=3.7, a=0.2):
+def damped_sine_solution(t_init, t_final, w=3.7, a=5):
     _w = 2*torch.pi*w
     def numerator(t, w, a):
         t = torch.tensor([t])
-        return torch.exp(-a*t)*(torch.sin(_w*t) + _w*torch.cos(_w*t))
+        return -1*torch.exp(-a*t)*(a*torch.sin(_w*t) + _w*torch.cos(_w*t))
     return (numerator(t_final, w, a) - numerator(t_init, w, a))/(a**2 + _w**2)
 
 
 ODE_dict = {
-    "t" : (t, t_solution, 1e-7),
-    "t_squared" : (t_squared, t_squared_solution, 1e-5),
-    "sine_squared" : (sine_squared, sine_squared_solution, 5e-2),
-    "exp" : (exp, exp_solution, 1e-5),
-    "damped_sine" : (damped_sine, damped_sine_solution, 2.)
+    "t" : (t, t_solution),
+    "t_squared" : (t_squared, t_squared_solution),
+    "sine_squared" : (sine_squared, sine_squared_solution),
+    "exp" : (exp, exp_solution),
+    "damped_sine" : (damped_sine, damped_sine_solution)
 }
