@@ -638,6 +638,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             else total_mem_usage
         assert total_mem_usage <= 1.0 and total_mem_usage > 0,\
             "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
+        assert hasattr(ode_fxn, "__name__"), "ODE function must have attribute __name__"
         same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
         if not same_ode_fxn and max_batch is None:
             self._setup_memory_checks(ode_fxn, t_init, ode_args=ode_args)
