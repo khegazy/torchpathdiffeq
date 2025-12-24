@@ -133,23 +133,23 @@ experiments = {
         'ode' : {},
         'model' : {
             'activation' : nn.GELU(),
-            'layers' : [1, 64, 64] 
+            'layers' : [1, 64, 128, 128, 256, 128, 128, 64] 
         },
         'trainer' :{
             'integrator_config' : {
                 'method' : 'dopri5',
                 #'atol' : 1e-7,
                 #'rtol' : 1e-6
-                'atol' : 1e-5,
-                'rtol' : 1e-4
+                'atol' : 1e-10,
+                'rtol' : 1e-9
             },
             #'loss_fxn' : 'MSE_MAE',
-            'loss_fxn' : 'relative_MSE',
+            'loss_fxn' : 'MSE',
             'curr_type': 'exponential',
             'curr_config' : {
                 'metric' : 'loss',
                 'scale' : 0.05,
-                'cutoff' : 1e-2,
+                'cutoff' : 1e-4,
                 #'cutoff_patience': 1000,
                 #'cutoff_scale': 1.2
             },
@@ -475,7 +475,8 @@ class CurriculumClass():
             raise ValueError(f"Cannot handle metric type {self.config['metric']}")
 
         if update:
-            return self.t_pred*(1 + self.config['scale']), True
+            return self.t_pred + self.config['scale'], True
+            #return self.t_pred*(1 + self.config['scale']), True #TODO THIS IS EXPONENTIAL
         return self.t_pred, False
 
     def __exponential(self, epoch, **kwargs):
@@ -600,7 +601,9 @@ class Trainer(CurriculumClass):
         self.lr_scale = lr_scale
 
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, weight_decay=1e-5)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
+        #self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
+        self.init_optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
+        self.optimizer = torch.optim.LBFGS(self.model.parameters(), tolerance_change=0.0, line_search_fn = "strong_wolfe")
         
         assert hasattr(self, f"_{loss_fxn}")
         self.loss_fxn = getattr(self, f"_{loss_fxn}")
@@ -705,7 +708,7 @@ class Trainer(CurriculumClass):
         #print("pred", pred)
         #print("targ", target)
         return torch.sum(
-            ((pred - target)/(torch.abs(target) + 1e-4))**2, #TODO: make eps smaller
+            ((pred - target)/(torch.abs(target) + 1e-2))**2, #TODO: make eps smaller
             dim=1, keepdim=True
         )
     
@@ -740,7 +743,29 @@ class Trainer(CurriculumClass):
             #print("scale", scale)
         """
         return self.loss_fxn(pred, target)
-  
+
+    def train_iteration(self):
+        self.optimizer.zero_grad()
+        self.integral_output = self.integrator.integrate(
+            ode_fxn=self._integrad, t=self.input_times, ode_args=(self.model,)
+        )
+        #print(epoch_count, integral_output.t.shape)
+        loss = self.integral_output.loss
+        #print("BEFORE", self.model.layers[0].weight.data[:5])
+        #print("OUTPUT", integral_output)
+
+        # T0 loss
+        init_loss = torch.mean(
+            self.loss_fxn(self.model(self.t_init_eval), self.ode_fxn.initial_condition)
+        )
+        loss = loss + init_loss
+        if not self.integral_output.gradient_taken:
+            #print("taking gradients")
+            loss.backward()
+        else:
+            init_loss.backward()
+        return loss
+
 
     def train(self, ode_fxn):
         self.ode_fxn = ode_fxn
@@ -771,11 +796,12 @@ class Trainer(CurriculumClass):
         loss_ratio, error_ratio, t0_count = 1, torch.tensor([1e10]), 0
         prev_loss = 1.0
         pred = torch.ones(1)
+        self.t_init_eval = t_init_eval
         print("Training initial conditions")
         while torch.any(error_ratio > 1e-3):
             if t0_count % 100 == 0:
                 print(f"T0 count {t0_count} | loss ratio: {loss_ratio} / error ratio: {error_ratio} / prediction: {torch.squeeze(pred).item()}")
-            self.optimizer.zero_grad()
+            self.init_optimizer.zero_grad()
             pred = self.model(t_init_eval) 
             loss = torch.mean(
                 self.loss_fxn(pred, self.ode_fxn.initial_condition)
@@ -785,7 +811,7 @@ class Trainer(CurriculumClass):
             loss.backward()
             #print("BEFORE", self.model.layers[0].bias.data[:5])
             #print("GRAD", self.model.layers[0].bias.grad[:5]*1e5)
-            self.optimizer.step()
+            self.init_optimizer.step()
             loss_ratio = torch.abs(prev_loss - loss)/prev_loss
             error_ratio = torch.abs(pred - self.ode_fxn.initial_condition)/(torch.abs(self.ode_fxn.initial_condition) + 1e-9)
             error_ratio = torch.squeeze(error_ratio)
@@ -796,39 +822,45 @@ class Trainer(CurriculumClass):
             t0_count += 1
         print("Finished training initial conditions", loss_ratio, error_ratio)
 
-        times, epoch_count = t_init_eval, 0
+        self.input_times, epoch_count = t_init_eval, 0
         train_criteria = True
-        integral_output = None
+        self.integral_output = None
         while train_criteria:
-            if epoch_count % 1000 == 0:
+            eval_time = 50
+            if epoch_count % eval_time == 0:
                 #print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
-                if integral_output is not None:
-                    print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(integral_output.t)}")
+                if self.integral_output is not None:
+                    print(f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(self.integral_output.t)}")
                 #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                 #if integral_output is not None:
                 #    print(integral_output.t[:,0,0])
-                if epoch_count % 5000 == 0:
+                if epoch_count % eval_time == 0:
                     self._integrad(
                         torch.arange(
                             10, dtype=self.dtype, device=self.device
                         ).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True
                     )
                     self.eval_results(t_init, epoch_count)
-                    if integral_output is not None:
-                        print(integral_output.y[0,:,0])
-            self.optimizer.zero_grad()
+                    if self.integral_output is not None:
+                        print("Y", self.integral_output.y[0,:,0])
+            
             updated_curr = self.update_curriculum(epoch_count, loss)
-            if updated_curr or integral_output is None:
-                if times[-1] < self.t_pred:
-                    times = torch.concatenate(
-                        [times, torch.tensor([self.t_pred], device=self.device).unsqueeze(-1)], dim=0
+            if updated_curr:
+                self.optimizer = torch.optim.LBFGS(self.model.parameters(), tolerance_change=0.0, line_search_fn = "strong_wolfe")
+            
+            if updated_curr or self.integral_output is None:
+                if self.input_times[-1] < self.t_pred:
+                    self.input_times = torch.concatenate(
+                        [self.input_times, torch.tensor([self.t_pred], device=self.device).unsqueeze(-1)], dim=0
                     )
-                times = torch.tensor([t_init, self.t_pred], dtype=self.dtype, device=self.device).unsqueeze(-1)
+                self.input_times = torch.tensor([t_init, self.t_pred], dtype=self.dtype, device=self.device).unsqueeze(-1)
             else:
-                times = integral_output.t_optimal
+                self.input_times = self.integral_output.t_optimal
+            #self.input_times = torch.tensor([t_init, self.t_pred], dtype=self.dtype, device=self.device).unsqueeze(-1)
             #print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
+            """
             integral_output = self.integrator.integrate(
-                ode_fxn=self._integrad, t=times, ode_args=(self.model,)
+                ode_fxn=self._integrad, t=self.input_times, ode_args=(self.model,)
             )
             #print(epoch_count, integral_output.t.shape)
             loss = integral_output.loss
@@ -838,6 +870,7 @@ class Trainer(CurriculumClass):
                 #print("taking gradients")
                 loss.backward()
             """
+            """
             
             t_eval = torch.arange(100).unsqueeze(1)*self.t_pred/99
             loss = torch.mean(
@@ -845,34 +878,30 @@ class Trainer(CurriculumClass):
             )
             loss.backward()
             """
-            # T0 loss
-            init_loss = torch.mean(
-                self.loss_fxn(self.model(t_init_eval), self.ode_fxn.initial_condition)
-            )
-            init_loss.backward()
+            
             #print("GRAD", self.model.layers[0].weight.grad[:5]*1e5)
-            self.optimizer.step()
+            loss = self.optimizer.step(self.train_iteration)
             #print("AFTER", self.model.layers[0].weight.data[:5])
             #times = integral_output.t_optimal.clone()
             #times = integral_output.t_optimal.detach()
             #times.requires_grad_(True)
 
-            # Update learning rate
-            if self.t_pred != self.t_max and self.lr_patience is not None:
-                if loss < prev_loss or updated_curr:
-                    patience = 0
-                else:
-                    patience += 1
-                    if patience >= self.lr_patience:
-                        self.optimizer.lr = self.optimizer.lr*self.lr_scale
-                        patience = 0
-                prev_loss = loss.detach().item()
+            # # Update learning rate
+            # if self.t_pred != self.t_max and self.lr_patience is not None:
+            #     if loss < prev_loss or updated_curr:
+            #         patience = 0
+            #     else:
+            #         patience += 1
+            #         if patience >= self.lr_patience:
+            #             self.optimizer.lr = self.optimizer.lr*self.lr_scale
+            #             patience = 0
+            #     prev_loss = loss.detach().item()
 
             epoch_count += 1
             if self.N_epochs is not None:
                 train_criteria = epoch_count < self.N_epochs
             else:
-                train_criteria = times[-1,0] < self.t_max
+                train_criteria = self.input_times[-1,0] < self.t_max
 
         self.eval_results(t_init, epoch_count)
 
