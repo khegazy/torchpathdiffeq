@@ -1,6 +1,11 @@
 import os
 import torch
+import json
+import yaml
+import hashlib
+import h5py as h5
 import numpy as np
+from glob import glob
 from torch import nn
 import torchpathdiffeq as tpd
 from torchdiffeq import odeint
@@ -132,8 +137,7 @@ experiments = {
         'problem' : 'lotka_volterra',
         'ode' : {},
         'model' : {
-            'activation' : nn.GELU(),
-            'layers' : [1, 64, 128, 128, 256, 128, 128, 64] 
+            'layers' : [1, 64, 128, 256, 256, 128, 64] 
         },
         'trainer' :{
             'integrator_config' : {
@@ -381,6 +385,7 @@ class CurriculumClass():
         self._idx = 0
         self.dtype = dtype
 
+        self.prev_t_pred = 1e-9
         self.t_pred = torch.tensor(t_pred, dtype=self.dtype)
         self.t_max = torch.tensor(t_max, dtype=self.dtype)
         if self.curr_type is not None:
@@ -422,6 +427,9 @@ class CurriculumClass():
             ]
             raise ValueError(f"Cannot evaluate {curr_type}, either add a new function to the Metrics class or use one of the following:\n\t{curr_types}")
 
+    #def _calculate_filter(self):
+        
+    
     def update_curriculum(self, epoch, loss):
         self.loss = loss
         
@@ -449,7 +457,8 @@ class CurriculumClass():
                     self.config['cutoff'] = self.config['default_cutoff']
                     self.curr_patience = 0
             t_update, updated_t = self._update_curriculum(epoch)
-            t_update = torch.minimum(t_update, self.t_max)
+            t_update = np.minimum(t_update, self.t_max)
+            self.prev_t_pred = self.t_pred
             self.t_pred = t_update
             return updated_t and t_update < self.t_max
         
@@ -612,6 +621,62 @@ class Trainer(CurriculumClass):
             **integrator_config, device=self.device
         )
 
+    def _find_saved_weights(self):
+        files = glob(os.path.join(self.chkpt_dir, "*pth"))
+        if len(files) == 0:
+            return None, None
+        max_t = -1.0
+        filename = None
+        for f in files:
+            idx = f.find("_t-") + 3
+            print(f,f[idx:-4])
+            t_str = f[idx:-4]
+            t = float(t_str)
+            if t > max_t:
+                max_t = t
+                filename = f
+                t_label = t_str
+        return filename, t_label
+
+    def _save_model(self, t):
+        if self.prev_saved_model is not None:
+            os.remove(self.prev_saved_model)
+        filename = os.path.join(self.chkpt_dir, self._get_chkpt_filename())
+        torch.save(
+            self.model.state_dict(), filename
+        )
+        self.prev_saved_model = filename
+    
+    def _get_results_filename(self):
+        t_label = np.round(np.squeeze(self.t_pred)).item()
+        return f"training_t-{t_label:.3f}.h5"
+    
+    def _get_chkpt_filename(self):
+        t_label = np.round(np.squeeze(self.t_pred)).item()
+        return f'model_weights_t-{t_label:.3f}.pth'
+
+    def _load_model(self):
+        filename, t_label = self._find_saved_weights()
+        print("FILENAME", filename)
+        if filename is None:
+            print("Start training from scratch")
+            return 0
+        else:
+            print(f"Starting training from {filename}")
+            self.model.load_state_dict(torch.load(filename))
+            results_filename = self._get_results_filename()
+            with h5.File(os.path.join(self.results_dir, results_filename), 'r') as f:
+                self.eval_integral_values = [arr for arr in f['integrals']]
+                self.eval_integral_limits = [arr for arr in f['t_final']]
+                self.t_pred = f['t_pred'][...]
+                idx = -1
+                while self.eval_integral_limits[idx][0] >= self.t_pred.item():
+                    idx -= 1
+                self.prev_t_pred = self.eval_integral_limits[idx][0]
+                epoch_count = f['epoch'][...]
+            return epoch_count
+
+        
     def plot_results(self, time, pred, solution, epoch):
 
         device = pred.device
@@ -767,15 +832,32 @@ class Trainer(CurriculumClass):
         return loss
 
 
-    def train(self, ode_fxn):
+    def train(self, config, ode_fxn):
         self.ode_fxn = ode_fxn
         self.ode_fxn.solve_ode(self.t_max)
-        self.plot_dir = os.path.join("plots", self.ode_fxn.__name__, self.loss_fxn_name)
-        os.makedirs(self.plot_dir, exist_ok=True)
         t_init = self.ode_fxn.t_init 
         t_init_eval = torch.tensor(
             [t_init], requires_grad=True, dtype=self.dtype, device=self.device
         ).unsqueeze(-1)
+        self.prev_t_pred = 1e-9
+        
+        config_vars = json.dumps(config, sort_keys=True).encode()
+        hash_label = hashlib.blake2s(
+            config_vars, digest_size=4
+        ).hexdigest()
+        sub_dir = os.path.join(self.ode_fxn.__name__, self.loss_fxn_name, hash_label) 
+        self.chkpt_dir = os.path.join("checkpoints", sub_dir)
+        os.makedirs(self.chkpt_dir, exist_ok=True)
+        self.results_dir = os.path.join("results", sub_dir)
+        self.plot_dir = os.path.join(self.results_dir, "plots")
+        os.makedirs(self.plot_dir, exist_ok=True)
+        self.eval_integral_values, self.eval_integral_limits = [], []
+        
+        with open(os.path.join(self.results_dir, "config.yaml"), "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
+        self.prev_saved_model = None
+        epoch_count = self._load_model()
+
         self.model.train()
         #self.model.compile()
 
@@ -794,7 +876,7 @@ class Trainer(CurriculumClass):
                     print(f"  {key}: {value}")
         # Train t0
         loss_ratio, error_ratio, t0_count = 1, torch.tensor([1e10]), 0
-        prev_loss = 1.0
+        prev_loss, prev_filename = 1.0, None
         pred = torch.ones(1)
         self.t_init_eval = t_init_eval
         print("Training initial conditions")
@@ -822,11 +904,15 @@ class Trainer(CurriculumClass):
             t0_count += 1
         print("Finished training initial conditions", loss_ratio, error_ratio)
 
+        # Make output folder
+        prev_loss = 0
+        N_const_loss = 0
+        cutoff_count = 0
         self.input_times, epoch_count = t_init_eval, 0
         train_criteria = True
         self.integral_output = None
         while train_criteria:
-            eval_time = 50
+            eval_time = 5
             if epoch_count % eval_time == 0:
                 #print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
                 if self.integral_output is not None:
@@ -834,15 +920,68 @@ class Trainer(CurriculumClass):
                 #self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                 #if integral_output is not None:
                 #    print(integral_output.t[:,0,0])
-                if epoch_count % eval_time == 0:
+                    integral_values = [loss.item()]
+                    integral_limits = [self.t_pred]
+                    eval_t_preds = np.concatenate([
+                        np.array([self.prev_t_pred]),
+                        self.t_pred*np.array([0.95, 0.9, 0.75, 0.5, 0.25])
+                    ])
+                    #print("EVAL", self.t_pred, eval)
+                    half_idx = -2
+                    for eval_t in eval_t_preds:
+                        self.eval_input_times = torch.tensor(
+                            [t_init, eval_t],
+                            dtype=self.dtype, device=self.device
+                        ).unsqueeze(-1)
+                        with torch.no_grad():
+                            eval_integral_output = self.integrator.integrate(
+                                ode_fxn=self._integrad, t=self.eval_input_times, ode_args=(self.model,)
+                            )
+                        integral_values.append(eval_integral_output.loss.item())
+                        integral_limits.append(eval_t)
+                    self.eval_integral_values.append(np.array(integral_values))
+                    data_values = np.array(self.eval_integral_values)
+                    self.eval_integral_limits.append(np.array(integral_limits))
+                    data_limits = np.array(self.eval_integral_limits)
+                    filename = os.path.join(self.results_dir, self._get_results_filename())
+                    with h5.File(filename, 'w') as f:
+                        f.create_dataset("epoch", data=epoch_count)
+                        f.create_dataset("t_pred", data=self.t_pred)
+                        f.create_dataset("t_final", data=data_limits)
+                        f.create_dataset("integrals", data=data_values)
+                    # if prev_filename is not None:
+                    #     print("preve filename", prev_filename)
+                    #     os.remove(prev_filename)
+                    # prev_filename = filename
+                    
+                    fig, ax = plt.subplots(2,1, height_ratios=[5,1])
+                    ax[0].plot(data_values[:,-2], 'y--')
+                    ax[0].plot(data_values[:,-3], 'g--')
+                    ax[0].plot(data_values[:,-4], 'r--')
+                    ax[0].plot(data_values[:,1], 'b--')
+                    ax[0].plot(data_values[:,0], 'k-')
+                    ax[1].plot(data_limits[:,0])
+                    fig.tight_layout()
+                    fig.savefig(os.path.join(self.results_dir, "training_progress.png"))
+
+                    if integral_values[half_idx]/integral_values[0] > 0.25:
+                        cutoff_count = cutoff_count + 1
+                        if cutoff_count > 50:
+                            self.config['cutoff'] = 1.25*self.config['cutoff']
+                            cutoff_count = 0
+                    else:
+                        cutoff_count = 0
+
+                if epoch_count % 50 == 0:
                     self._integrad(
                         torch.arange(
                             10, dtype=self.dtype, device=self.device
                         ).unsqueeze(-1)*self.t_pred/9., self.model, verbose=True
                     )
-                    self.eval_results(t_init, epoch_count)
                     if self.integral_output is not None:
                         print("Y", self.integral_output.y[0,:,0])
+                    self.eval_results(t_init, epoch_count)
+                    self._save_model(self.t_pred)
             
             updated_curr = self.update_curriculum(epoch_count, loss)
             if updated_curr:
@@ -881,6 +1020,15 @@ class Trainer(CurriculumClass):
             
             #print("GRAD", self.model.layers[0].weight.grad[:5]*1e5)
             loss = self.optimizer.step(self.train_iteration)
+            if loss == prev_loss:
+                N_const_loss += 1
+            else:
+                prev_loss = loss
+                N_const_loss = 0
+            if N_const_loss > 200:
+                print("NEW SOLVER")
+                self.optimizer = torch.optim.LBFGS(self.model.parameters(), tolerance_change=0.0, line_search_fn = "strong_wolfe")
+                #asdfasd
             #print("AFTER", self.model.layers[0].weight.data[:5])
             #times = integral_output.t_optimal.clone()
             #times = integral_output.t_optimal.detach()
@@ -958,7 +1106,8 @@ if __name__ == "__main__":
     """
 
     # Solve ODE
-    trainer.train(ode_fxn)#torch.zeros((1,1)))
+    del config['dtype']
+    trainer.train(config, ode_fxn)#torch.zeros((1,1)))
 
     # Evaluate Solver
 
