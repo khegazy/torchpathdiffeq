@@ -296,21 +296,40 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Make no neighboring values are both True by setting the second value
         to False, this is done recursively.
         """
+        
         mask2 = mask[:-1]*mask[1:]
-        if torch.any(mask2):
-            if mask2[0]:
-                mask[1] = False
-            if len(mask) > 2:
-                return self._rec_remove(torch.concatenate(
-                    [
-                        mask[:2],
-                        mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
-                    ]
-                ))
-            else:
-                return mask
-        else:
+        if not torch.any(mask2):
             return mask
+        
+        # Must keep the first integration step
+        if mask2[0]:
+            mask[1] = False
+        
+        # Mask is too small to remove points
+        if len(mask) <= 2:
+            return mask
+        
+        return self._rec_remove(torch.concatenate(
+            [
+                mask[:2],
+                mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
+            ]
+        ))
+        
+        # if torch.any(mask2):
+        #     if mask2[0]:
+        #         mask[1] = False
+        #     if len(mask) > 2:
+        #         return self._rec_remove(torch.concatenate(
+        #             [
+        #                 mask[:2],
+        #                 mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
+        #             ]
+        #         ))
+        #     else:
+        #         return mask
+        # else:
+        #     return mask
 
 
     def _compute_error_ratios(self, sum_step_errors, sum_steps=None, cum_sum_steps=None, integral=None):
