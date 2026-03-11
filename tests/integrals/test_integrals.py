@@ -11,8 +11,8 @@ from torchpathdiffeq import\
 
 
 def test_integrals():
-    atol = 1e-9
-    rtol = 1e-7
+    atol = 1e-12
+    rtol = 1e-10
     t_init = torch.tensor([0], dtype=torch.float64)
     t_final = torch.tensor([1], dtype=torch.float64)
     #loop_items = zip(
@@ -32,6 +32,7 @@ def test_integrals():
             for name, (ode, solution, cutoff) in ODE_dict.items():
                 print("INTEGRAL", method, name, sampling_name)
                 correct = solution(t_init=t_init, t_final=t_final)
+                torch.manual_seed(2025)
                 parallel_integrator = get_parallel_RK_solver(
                     sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1
                 )

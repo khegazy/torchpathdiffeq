@@ -296,21 +296,40 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Make no neighboring values are both True by setting the second value
         to False, this is done recursively.
         """
+        
         mask2 = mask[:-1]*mask[1:]
-        if torch.any(mask2):
-            if mask2[0]:
-                mask[1] = False
-            if len(mask) > 2:
-                return self._rec_remove(torch.concatenate(
-                    [
-                        mask[:2],
-                        mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
-                    ]
-                ))
-            else:
-                return mask
-        else:
+        if not torch.any(mask2):
             return mask
+        
+        # Must keep the first integration step
+        if mask2[0]:
+            mask[1] = False
+        
+        # Mask is too small to remove points
+        if len(mask) <= 2:
+            return mask
+        
+        return self._rec_remove(torch.concatenate(
+            [
+                mask[:2],
+                mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
+            ]
+        ))
+        
+        # if torch.any(mask2):
+        #     if mask2[0]:
+        #         mask[1] = False
+        #     if len(mask) > 2:
+        #         return self._rec_remove(torch.concatenate(
+        #             [
+        #                 mask[:2],
+        #                 mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
+        #             ]
+        #         ))
+        #     else:
+        #         return mask
+        # else:
+        #     return mask
 
 
     def _compute_error_ratios(self, sum_step_errors, sum_steps=None, cum_sum_steps=None, integral=None):
@@ -336,10 +355,12 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         if self.error_calc_idx is not None:
             sum_step_errors = sum_step_errors[:,self.error_calc_idx, None]
             integral = integral[self.error_calc_idx, None]
+            #y = y[:,:,self.error_calc_idx, None]
             if sum_steps is not None:
                 sum_steps = sum_steps[:,self.error_calc_idx, None]
             if cum_sum_steps is not None:
                 cum_sum_steps = cum_sum_steps[:,self.error_calc_idx, None]
+                #DEBUG: add y0 to cum_steps to get get integral values at different times?
 
         if self.use_absolute_error_ratio:
             return self._compute_error_ratios_absolute(
@@ -350,7 +371,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 sum_step_errors, sum_steps=sum_steps, cum_sum_steps=cum_sum_steps
             )
     
-    
+
     def _compute_error_ratios_absolute(self, sum_step_errors, integral):
         """
         Computes the ratio of the difference between chosen method of order p
@@ -490,7 +511,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 record[key] = record[key][sorted_idxs]
         all_ascending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] > 0)
         all_descending = torch.all(record['t'][1:,0,0] - record['t'][:-1,0,0] < 0)
-        assert all_ascending or all_descending
+        assert all_ascending or all_descending, "Times are required to be either in ascending or descending order"
         return record
 
     def _get_cpu_memory(self):
@@ -564,7 +585,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_final=None,
             N_init_steps=13,
             ode_args=(),
-            take_gradient=None,
+            take_gradient=False,
             total_mem_usage=None,
             loss_fxn=None,
             max_batch=None,
@@ -671,12 +692,23 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 )
             
         if t is None:
+            #TODO: set random seed during tests for reproducability
             t_is_given = False
-            t_step_barriers = t_init\
-                + (t_final - t_init)/N_init_steps*torch.arange(
-                    N_init_steps+1, device=self.device
-                ).unsqueeze(-1)
-            #TODO: Reuse get_initial_t_steps
+            N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(torch.int)
+            dt = (t_final - t_init)/N_even_t
+            t_step_barriers = t_init + dt * torch.arange(N_even_t, device=self.device)[:,None,None] #TODO: this assumes time is 1d
+
+            random_ts = dt*torch.rand(
+                (N_even_t, N_even_t + 1, 1), device=self.device
+            )
+            random_ts = torch.sort(random_ts, dim=1)[0]
+            t_step_barriers = t_step_barriers + random_ts
+            t_step_barriers[0] += t_init - t_step_barriers[0,0]
+            t_step_barriers[-1] += t_final - t_step_barriers[-1,-1]
+            t_step_barriers = torch.flatten(t_step_barriers, start_dim=0, end_dim=1)
+            t_step_barriers[0] = t_init
+            t_step_barriers[-1] = t_final
+            assert torch.all(t_step_barriers[1:] - t_step_barriers[:-1] > 0)
         else:
             t_is_given = True
             t_step_barriers = t
@@ -971,7 +1003,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         
         # Check that t is ordered and first/last match
         t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
+        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0) #DEBUG, hit this error
         t_flat = torch.flatten(t, start_dim=0, end_dim=1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert>= 0)
 

@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torchpathdiffeq import ode_path_integral, UNIFORM_METHODS, VARIABLE_METHODS, RKParallelUniformAdaptiveStepsizeSolver, RKParallelVariableAdaptiveStepsizeSolver, SerialAdaptiveStepsizeSolver
 
 def integrand(t, y=0):
@@ -13,6 +14,8 @@ def test_ode_path_integral_fxn():
     ##############################
     for method in UNIFORM_METHODS.keys():
     
+        torch.manual_seed(2025)
+        np.random.seed(2025)
         OPI_integral = ode_path_integral(
             ode_fxn=integrand,
             method=method,
@@ -24,6 +27,8 @@ def test_ode_path_integral_fxn():
             t=None,
         )
 
+        torch.manual_seed(2025)
+        np.random.seed(2025)
         RK_integrator = RKParallelUniformAdaptiveStepsizeSolver(
             method=method,
             atol=atol,
