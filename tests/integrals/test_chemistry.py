@@ -53,6 +53,7 @@ def test_chemistry():
         [steps.ADAPTIVE_UNIFORM])
     for sampling_name, sampling, sampling_type in loop_items:
         for method in sampling.keys():
+            torch.manual_seed(2025)
             parallel_integrator = get_parallel_RK_solver(
                 sampling_type,
                 method=method,

@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torchpathdiffeq import\
     steps,\
     get_parallel_RK_solver,\
@@ -35,6 +36,8 @@ def test_data_type():
                 sampling_type, method=method, atol=atol, rtol=rtol, remove_cut=0.1
             )
             for dtype in [torch.float32, torch.float64]:
+                if dtype == torch.float32:
+                    cutoff = np.sqrt(cutoff)
                 integral_output = parallel_integrator.integrate(
                     ode,
                     t_init=torch.tensor([0], dtype=dtype),
