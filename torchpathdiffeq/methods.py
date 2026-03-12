@@ -241,7 +241,7 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
 
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tableau tensors to the specified dtype."""
-        self.tableau.to(dtype)
+        self.tableau.to_dtype(dtype)
 
     def tableau_b(self, c: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

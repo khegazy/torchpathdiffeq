@@ -1584,10 +1584,16 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         assert self.method_name in VARIABLE_METHODS, \
             f"Cannot find method '{self.method_name}' in supported methods: {list(VARIABLE_METHODS.keys())}"
         self.method = VARIABLE_METHODS[self.method_name]()
+        self.method.to_dtype(self.dtype)
         self.order = self.method.order
         self.C = self.method.n_tableau_c
         self.Cm1 = self.C - 1
-    
+
+    def _set_solver_dtype(self, dtype: torch.dtype) -> None:
+        """Convert variable method tensors to the new dtype."""
+        if hasattr(self, "method"):
+            self.method.to_dtype(dtype)
+
     """
     def _initial_t_steps(
             self,
