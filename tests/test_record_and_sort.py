@@ -1,11 +1,11 @@
 """Unit tests for _record_results and _sort_record."""
+
 from __future__ import annotations
 
 import torch
+from _helpers import make_solver_for_unit_test
 
 from torchpathdiffeq.base import IntegralOutput
-
-from _helpers import make_solver_for_unit_test
 
 
 def _make_integral_output(t_start, t_end, N=2, C=4, D=1):
@@ -35,6 +35,7 @@ def _make_integral_output(t_start, t_end, N=2, C=4, D=1):
 # _record_results
 # ---------------------------------------------------------------------------
 
+
 class TestRecordResults:
     """Tests for _record_results: accumulate batches into a sorted record."""
 
@@ -46,12 +47,12 @@ class TestRecordResults:
         record = {}
         results = _make_integral_output(0.0, 0.5)
         record = self.solver._record_results(record, False, results)
-        assert 'integral' in record
-        assert 't' in record
-        assert 'h' in record
-        assert 'y' in record
-        assert 'sum_steps' in record
-        assert torch.equal(record['integral'], results.integral)
+        assert "integral" in record
+        assert "t" in record
+        assert "h" in record
+        assert "y" in record
+        assert "sum_steps" in record
+        assert torch.equal(record["integral"], results.integral)
 
     def test_first_batch_detaches(self):
         """With take_gradient=True, first batch values are detached."""
@@ -61,8 +62,8 @@ class TestRecordResults:
         results.integral = results.integral.clone().requires_grad_(True)
         results.loss = results.loss.clone().requires_grad_(True)
         record = self.solver._record_results(record, True, results)
-        assert not record['integral'].requires_grad
-        assert not record['loss'].requires_grad
+        assert not record["integral"].requires_grad
+        assert not record["loss"].requires_grad
 
     def test_second_batch_merges(self):
         """Two non-overlapping batches merge correctly in time order."""
@@ -73,9 +74,9 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert record['t'].shape[0] == 4  # 2 + 2 steps
+        assert record["t"].shape[0] == 4  # 2 + 2 steps
         # Times should be sorted ascending
-        assert torch.all(record['t'][1:, 0, 0] - record['t'][:-1, 0, 0] > 0)
+        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
 
     def test_integral_accumulated(self):
         """Integral values are summed across batches."""
@@ -88,7 +89,9 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert torch.allclose(record['integral'], torch.tensor([1.0], dtype=torch.float64))
+        assert torch.allclose(
+            record["integral"], torch.tensor([1.0], dtype=torch.float64)
+        )
 
     def test_loss_accumulated(self):
         """Loss values are summed across batches."""
@@ -101,7 +104,7 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert torch.allclose(record['loss'], torch.tensor([3.0], dtype=torch.float64))
+        assert torch.allclose(record["loss"], torch.tensor([3.0], dtype=torch.float64))
 
     def test_time_ordering_after_merge(self):
         """Batch 2 has earlier times but record remains sorted."""
@@ -112,12 +115,13 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert torch.all(record['t'][1:, 0, 0] - record['t'][:-1, 0, 0] > 0)
+        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
 
 
 # ---------------------------------------------------------------------------
 # _sort_record
 # ---------------------------------------------------------------------------
+
 
 class TestSortRecord:
     """Tests for _sort_record: sort per-step tensors by time."""
@@ -133,42 +137,45 @@ class TestSortRecord:
         for i, ts in enumerate(t_starts):
             t[i, :, 0] = torch.linspace(ts, ts + 0.1, C)
         return {
-            'integral': torch.tensor([1.0], dtype=torch.float64),
-            'loss': torch.tensor([2.0], dtype=torch.float64),
-            't': t,
-            'h': torch.ones(N, 1, dtype=torch.float64) * 0.1,
-            'y': torch.arange(N, dtype=torch.float64).unsqueeze(-1).unsqueeze(-1).expand(N, C, D),
-            'sum_steps': torch.arange(N, dtype=torch.float64).unsqueeze(-1),
-            'sum_step_errors': torch.ones(N, D, dtype=torch.float64) * 0.01,
-            'error_ratios': torch.ones(N, dtype=torch.float64) * 0.5,
-            'integral_error': torch.tensor([0.01], dtype=torch.float64),
+            "integral": torch.tensor([1.0], dtype=torch.float64),
+            "loss": torch.tensor([2.0], dtype=torch.float64),
+            "t": t,
+            "h": torch.ones(N, 1, dtype=torch.float64) * 0.1,
+            "y": torch.arange(N, dtype=torch.float64)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .expand(N, C, D),
+            "sum_steps": torch.arange(N, dtype=torch.float64).unsqueeze(-1),
+            "sum_step_errors": torch.ones(N, D, dtype=torch.float64) * 0.01,
+            "error_ratios": torch.ones(N, dtype=torch.float64) * 0.5,
+            "integral_error": torch.tensor([0.01], dtype=torch.float64),
         }
 
     def test_already_sorted(self):
         """Ascending times: unchanged."""
         record = self._make_record([0.1, 0.3, 0.5])
-        original_t = record['t'].clone()
+        original_t = record["t"].clone()
         record = self.solver._sort_record(record)
-        assert torch.equal(record['t'], original_t)
+        assert torch.equal(record["t"], original_t)
 
     def test_reverse_order(self):
         """Descending times: sorted to ascending."""
         record = self._make_record([0.5, 0.3, 0.1])
         record = self.solver._sort_record(record)
-        assert torch.all(record['t'][1:, 0, 0] - record['t'][:-1, 0, 0] > 0)
+        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
 
     def test_single_step(self):
         """Single step: trivially sorted."""
         record = self._make_record([0.5])
         record = self.solver._sort_record(record)
-        assert record['t'].shape[0] == 1
+        assert record["t"].shape[0] == 1
 
     def test_scalars_untouched(self):
         """integral and loss are not reordered."""
         record = self._make_record([0.5, 0.3, 0.1])
         record = self.solver._sort_record(record)
-        assert torch.equal(record['integral'], torch.tensor([1.0], dtype=torch.float64))
-        assert torch.equal(record['loss'], torch.tensor([2.0], dtype=torch.float64))
+        assert torch.equal(record["integral"], torch.tensor([1.0], dtype=torch.float64))
+        assert torch.equal(record["loss"], torch.tensor([2.0], dtype=torch.float64))
 
     def test_all_keys_sorted_consistently(self):
         """All per-step keys are reordered identically."""
@@ -177,4 +184,7 @@ class TestSortRecord:
         # After sorting by t, sum_steps should follow same order
         # Original: [0.5→idx0, 0.1→idx1, 0.3→idx2]
         # Sorted: [0.1→idx1, 0.3→idx2, 0.5→idx0]
-        assert torch.allclose(record['sum_steps'][:, 0], torch.tensor([1.0, 2.0, 0.0], dtype=torch.float64))
+        assert torch.allclose(
+            record["sum_steps"][:, 0],
+            torch.tensor([1.0, 2.0, 0.0], dtype=torch.float64),
+        )

@@ -1,12 +1,12 @@
 """Unit tests for _t_step_interpolate (quadrature point placement)."""
+
 from __future__ import annotations
 
 import pytest
 import torch
+from _helpers import UNIFORM_METHOD_NAMES, make_solver_for_unit_test
 
 from torchpathdiffeq import UNIFORM_METHODS
-
-from _helpers import UNIFORM_METHOD_NAMES, make_solver_for_unit_test
 
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
@@ -62,9 +62,9 @@ class TestTStepInterpolate:
 
         for i in range(N):
             diffs = result[i, 1:, 0] - result[i, :-1, 0]
-            assert torch.all(diffs >= -1e-15), (
-                f"Step {i}: non-monotonic points {result[i, :, 0]}"
-            )
+            assert torch.all(
+                diffs >= -1e-15
+            ), f"Step {i}: non-monotonic points {result[i, :, 0]}"
 
     def test_matches_tableau_c_on_unit_step(self, method_name):
         """On a unit step [0,1], points equal the tableau c values."""

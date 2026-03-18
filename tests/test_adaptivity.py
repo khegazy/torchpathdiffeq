@@ -1,21 +1,21 @@
 """Tests for adaptive step adding (refinement) and removal (pruning)."""
+
 from __future__ import annotations
 
 import pytest
 import torch
+from _helpers import (
+    ATOL_LOOSE,
+    ATOL_MED,
+    RTOL_LOOSE,
+    RTOL_MED,
+    T_FINAL,
+    T_INIT,
+    assert_step_continuity,
+    assert_time_ordering,
+)
 
 from torchpathdiffeq import RKParallelUniformAdaptiveStepsizeSolver
-
-from _helpers import (
-    ATOL_MED,
-    RTOL_MED,
-    ATOL_LOOSE,
-    RTOL_LOOSE,
-    T_INIT,
-    T_FINAL,
-    assert_time_ordering,
-    assert_step_continuity,
-)
 
 
 def _integrand(t):
@@ -36,7 +36,10 @@ class TestStepAdding:
 
     def _make_solver(self, method_name):
         return RKParallelUniformAdaptiveStepsizeSolver(
-            method=method_name, ode_fxn=_integrand, atol=ATOL_MED, rtol=RTOL_MED,
+            method=method_name,
+            ode_fxn=_integrand,
+            atol=ATOL_MED,
+            rtol=RTOL_MED,
         )
 
     def test_steps_added_on_coarse_mesh(self, method_name):
@@ -72,14 +75,14 @@ class TestStepAdding:
             t_optimal = output.t_optimal
             if idx == 0:
                 # First iteration: mesh must grow
-                assert len(t) < len(t_optimal), (
-                    f"Iteration {idx}: mesh should grow from {len(t)} points"
-                )
+                assert len(t) < len(
+                    t_optimal
+                ), f"Iteration {idx}: mesh should grow from {len(t)} points"
             else:
                 # Subsequent iterations: mesh should not shrink
-                assert len(t) <= len(t_optimal), (
-                    f"Iteration {idx}: mesh should not shrink from {len(t)} points"
-                )
+                assert len(t) <= len(
+                    t_optimal
+                ), f"Iteration {idx}: mesh should not shrink from {len(t)} points"
             t = t_optimal
 
 
@@ -87,12 +90,16 @@ class TestStepAdding:
 # Step Removal (pruning) tests
 # ---------------------------------------------------------------------------
 
+
 class TestStepRemoval:
     """Starting from an over-resolved mesh, verify the solver prunes excess steps."""
 
     def _make_solver(self):
         return RKParallelUniformAdaptiveStepsizeSolver(
-            method="dopri5", ode_fxn=_integrand, atol=ATOL_LOOSE, rtol=RTOL_LOOSE,
+            method="dopri5",
+            ode_fxn=_integrand,
+            atol=ATOL_LOOSE,
+            rtol=RTOL_LOOSE,
         )
 
     def test_steps_removed_on_dense_mesh(self):
@@ -128,12 +135,12 @@ class TestStepRemoval:
             t_optimal = output.t_optimal
             if idx == 0:
                 # First iteration: mesh must shrink
-                assert len(t) > len(t_optimal), (
-                    f"Iteration {idx}: mesh should shrink from {len(t)} points"
-                )
+                assert len(t) > len(
+                    t_optimal
+                ), f"Iteration {idx}: mesh should shrink from {len(t)} points"
             else:
                 # Subsequent iterations: mesh should not grow
-                assert len(t) >= len(t_optimal), (
-                    f"Iteration {idx}: mesh should not grow from {len(t)} points"
-                )
+                assert len(t) >= len(
+                    t_optimal
+                ), f"Iteration {idx}: mesh should not grow from {len(t)} points"
             t = t_optimal

@@ -1,12 +1,12 @@
 """Tests for Butcher tableau coefficient validity."""
+
 from __future__ import annotations
 
 import pytest
 import torch
+from _helpers import UNIFORM_METHOD_NAMES
 
 from torchpathdiffeq import UNIFORM_METHODS, VARIABLE_METHODS
-
-from _helpers import UNIFORM_METHOD_NAMES
 
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
@@ -14,9 +14,9 @@ def test_uniform_tableau_b_sums_to_one(method_name):
     """The b weights of each uniform method must sum to 1 (consistency condition)."""
     method = UNIFORM_METHODS[method_name]
     b_sum = torch.sum(method.tableau.b)
-    assert torch.abs(b_sum - 1.0) < 1e-7, (
-        f"Uniform method '{method_name}': b weights sum to {b_sum.item()}, expected 1.0"
-    )
+    assert (
+        torch.abs(b_sum - 1.0) < 1e-7
+    ), f"Uniform method '{method_name}': b weights sum to {b_sum.item()}, expected 1.0"
 
 
 @pytest.mark.parametrize(

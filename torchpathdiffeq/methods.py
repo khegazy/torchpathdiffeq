@@ -26,15 +26,19 @@ positions within each step, which is useful when refining the mesh by
 inserting new points between existing ones.
 """
 
-from typing import Any, Optional, Tuple, Union
-import torch
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import override
+
+import torch
 
 from .base import steps
 
 
 @dataclass
-class _Tableau():
+class _Tableau:
     """
     Butcher tableau for a Runge-Kutta integration method.
 
@@ -51,6 +55,7 @@ class _Tableau():
         b_error: Difference between primary and embedded method weights.
             The error estimate is h * sum(b_error * f(t)). Shape: same as b.
     """
+
     c: torch.Tensor
     b: torch.Tensor
     b_error: torch.Tensor
@@ -61,14 +66,14 @@ class _Tableau():
         self.b = self.b.to(dtype)
         self.b_error = self.b_error.to(dtype)
 
-    def to_device(self, device: Union[str, torch.device]) -> None:
+    def to_device(self, device: str | torch.device) -> None:
         """Move all tableau tensors to the specified device."""
         self.c = self.c.to(device)
         self.b = self.b.to(device)
         self.b_error = self.b_error.to(device)
 
 
-class MethodClass():
+class MethodClass:
     """
     A complete uniform-sampling RK method: order + tableau.
 
@@ -80,6 +85,7 @@ class MethodClass():
         order: Convergence order of the method.
         tableau: The Butcher tableau defining the method's coefficients.
     """
+
     order: int
     tableau: _Tableau
 
@@ -91,7 +97,7 @@ class MethodClass():
         """Convert tableau to the specified dtype."""
         self.tableau.to_dtype(dtype)
 
-    def to_device(self, device: Union[str, torch.device]) -> None:
+    def to_device(self, device: str | torch.device) -> None:
         """Move tableau to the specified device."""
         self.tableau.to_device(device)
 
@@ -104,59 +110,50 @@ class MethodClass():
 
 # Adaptive Heun: 2nd-order method with 2 evaluations per step (endpoints only)
 _ADAPTIVE_HEUN = MethodClass(
-    order = 2,
-    tableau = _Tableau(
-        c = torch.tensor([0.0, 1.0], dtype=torch.float64),
-        b = torch.tensor([[0.5, 0.5]], dtype=torch.float64),
-        b_error = torch.tensor([[0.5, -0.5]], dtype=torch.float64)
-    )
+    order=2,
+    tableau=_Tableau(
+        c=torch.tensor([0.0, 1.0], dtype=torch.float64),
+        b=torch.tensor([[0.5, 0.5]], dtype=torch.float64),
+        b_error=torch.tensor([[0.5, -0.5]], dtype=torch.float64),
+    ),
 )
 
 # Fehlberg2: 2nd-order method with 3 evaluations per step (start, mid, end)
 _FEHLBERG2 = MethodClass(
-    order = 2,
-    tableau = _Tableau(
-        c = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64),
-        b = torch.tensor([1 / 512, 255 / 256, 1 / 512], dtype=torch.float64),
-        b_error = torch.tensor([-1 / 512, 0, 1 / 512], dtype=torch.float64)
-    )
+    order=2,
+    tableau=_Tableau(
+        c=torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64),
+        b=torch.tensor([1 / 512, 255 / 256, 1 / 512], dtype=torch.float64),
+        b_error=torch.tensor([-1 / 512, 0, 1 / 512], dtype=torch.float64),
+    ),
 )
 
 # Bogacki-Shampine: 3rd-order method with 4 evaluations per step
 _BOGACKI_SHAMPINE = MethodClass(
-    order = 3,
-    tableau = _Tableau(
-        c = torch.tensor([0.0, 0.5, 0.75, 1.0], dtype=torch.float64),
-        b = torch.tensor([2 / 9, 1 / 3, 4 / 9, 0.], dtype=torch.float64),
-        b_error = torch.tensor(
-            [2 / 9 - 7 / 24, 1 / 3 - 1 / 4, 4 / 9 - 1 / 3, -1 / 8],
-            dtype=torch.float64
-        )
-    )
+    order=3,
+    tableau=_Tableau(
+        c=torch.tensor([0.0, 0.5, 0.75, 1.0], dtype=torch.float64),
+        b=torch.tensor([2 / 9, 1 / 3, 4 / 9, 0.0], dtype=torch.float64),
+        b_error=torch.tensor(
+            [2 / 9 - 7 / 24, 1 / 3 - 1 / 4, 4 / 9 - 1 / 3, -1 / 8], dtype=torch.float64
+        ),
+    ),
 )
 
 # Dormand-Prince: 5th-order method with 7 evaluations per step
 _DORMAND_PRINCE_SHAMPINE = MethodClass(
-    order = 5,
-    tableau = _Tableau(
-        c = torch.tensor(
-            [0.0, 1.0/5, 3.0/10, 4.0/5, 8.0/9, 1., 1.], dtype=torch.float64
+    order=5,
+    tableau=_Tableau(
+        c=torch.tensor(
+            [0.0, 1.0 / 5, 3.0 / 10, 4.0 / 5, 8.0 / 9, 1.0, 1.0], dtype=torch.float64
         ),
-        b = torch.tensor(
-            [
-                35 / 384,
-                0,
-                500 / 1113,
-                125 / 192,
-                -2187 / 6784,
-                11 / 84,
-                0
-            ],
-            dtype=torch.float64
+        b=torch.tensor(
+            [35 / 384, 0, 500 / 1113, 125 / 192, -2187 / 6784, 11 / 84, 0],
+            dtype=torch.float64,
         ),
         # b_error = b_primary - b_embedded: the difference between the 5th-order
         # and 4th-order method weights, used for error estimation
-        b_error = torch.tensor(
+        b_error=torch.tensor(
             [
                 35 / 384 - 1951 / 21600,
                 0,
@@ -164,21 +161,21 @@ _DORMAND_PRINCE_SHAMPINE = MethodClass(
                 125 / 192 - 451 / 720,
                 -2187 / 6784 - -12231 / 42400,
                 11 / 84 - 649 / 6300,
-                -1. / 60.,
+                -1.0 / 60.0,
             ],
-            dtype=torch.float64
-        )
-    )
+            dtype=torch.float64,
+        ),
+    ),
 )
 
 
 # Registry of uniform-sampling methods, keyed by name.
 # These are singleton instances since their tableaux are constant.
 UNIFORM_METHODS = {
-    'adaptive_heun' : _ADAPTIVE_HEUN,
-    'fehlberg2' : _FEHLBERG2,
-    'bosh3' : _BOGACKI_SHAMPINE,
-    'dopri5' : _DORMAND_PRINCE_SHAMPINE
+    "adaptive_heun": _ADAPTIVE_HEUN,
+    "fehlberg2": _FEHLBERG2,
+    "bosh3": _BOGACKI_SHAMPINE,
+    "dopri5": _DORMAND_PRINCE_SHAMPINE,
 }
 
 
@@ -191,7 +188,7 @@ UNIFORM_METHODS = {
 # mesh refinement inserts new points between existing evaluations.
 
 
-class _VariableSubclass():
+class _VariableSubclass(ABC):
     """
     Base class for variable-sampling RK methods.
 
@@ -203,16 +200,16 @@ class _VariableSubclass():
         device: The device tensors are stored on.
     """
 
-    def __init__(self, device: Optional[Union[str, torch.device]] = None) -> None:
+    def __init__(self, device: str | torch.device | None = None) -> None:
         self.device = device
 
-    def to_device(self, device: Union[str, torch.device]) -> None:
+    @abstractmethod
+    def to_device(self, device: str | torch.device) -> None:
         """Move method tensors to the specified device."""
-        raise NotImplementedError
 
+    @abstractmethod
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert method tensors to the specified dtype."""
-        raise NotImplementedError
 
 
 class _VARIABLE_SECOND_ORDER(_VariableSubclass):
@@ -227,23 +224,26 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
         order: Convergence order (2).
         n_tableau_c: Number of quadrature points per step (2).
     """
+
     order = 2
     n_tableau_c = 2
 
-    def __init__(self, device: Optional[Union[str, torch.device]] = None) -> None:
+    def __init__(self, device: str | torch.device | None = None) -> None:
         super().__init__(device)
         self.device = device
         self.tableau = _ADAPTIVE_HEUN.tableau
 
-    def to_device(self, device: Union[str, torch.device]) -> None:
+    @override
+    def to_device(self, device: str | torch.device) -> None:
         """Move tableau tensors to the specified device."""
         self.tableau.to_device(device)
 
+    @override
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tableau tensors to the specified dtype."""
         self.tableau.to_dtype(dtype)
 
-    def tableau_b(self, c: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def tableau_b(self, _c: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Return b weights for the given quadrature positions.
 
@@ -285,10 +285,11 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
         n_tableau_c: Number of quadrature points per step (3).
         b_delta: Reference weights for error estimation. Shape: [1, 3].
     """
+
     order = 3
     n_tableau_c = 3
 
-    def __init__(self, device: Optional[Union[str, torch.device]] = None) -> None:
+    def __init__(self, device: str | torch.device | None = None) -> None:
         super().__init__(device)
         self.device = device
         # Reference weights (trapezoidal rule) used for error estimation
@@ -296,27 +297,29 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
             [[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device
         )
 
-    def to_device(self, device: Union[str, torch.device]) -> None:
+    @override
+    def to_device(self, device: str | torch.device) -> None:
         """Move tensors to the specified device."""
         self.b_delta = self.b_delta.to(device)
 
+    @override
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tensors to the specified dtype."""
         self.b_delta = self.b_delta.to(dtype)
 
     def _b0(self, a: torch.Tensor) -> torch.Tensor:
         """Weight for the left endpoint (c=0). Shape follows input a."""
-        return 0.5 - 1./(6*a)
+        return 0.5 - 1.0 / (6 * a)
 
     def _ba(self, a: torch.Tensor) -> torch.Tensor:
         """Weight for the interior point (c=a). Shape follows input a."""
-        return 1./(6*a*(1 - a))
+        return 1.0 / (6 * a * (1 - a))
 
     def _b1(self, a: torch.Tensor) -> torch.Tensor:
         """Weight for the right endpoint (c=1). Shape follows input a."""
-        return (2. - 3*a)/(6*(1. - a))
+        return (2.0 - 3 * a) / (6 * (1.0 - a))
 
-    def tableau_b(self, c: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def tableau_b(self, c: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute b weights dynamically from actual quadrature positions.
 
@@ -343,9 +346,9 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
                   estimation. Shape: [N, C].
         """
         # Extract the middle node position 'a' for each step
-        a = c[:,1,0]
+        a = c[:, 1, 0]
         # Compute the three b weights as functions of 'a'
-        b = torch.stack([self._b0(a), self._ba(a), self._b1(a)]).transpose(0,1)
+        b = torch.stack([self._b0(a), self._ba(a), self._b1(a)]).transpose(0, 1)
         # Error is the difference between the computed weights and the
         # reference trapezoidal rule weights
         b_error = b - self.b_delta
@@ -356,17 +359,17 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
 # Registry of variable-sampling methods, keyed by name.
 # These are classes (not instances) since they need per-device initialization.
 VARIABLE_METHODS = {
-    'adaptive_heun' : _VARIABLE_SECOND_ORDER,
-    'generic3' : _VARIABLE_THIRD_ORDER
+    "adaptive_heun": _VARIABLE_SECOND_ORDER,
+    "generic3": _VARIABLE_THIRD_ORDER,
 }
 
 
 def _get_method(
-        sampling_type: steps,
-        method_name: str,
-        device: Union[str, torch.device],
-        dtype: torch.dtype
-    ) -> Union[MethodClass, _VariableSubclass]:
+    sampling_type: steps,
+    method_name: str,
+    device: str | torch.device,
+    dtype: torch.dtype,
+) -> MethodClass | _VariableSubclass:
     """
     Retrieve and initialize an integration method by name and sampling type.
 

@@ -1,4 +1,5 @@
 """Unit tests for SerialAdaptiveStepsizeSolver."""
+
 from __future__ import annotations
 
 import torch
@@ -24,7 +25,9 @@ class TestSerialSolverIntegrate:
             t_init=torch.tensor([0.0], dtype=torch.float64),
             t_final=torch.tensor([1.0], dtype=torch.float64),
         )
-        assert torch.allclose(result.integral, torch.tensor([1.0], dtype=torch.float64), atol=1e-6)
+        assert torch.allclose(
+            result.integral, torch.tensor([1.0], dtype=torch.float64), atol=1e-6
+        )
 
     def test_linear_integrand(self):
         """∫₀¹ t dt = 0.5."""
@@ -35,7 +38,9 @@ class TestSerialSolverIntegrate:
             t_init=torch.tensor([0.0], dtype=torch.float64),
             t_final=torch.tensor([1.0], dtype=torch.float64),
         )
-        assert torch.allclose(result.integral, torch.tensor([0.5], dtype=torch.float64), atol=1e-6)
+        assert torch.allclose(
+            result.integral, torch.tensor([0.5], dtype=torch.float64), atol=1e-6
+        )
 
     def test_returns_integral_output(self):
         """Result is an IntegralOutput instance."""
@@ -58,7 +63,9 @@ class TestSerialSolverIntegrate:
             t_init=torch.tensor([2.0], dtype=torch.float64),
             t_final=torch.tensor([5.0], dtype=torch.float64),
         )
-        assert torch.allclose(result.integral, torch.tensor([3.0], dtype=torch.float64), atol=1e-6)
+        assert torch.allclose(
+            result.integral, torch.tensor([3.0], dtype=torch.float64), atol=1e-6
+        )
 
     def test_nonzero_y0(self):
         """∫₀¹ 1 dt with y0=5 gives 6."""
@@ -69,7 +76,9 @@ class TestSerialSolverIntegrate:
             t_init=torch.tensor([0.0], dtype=torch.float64),
             t_final=torch.tensor([1.0], dtype=torch.float64),
         )
-        assert torch.allclose(result.integral, torch.tensor([6.0], dtype=torch.float64), atol=1e-6)
+        assert torch.allclose(
+            result.integral, torch.tensor([6.0], dtype=torch.float64), atol=1e-6
+        )
 
     def test_set_solver_dtype_noop(self):
         """_set_solver_dtype does nothing (no error)."""

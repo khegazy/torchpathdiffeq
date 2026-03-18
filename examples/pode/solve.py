@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import override
 import hashlib
 import json
 import os
+from abc import abstractmethod
 from glob import glob
+from typing import override
 
 import h5py as h5
 import matplotlib.pyplot as plt
@@ -165,7 +165,7 @@ class BaseODE(abc.ABC):
 
     @abstractmethod
     def ode(self, t, y):
-        """ The ODE function (integrand) to be integrated """
+        """The ODE function (integrand) to be integrated"""
 
     def solve_ode(self, t_max):
         self.sol_times = torch.linspace(self.t_init, t_max, 1000)

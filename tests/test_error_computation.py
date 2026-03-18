@@ -1,15 +1,15 @@
 """Unit tests for error norm, _rec_remove, and error ratio computation."""
+
 from __future__ import annotations
 
 import pytest
 import torch
-
 from _helpers import make_solver_for_unit_test
-
 
 # ---------------------------------------------------------------------------
 # _error_norm
 # ---------------------------------------------------------------------------
+
 
 class TestErrorNorm:
     """Tests for _error_norm: RMS norm sqrt(mean(error², dim=-1))."""
@@ -56,6 +56,7 @@ class TestErrorNorm:
 # _rec_remove
 # ---------------------------------------------------------------------------
 
+
 class TestRecRemove:
     """Tests for _rec_remove: ensure no adjacent True values in a boolean mask."""
 
@@ -80,7 +81,7 @@ class TestRecRemove:
         mask = torch.tensor([True, True, False, True])
         result = self.solver._rec_remove(mask.clone())
         self._check_no_adjacent(result)
-        assert result[0] == True  # First kept
+        assert result[0] is True  # First kept
 
     def test_all_true(self):
         """All True: result alternates True/False."""
@@ -100,7 +101,7 @@ class TestRecRemove:
         """Single True element is unchanged."""
         mask = torch.tensor([True])
         result = self.solver._rec_remove(mask.clone())
-        assert result[0] == True
+        assert result[0] is True
 
     def test_two_both_true(self):
         """Two adjacent Trues: second is removed."""
@@ -114,8 +115,8 @@ class TestRecRemove:
         mask = torch.tensor([True, True, True])
         result = self.solver._rec_remove(mask.clone())
         self._check_no_adjacent(result)
-        assert result[0] == True
-        assert result[2] == True
+        assert result[0] is True
+        assert result[2] is True
 
     def test_long_alternating(self):
         """Already alternating mask of length 20 is unchanged."""
@@ -134,6 +135,7 @@ class TestRecRemove:
 # ---------------------------------------------------------------------------
 # _compute_error_ratios_absolute
 # ---------------------------------------------------------------------------
+
 
 class TestComputeErrorRatiosAbsolute:
     """Tests for absolute error ratio computation."""
@@ -213,6 +215,7 @@ class TestComputeErrorRatiosAbsolute:
 # ---------------------------------------------------------------------------
 # _compute_error_ratios_cumulative
 # ---------------------------------------------------------------------------
+
 
 class TestComputeErrorRatiosCumulative:
     """Tests for cumulative error ratio computation."""

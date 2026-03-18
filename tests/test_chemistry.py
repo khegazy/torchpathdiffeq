@@ -1,17 +1,24 @@
 """Tests using the Wolf-Schlegel potential energy surface (multi-dimensional integrand)."""
+
 from __future__ import annotations
 
 import pytest
 import torch
+from _helpers import (
+    ATOL_LOOSE,
+    REMOVE_CUT,
+    RTOL_LOOSE,
+    SEED,
+    T_FINAL,
+    T_INIT,
+    UNIFORM_METHOD_NAMES,
+)
 
 from torchpathdiffeq import (
     SerialAdaptiveStepsizeSolver,
     get_parallel_RK_solver,
     steps,
-    UNIFORM_METHODS,
 )
-
-from _helpers import ATOL_LOOSE, RTOL_LOOSE, SEED, UNIFORM_METHOD_NAMES, REMOVE_CUT, T_INIT, T_FINAL
 
 # ---------------------------------------------------------------------------
 # Wolf-Schlegel potential energy surface along a linear interpolation path
@@ -23,10 +30,13 @@ _WS_MIN_FINAL = torch.tensor([-1.166, 1.477])
 
 def _wolf_schlegel(t, y=None):
     """Evaluate the Wolf-Schlegel 2D potential along a linear path in [0, 1]."""
-    assert torch.all(t >= 0) and torch.all(t <= 1)
+    assert torch.all(t >= 0)
+    assert torch.all(t <= 1)
     while len(t.shape) < 2:
         t = t.unsqueeze(0)
-    interpolate = _WS_MIN_INIT.to(t.device) + t * (_WS_MIN_FINAL - _WS_MIN_INIT).to(t.device)
+    interpolate = _WS_MIN_INIT.to(t.device) + t * (_WS_MIN_FINAL - _WS_MIN_INIT).to(
+        t.device
+    )
     x = interpolate[:, 0].unsqueeze(-1)
     y = interpolate[:, 1].unsqueeze(-1)
     return 10 * (x**4 + y**4 - 2 * x**2 - 4 * y**2 + x * y + 0.2 * x + 0.1 * y)
@@ -46,7 +56,9 @@ class _WolfSchlegelCallable:
     def __call__(self, t, y=None):
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
-        interpolate = _WS_MIN_INIT.to(t.device) + t * (_WS_MIN_FINAL - _WS_MIN_INIT).to(t.device)
+        interpolate = _WS_MIN_INIT.to(t.device) + t * (_WS_MIN_FINAL - _WS_MIN_INIT).to(
+            t.device
+        )
         x = interpolate[:, 0].unsqueeze(-1)
         y = interpolate[:, 1].unsqueeze(-1)
         self.calls += 1
@@ -73,7 +85,10 @@ def test_wolf_schlegel_parallel_vs_serial(method_name):
     serial_method = _SERIAL_METHOD_MAP.get(method_name, method_name)
     wf_instance = _WolfSchlegelCallable()
     serial_solver = SerialAdaptiveStepsizeSolver(
-        serial_method, ATOL_LOOSE, RTOL_LOOSE, ode_fxn=wf_instance,
+        serial_method,
+        ATOL_LOOSE,
+        RTOL_LOOSE,
+        ode_fxn=wf_instance,
     )
 
     parallel_output = parallel_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
@@ -81,9 +96,9 @@ def test_wolf_schlegel_parallel_vs_serial(method_name):
 
     error = torch.abs(parallel_output.integral - serial_output.integral)
     # Scale tolerance by the number of steps (each step contributes up to atol + rtol*|y|)
-    error_tolerance = (ATOL_LOOSE + RTOL_LOOSE * torch.abs(serial_output.integral)) * len(
-        parallel_output.t
-    )
+    error_tolerance = (
+        ATOL_LOOSE + RTOL_LOOSE * torch.abs(serial_output.integral)
+    ) * len(parallel_output.t)
     assert error < error_tolerance, (
         f"{method_name}: parallel={parallel_output.integral.item():.6f}, "
         f"serial={serial_output.integral.item():.6f}, "

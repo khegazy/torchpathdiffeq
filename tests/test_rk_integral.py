@@ -1,11 +1,12 @@
 """Unit tests for the core _RK_integral function."""
+
 from __future__ import annotations
 
 import pytest
 import torch
 
-from torchpathdiffeq.runge_kutta import _RK_integral
 from torchpathdiffeq import UNIFORM_METHODS
+from torchpathdiffeq.runge_kutta import _RK_integral
 
 
 class TestRKIntegralBasic:
@@ -39,10 +40,12 @@ class TestRKIntegralBasic:
 
     def test_multiple_steps(self):
         """Two half-steps of constant y=1 sum to 1.0."""
-        t = torch.tensor([
-            [[0.0], [0.5]],
-            [[0.5], [1.0]],
-        ])  # [2, 2, 1]
+        t = torch.tensor(
+            [
+                [[0.0], [0.5]],
+                [[0.5], [1.0]],
+            ]
+        )  # [2, 2, 1]
         y = torch.ones(2, 2, 1)
         b = torch.tensor([[[0.5], [0.5]]])  # [1, 2, 1] broadcast over N
         y0 = torch.tensor([0.0])
@@ -91,16 +94,20 @@ class TestRKIntegralBasic:
 
     def test_variable_b_per_step(self):
         """Different b weights per step (simulating variable solver)."""
-        t = torch.tensor([
-            [[0.0], [0.5], [1.0]],
-            [[1.0], [1.5], [2.0]],
-        ])  # [2, 3, 1]
+        t = torch.tensor(
+            [
+                [[0.0], [0.5], [1.0]],
+                [[1.0], [1.5], [2.0]],
+            ]
+        )  # [2, 3, 1]
         y = torch.ones(2, 3, 1)  # constant y=1
         # Different weights per step
-        b = torch.tensor([
-            [[0.25], [0.5], [0.25]],
-            [[1.0 / 6], [4.0 / 6], [1.0 / 6]],
-        ])  # [2, 3, 1]
+        b = torch.tensor(
+            [
+                [[0.25], [0.5], [0.25]],
+                [[1.0 / 6], [4.0 / 6], [1.0 / 6]],
+            ]
+        )  # [2, 3, 1]
         y0 = torch.tensor([0.0])
 
         integral, rk_steps, _ = _RK_integral(t, y, b, y0)

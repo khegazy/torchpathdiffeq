@@ -27,7 +27,7 @@ def setup_logging(level=logging.WARNING, filename=None):
     logger = logging.getLogger("torchpathdiffeq")
     logger.setLevel(level)
     handler = logging.FileHandler(filename) if filename else logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    ))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     logger.addHandler(handler)

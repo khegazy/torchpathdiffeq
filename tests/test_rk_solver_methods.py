@@ -1,27 +1,26 @@
 """Unit tests for get_parallel_RK_solver factory, _get_tableau_b, and _get_num_tableau_c."""
+
 from __future__ import annotations
 
 import pytest
 import torch
-
-from torchpathdiffeq import UNIFORM_METHODS
-from torchpathdiffeq.base import steps
-from torchpathdiffeq.runge_kutta import (
-    get_parallel_RK_solver,
-    RKParallelUniformAdaptiveStepsizeSolver,
-    RKParallelVariableAdaptiveStepsizeSolver,
-)
-
 from _helpers import (
+    REMOVE_CUT,
     make_solver_for_unit_test,
     make_variable_solver_for_unit_test,
-    REMOVE_CUT,
 )
 
+from torchpathdiffeq.base import steps
+from torchpathdiffeq.runge_kutta import (
+    RKParallelUniformAdaptiveStepsizeSolver,
+    RKParallelVariableAdaptiveStepsizeSolver,
+    get_parallel_RK_solver,
+)
 
 # ---------------------------------------------------------------------------
 # get_parallel_RK_solver factory
 # ---------------------------------------------------------------------------
+
 
 class TestGetParallelRKSolver:
     """Tests for the factory function that creates uniform or variable solvers."""
@@ -29,7 +28,10 @@ class TestGetParallelRKSolver:
     def test_uniform_string(self):
         """String 'uniform' returns a uniform solver."""
         solver = get_parallel_RK_solver(
-            sampling_type="uniform", method="bosh3", atol=1e-6, rtol=1e-6,
+            sampling_type="uniform",
+            method="bosh3",
+            atol=1e-6,
+            rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
         assert isinstance(solver, RKParallelUniformAdaptiveStepsizeSolver)
@@ -37,7 +39,10 @@ class TestGetParallelRKSolver:
     def test_variable_string(self):
         """String 'variable' returns a variable solver."""
         solver = get_parallel_RK_solver(
-            sampling_type="variable", method="adaptive_heun", atol=1e-6, rtol=1e-6,
+            sampling_type="variable",
+            method="adaptive_heun",
+            atol=1e-6,
+            rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
         assert isinstance(solver, RKParallelVariableAdaptiveStepsizeSolver)
@@ -45,7 +50,10 @@ class TestGetParallelRKSolver:
     def test_uniform_enum(self):
         """steps.ADAPTIVE_UNIFORM enum returns a uniform solver."""
         solver = get_parallel_RK_solver(
-            sampling_type=steps.ADAPTIVE_UNIFORM, method="bosh3", atol=1e-6, rtol=1e-6,
+            sampling_type=steps.ADAPTIVE_UNIFORM,
+            method="bosh3",
+            atol=1e-6,
+            rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
         assert isinstance(solver, RKParallelUniformAdaptiveStepsizeSolver)
@@ -53,7 +61,10 @@ class TestGetParallelRKSolver:
     def test_variable_enum(self):
         """steps.ADAPTIVE_VARIABLE enum returns a variable solver."""
         solver = get_parallel_RK_solver(
-            sampling_type=steps.ADAPTIVE_VARIABLE, method="adaptive_heun", atol=1e-6, rtol=1e-6,
+            sampling_type=steps.ADAPTIVE_VARIABLE,
+            method="adaptive_heun",
+            atol=1e-6,
+            rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
         assert isinstance(solver, RKParallelVariableAdaptiveStepsizeSolver)
@@ -62,7 +73,10 @@ class TestGetParallelRKSolver:
         """steps.FIXED raises ValueError (not supported for parallel RK)."""
         with pytest.raises(ValueError):
             get_parallel_RK_solver(
-                sampling_type=steps.FIXED, method="bosh3", atol=1e-6, rtol=1e-6,
+                sampling_type=steps.FIXED,
+                method="bosh3",
+                atol=1e-6,
+                rtol=1e-6,
                 remove_cut=REMOVE_CUT,
             )
 
@@ -70,6 +84,7 @@ class TestGetParallelRKSolver:
 # ---------------------------------------------------------------------------
 # Uniform _get_tableau_b
 # ---------------------------------------------------------------------------
+
 
 class TestUniformGetTableauB:
     """Tests for RKParallelUniformAdaptiveStepsizeSolver._get_tableau_b."""
@@ -104,19 +119,23 @@ class TestUniformGetTableauB:
 # Variable _get_tableau_b
 # ---------------------------------------------------------------------------
 
+
 class TestVariableGetTableauB:
     """Tests for RKParallelVariableAdaptiveStepsizeSolver._get_tableau_b."""
 
     def test_shape_adaptive_heun(self):
         """adaptive_heun variable: b shape [1, 2, 1] (constant, broadcast over N)."""
         solver = make_variable_solver_for_unit_test("adaptive_heun")
-        t = torch.tensor([
-            [[0.0], [1.0]],
-            [[1.0], [2.0]],
-            [[2.0], [3.0]],
-            [[3.0], [4.0]],
-            [[4.0], [5.0]],
-        ], dtype=torch.float64)
+        t = torch.tensor(
+            [
+                [[0.0], [1.0]],
+                [[1.0], [2.0]],
+                [[2.0], [3.0]],
+                [[3.0], [4.0]],
+                [[4.0], [5.0]],
+            ],
+            dtype=torch.float64,
+        )
         b, b_error = solver._get_tableau_b(t)
         # 2nd-order: weights are constant, returned as [1, C, 1]
         assert b.shape == (1, 2, 1)
@@ -128,16 +147,21 @@ class TestVariableGetTableauB:
         t = torch.tensor([[[2.0], [3.0], [4.0]]], dtype=torch.float64)
         b, _ = solver._get_tableau_b(t)
         # At a=0.5: b0=1/6, ba=2/3, b1=1/6
-        expected = torch.tensor([[[1.0 / 6], [2.0 / 3], [1.0 / 6]]], dtype=torch.float64)
+        expected = torch.tensor(
+            [[[1.0 / 6], [2.0 / 3], [1.0 / 6]]], dtype=torch.float64
+        )
         assert torch.allclose(b, expected, atol=1e-12)
 
     def test_different_positions_different_weights(self):
         """generic3: two steps with different midpoints produce different weights."""
         solver = make_variable_solver_for_unit_test("generic3")
-        t = torch.tensor([
-            [[0.0], [0.3], [1.0]],  # a=0.3
-            [[0.0], [0.7], [1.0]],  # a=0.7
-        ], dtype=torch.float64)
+        t = torch.tensor(
+            [
+                [[0.0], [0.3], [1.0]],  # a=0.3
+                [[0.0], [0.7], [1.0]],  # a=0.7
+            ],
+            dtype=torch.float64,
+        )
         b, _ = solver._get_tableau_b(t)
         assert not torch.allclose(b[0], b[1])
 
@@ -145,6 +169,7 @@ class TestVariableGetTableauB:
 # ---------------------------------------------------------------------------
 # _get_num_tableau_c
 # ---------------------------------------------------------------------------
+
 
 class TestGetNumTableauC:
     """Tests for _get_num_tableau_c on both solver types."""
@@ -159,7 +184,10 @@ class TestGetNumTableauC:
         assert make_solver_for_unit_test("adaptive_heun")._get_num_tableau_c() == 2
 
     def test_variable_adaptive_heun(self):
-        assert make_variable_solver_for_unit_test("adaptive_heun")._get_num_tableau_c() == 2
+        assert (
+            make_variable_solver_for_unit_test("adaptive_heun")._get_num_tableau_c()
+            == 2
+        )
 
     def test_variable_generic3(self):
         assert make_variable_solver_for_unit_test("generic3")._get_num_tableau_c() == 3

@@ -1,14 +1,14 @@
 """Unit tests for prune_excess_t and _get_optimal_t_step_barriers."""
+
 from __future__ import annotations
 
 import torch
-
 from _helpers import make_solver_for_unit_test
-
 
 # ---------------------------------------------------------------------------
 # prune_excess_t
 # ---------------------------------------------------------------------------
+
 
 class TestPruneExcessT:
     """Tests for ParallelAdaptiveStepsizeSolver.prune_excess_t."""
@@ -91,6 +91,7 @@ class TestPruneExcessT:
 # _get_optimal_t_step_barriers
 # ---------------------------------------------------------------------------
 
+
 class TestGetOptimalTStepBarriers:
     """Tests for _get_optimal_t_step_barriers: post-convergence mesh optimization."""
 
@@ -101,10 +102,10 @@ class TestGetOptimalTStepBarriers:
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
         return {
-            't': t,
-            'sum_steps': torch.ones(N, 1, dtype=torch.float64) * (integral_val / N),
-            'sum_step_errors': torch.ones(N, 1, dtype=torch.float64) * error_scale,
-            'integral': torch.tensor([integral_val], dtype=torch.float64),
+            "t": t,
+            "sum_steps": torch.ones(N, 1, dtype=torch.float64) * (integral_val / N),
+            "sum_step_errors": torch.ones(N, 1, dtype=torch.float64) * error_scale,
+            "integral": torch.tensor([integral_val], dtype=torch.float64),
         }
 
     def test_over_resolved_pruned(self):
@@ -151,4 +152,6 @@ class TestGetOptimalTStepBarriers:
         barriers_opt = solver._get_optimal_t_step_barriers(record, barriers)
 
         assert torch.allclose(barriers_opt[0], torch.tensor([0.0], dtype=torch.float64))
-        assert torch.allclose(barriers_opt[-1], torch.tensor([1.0], dtype=torch.float64))
+        assert torch.allclose(
+            barriers_opt[-1], torch.tensor([1.0], dtype=torch.float64)
+        )

@@ -9,11 +9,12 @@ The ``ODE_dict`` maps names to ``(integrand, solution, error_cutoff)`` tuples,
 where ``error_cutoff`` is the maximum acceptable relative error for tests.
 """
 
+from __future__ import annotations
+
 import torch
-from typing import Optional
 
 
-def identity(t: torch.Tensor, y: Optional[torch.Tensor] = None) -> int:
+def identity(_t: torch.Tensor, _y: torch.Tensor | None = None) -> int:
     """
     Constant integrand f(t) = 1.
 
@@ -43,7 +44,7 @@ def identity_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Tens
     return t_final - t_init
 
 
-def t(t: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+def t(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     """
     Linear integrand f(t) = t.
 
@@ -70,10 +71,10 @@ def t_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Tensor:
     Returns:
         Exact integral value. Shape: [T].
     """
-    return 0.5*(t_final**2 - t_init**2)
+    return 0.5 * (t_final**2 - t_init**2)
 
 
-def t_squared(t: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+def t_squared(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     """
     Quadratic integrand f(t) = t^2.
 
@@ -100,10 +101,12 @@ def t_squared_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Ten
     Returns:
         Exact integral value. Shape: [T].
     """
-    return (t_final**3 - t_init**3)/3.
+    return (t_final**3 - t_init**3) / 3.0
 
 
-def sine_squared(t: torch.Tensor, w: float = 3.7, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+def sine_squared(
+    t: torch.Tensor, w: float = 3.7, _y: torch.Tensor | None = None
+) -> torch.Tensor:
     """
     Oscillatory integrand f(t) = sin^2(2*pi*w*t).
 
@@ -118,10 +121,12 @@ def sine_squared(t: torch.Tensor, w: float = 3.7, y: Optional[torch.Tensor] = No
     Returns:
         sin^2(2*pi*w*t) evaluated at each time point. Shape: [N, T].
     """
-    return torch.sin(t*w*2*torch.pi)**2
+    return torch.sin(t * w * 2 * torch.pi) ** 2
 
 
-def sine_squared_solution(t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7) -> torch.Tensor:
+def sine_squared_solution(
+    t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7
+) -> torch.Tensor:
     """
     Analytical solution for the integral of sin^2(2*pi*w*t) from t_init to t_final.
 
@@ -135,12 +140,13 @@ def sine_squared_solution(t_init: torch.Tensor, t_final: torch.Tensor, w: float 
     Returns:
         Exact integral value. Shape: [T].
     """
-    _w = 4*torch.pi*w
-    return (t_final - t_init)/2.\
-        - (torch.sin(torch.tensor([_w*t_final])) - torch.sin(torch.tensor([_w*t_init])))/(2*_w)
+    _w = 4 * torch.pi * w
+    return (t_final - t_init) / 2.0 - (
+        torch.sin(torch.tensor([_w * t_final])) - torch.sin(torch.tensor([_w * t_init]))
+    ) / (2 * _w)
 
 
-def exp(t: torch.Tensor, a: float = 5, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+def exp(t: torch.Tensor, a: float = 5, _y: torch.Tensor | None = None) -> torch.Tensor:
     """
     Exponential integrand f(t) = exp(a*t).
 
@@ -155,10 +161,12 @@ def exp(t: torch.Tensor, a: float = 5, y: Optional[torch.Tensor] = None) -> torc
     Returns:
         exp(a*t) evaluated at each time point. Shape: [N, T].
     """
-    return torch.exp(a*t)
+    return torch.exp(a * t)
 
 
-def exp_solution(t_init: torch.Tensor, t_final: torch.Tensor, a: float = 5) -> torch.Tensor:
+def exp_solution(
+    t_init: torch.Tensor, t_final: torch.Tensor, a: float = 5
+) -> torch.Tensor:
     """
     Analytical solution for the integral of exp(a*t) from t_init to t_final.
 
@@ -170,11 +178,14 @@ def exp_solution(t_init: torch.Tensor, t_final: torch.Tensor, a: float = 5) -> t
     Returns:
         Exact integral value. Shape: [T].
     """
-    return (torch.exp(torch.tensor([t_final*a]))\
-        - torch.exp(torch.tensor([t_init*a])))/a
+    return (
+        torch.exp(torch.tensor([t_final * a])) - torch.exp(torch.tensor([t_init * a]))
+    ) / a
 
 
-def damped_sine(t: torch.Tensor, w: float = 3.7, a: float = 5, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+def damped_sine(
+    t: torch.Tensor, w: float = 3.7, a: float = 5, _y: torch.Tensor | None = None
+) -> torch.Tensor:
     """
     Damped oscillatory integrand f(t) = exp(-a*t) * sin(2*pi*w*t).
 
@@ -191,10 +202,12 @@ def damped_sine(t: torch.Tensor, w: float = 3.7, a: float = 5, y: Optional[torch
     Returns:
         exp(-a*t)*sin(2*pi*w*t) evaluated at each time point. Shape: [N, T].
     """
-    return torch.exp(-a*t)*torch.sin(w*t*2*torch.pi)
+    return torch.exp(-a * t) * torch.sin(w * t * 2 * torch.pi)
 
 
-def damped_sine_solution(t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7, a: float = 5) -> torch.Tensor:
+def damped_sine_solution(
+    t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7, a: float = 5
+) -> torch.Tensor:
     """
     Analytical solution for the integral of exp(-a*t)*sin(2*pi*w*t) from t_init to t_final.
 
@@ -209,19 +222,21 @@ def damped_sine_solution(t_init: torch.Tensor, t_final: torch.Tensor, w: float =
     Returns:
         Exact integral value. Shape: [T].
     """
-    _w = 2*torch.pi*w
-    def numerator(t, w, a):
+    _w = 2 * torch.pi * w
+
+    def numerator(t, _w, a):
         t = torch.tensor([t])
-        return torch.exp(-a*t)*(a*torch.sin(_w*t) + _w*torch.cos(_w*t))
-    return -1*(numerator(t_final, w, a) - numerator(t_init, w, a))/(a**2 + _w**2)
+        return torch.exp(-a * t) * (a * torch.sin(_w * t) + _w * torch.cos(_w * t))
+
+    return -1 * (numerator(t_final, w, a) - numerator(t_init, w, a)) / (a**2 + _w**2)
 
 
 # Registry of test integrands: maps name -> (integrand_fn, analytical_solution_fn, error_cutoff).
 # error_cutoff is the maximum acceptable relative error |computed - exact| / |exact|.
 ODE_dict = {
-    "t" : (t, t_solution, 1e-7),
-    "t_squared" : (t_squared, t_squared_solution, 1e-6),
-    "sine_squared" : (sine_squared, sine_squared_solution, 1e-6),
-    "exp" : (exp, exp_solution, 1e-6),
-    "damped_sine" : (damped_sine, damped_sine_solution, 1e-6)
+    "t": (t, t_solution, 1e-7),
+    "t_squared": (t_squared, t_squared_solution, 1e-6),
+    "sine_squared": (sine_squared, sine_squared_solution, 1e-6),
+    "exp": (exp, exp_solution, 1e-6),
+    "damped_sine": (damped_sine, damped_sine_solution, 1e-6),
 }

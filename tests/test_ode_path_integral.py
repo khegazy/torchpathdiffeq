@@ -1,18 +1,17 @@
 """Tests that the ode_path_integral() wrapper produces identical results to direct solver usage."""
+
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import torch
+from _helpers import ATOL_MED, RTOL_MED, SEED, T_FINAL, T_INIT, UNIFORM_METHOD_NAMES
 
 from torchpathdiffeq import (
-    UNIFORM_METHODS,
     RKParallelUniformAdaptiveStepsizeSolver,
     SerialAdaptiveStepsizeSolver,
     ode_path_integral,
 )
-
-from _helpers import ATOL_MED, RTOL_MED, SEED, UNIFORM_METHOD_NAMES, T_INIT, T_FINAL
 
 
 def _integrand(t, y=0):
@@ -41,7 +40,10 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
     torch.manual_seed(SEED)
     np.random.seed(SEED)
     direct_solver = RKParallelUniformAdaptiveStepsizeSolver(
-        method=method_name, atol=ATOL_MED, rtol=RTOL_MED, ode_fxn=_integrand,
+        method=method_name,
+        atol=ATOL_MED,
+        rtol=RTOL_MED,
+        ode_fxn=_integrand,
     )
     direct_output = direct_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
 
@@ -49,30 +51,30 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
         f"Integral mismatch for {method_name}: "
         f"wrapper={wrapper_output.integral.item()}, direct={direct_output.integral.item()}"
     )
-    assert torch.allclose(wrapper_output.integral_error, direct_output.integral_error), (
-        f"Integral error mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.t_optimal, direct_output.t_optimal), (
-        f"Optimal mesh mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.y, direct_output.y), (
-        f"y values mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.t, direct_output.t), (
-        f"t values mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.h, direct_output.h), (
-        f"Step sizes mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.sum_steps, direct_output.sum_steps), (
-        f"sum_steps mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.sum_step_errors, direct_output.sum_step_errors), (
-        f"sum_step_errors mismatch for {method_name}"
-    )
-    assert torch.allclose(wrapper_output.error_ratios, direct_output.error_ratios), (
-        f"error_ratios mismatch for {method_name}"
-    )
+    assert torch.allclose(
+        wrapper_output.integral_error, direct_output.integral_error
+    ), f"Integral error mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.t_optimal, direct_output.t_optimal
+    ), f"Optimal mesh mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.y, direct_output.y
+    ), f"y values mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.t, direct_output.t
+    ), f"t values mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.h, direct_output.h
+    ), f"Step sizes mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.sum_steps, direct_output.sum_steps
+    ), f"sum_steps mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.sum_step_errors, direct_output.sum_step_errors
+    ), f"sum_step_errors mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.error_ratios, direct_output.error_ratios
+    ), f"error_ratios mismatch for {method_name}"
 
 
 SERIAL_METHODS = ["adaptive_heun", "fehlberg2", "bosh3", "rk4", "dopri5"]
@@ -94,7 +96,10 @@ def test_wrapper_matches_direct_solver_serial(method_name):
     )
 
     direct_solver = SerialAdaptiveStepsizeSolver(
-        method=method_name, atol=ATOL_MED, rtol=RTOL_MED, ode_fxn=_integrand,
+        method=method_name,
+        atol=ATOL_MED,
+        rtol=RTOL_MED,
+        ode_fxn=_integrand,
     )
     direct_output = direct_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
 
@@ -102,6 +107,6 @@ def test_wrapper_matches_direct_solver_serial(method_name):
         f"Serial integral mismatch for {method_name}: "
         f"wrapper={wrapper_output.integral.item()}, direct={direct_output.integral.item()}"
     )
-    assert torch.allclose(wrapper_output.t, direct_output.t), (
-        f"Serial t mismatch for {method_name}"
-    )
+    assert torch.allclose(
+        wrapper_output.t, direct_output.t
+    ), f"Serial t mismatch for {method_name}"

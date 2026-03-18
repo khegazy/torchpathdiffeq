@@ -1,8 +1,8 @@
 """Unit tests for _get_sorted_indices and _insert_sorted_results."""
+
 from __future__ import annotations
 
 import torch
-
 from _helpers import make_solver_for_unit_test
 
 
@@ -82,20 +82,26 @@ class TestInsertSortedResults:
         result = torch.tensor([2.0, 4.0], dtype=torch.float64)
         idxs_keep, idxs_input = self.solver._get_sorted_indices(record, result)
 
-        merged = self.solver._insert_sorted_results(record, idxs_keep, result, idxs_input)
+        merged = self.solver._insert_sorted_results(
+            record, idxs_keep, result, idxs_input
+        )
 
         expected = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0], dtype=torch.float64)
         assert torch.allclose(merged, expected)
 
     def test_2d(self):
         """Merging 2D tensors [N, D] preserves correct ordering."""
-        record = torch.tensor([[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]], dtype=torch.float64)
+        record = torch.tensor(
+            [[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]], dtype=torch.float64
+        )
         result = torch.tensor([[2.0, 20.0], [4.0, 40.0]], dtype=torch.float64)
         idxs_keep, idxs_input = self.solver._get_sorted_indices(
             record[:, 0], result[:, 0]
         )
 
-        merged = self.solver._insert_sorted_results(record, idxs_keep, result, idxs_input)
+        merged = self.solver._insert_sorted_results(
+            record, idxs_keep, result, idxs_input
+        )
 
         assert merged.shape == (5, 2)
         expected_col0 = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0], dtype=torch.float64)
@@ -113,7 +119,9 @@ class TestInsertSortedResults:
             record[:, 0, 0], result[:, 0, 0]
         )
 
-        merged = self.solver._insert_sorted_results(record, idxs_keep, result, idxs_input)
+        merged = self.solver._insert_sorted_results(
+            record, idxs_keep, result, idxs_input
+        )
 
         assert merged.shape == (5, 1, 2)
         expected_first = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0], dtype=torch.float64)
@@ -125,7 +133,9 @@ class TestInsertSortedResults:
         result = torch.tensor([20.0, 40.0], dtype=torch.float64)
         idxs_keep, idxs_input = self.solver._get_sorted_indices(record, result)
 
-        merged = self.solver._insert_sorted_results(record, idxs_keep, result, idxs_input)
+        merged = self.solver._insert_sorted_results(
+            record, idxs_keep, result, idxs_input
+        )
 
         for val in record:
             assert val in merged, f"Record value {val} missing from merged"

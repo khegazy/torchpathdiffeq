@@ -7,31 +7,37 @@ This function creates the appropriate solver, runs the integration, and
 returns the result.
 """
 
-import torch
-from typing import Callable, Optional
+from __future__ import annotations
 
-from .base import steps, IntegralOutput
-from .serial_solver import SerialAdaptiveStepsizeSolver
+from typing import TYPE_CHECKING
+
+from .base import IntegralOutput, steps
 from .runge_kutta import get_parallel_RK_solver
+from .serial_solver import SerialAdaptiveStepsizeSolver
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import torch
 
 
 def ode_path_integral(
-        ode_fxn: Callable,
-        method: str,
-        computation: str = 'parallel',
-        sampling: str = 'uniform',
-        atol: float = 1e-5,
-        rtol: float = 1e-5,
-        t: Optional[torch.Tensor] = None,
-        t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-        t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
-        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-        remove_cut: float = 0.1,
-        total_mem_usage: float = 0.9,
-        use_absolute_error_ratio: bool = True,
-        device: Optional[str] = None,
-        **kwargs
-    ) -> IntegralOutput:
+    ode_fxn: Callable,
+    method: str,
+    computation: str = "parallel",
+    sampling: str = "uniform",
+    atol: float = 1e-5,
+    rtol: float = 1e-5,
+    t: torch.Tensor | None = None,
+    t_init: torch.Tensor | None = None,
+    t_final: torch.Tensor | None = None,
+    y0: torch.Tensor | None = None,
+    remove_cut: float = 0.1,
+    total_mem_usage: float = 0.9,
+    use_absolute_error_ratio: bool = True,
+    device: str | None = None,
+    **kwargs,
+) -> IntegralOutput:
     """
     Compute the definite integral of ode_fxn from t_init to t_final.
 
@@ -108,14 +114,16 @@ def ode_path_integral(
         **Serial mode**: Delegates to torchdiffeq.odeint which handles its
         own adaptive stepping internally.
     """
-    if computation.lower() == 'parallel':
+    if computation.lower() == "parallel":
         # Select the sampling strategy for the parallel solver
-        if sampling.lower() == 'uniform':
+        if sampling.lower() == "uniform":
             sampling_type = steps.ADAPTIVE_UNIFORM
-        elif sampling.lower() == 'variable':
+        elif sampling.lower() == "variable":
             sampling_type = steps.ADAPTIVE_VARIABLE
         else:
-            raise ValueError(f"Sampling method must be either 'uniform' or 'variable', instead got {sampling}")
+            raise ValueError(
+                f"Sampling method must be either 'uniform' or 'variable', instead got {sampling}"
+            )
 
         # Create the parallel RK solver and run integration
         integrator = get_parallel_RK_solver(
@@ -129,17 +137,13 @@ def ode_path_integral(
             t_final=t_final,
             use_absolute_error_ratio=use_absolute_error_ratio,
             device=device,
-            **kwargs
+            **kwargs,
         )
 
         integral_output = integrator.integrate(
-            y0=y0,
-            t=t,
-            t_init=t_init,
-            t_final=t_final,
-            total_mem_usage=total_mem_usage
+            y0=y0, t=t, t_init=t_init, t_final=t_final, total_mem_usage=total_mem_usage
         )
-    elif computation.lower() == 'serial':
+    elif computation.lower() == "serial":
         # Create the serial (torchdiffeq-backed) solver and run integration
         integrator = SerialAdaptiveStepsizeSolver(
             method=method,
@@ -149,7 +153,7 @@ def ode_path_integral(
             t_init=t_init,
             t_final=t_final,
             device=device,
-            **kwargs
+            **kwargs,
         )
 
         integral_output = integrator.integrate(
@@ -159,6 +163,8 @@ def ode_path_integral(
             t_final=t_final,
         )
     else:
-        raise ValueError(f"Path integral computation type must be 'parallel' or 'serial', not {computation}.")
+        raise ValueError(
+            f"Path integral computation type must be 'parallel' or 'serial', not {computation}."
+        )
 
     return integral_output

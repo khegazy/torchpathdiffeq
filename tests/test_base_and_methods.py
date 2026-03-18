@@ -1,27 +1,41 @@
 """Unit tests for base utilities, method retrieval, tableaux, and example integrands."""
+
 from __future__ import annotations
 
 import pytest
 import torch
-
-from torchpathdiffeq import UNIFORM_METHODS, VARIABLE_METHODS, ODE_dict
-from torchpathdiffeq.base import get_sampling_type, steps
-from torchpathdiffeq.methods import _get_method, _VARIABLE_THIRD_ORDER
-from torchpathdiffeq.examples import (
-    identity, identity_solution,
-    t as t_fn, t_solution,
-    t_squared, t_squared_solution,
-    sine_squared, sine_squared_solution,
-    exp as exp_fn, exp_solution,
-    damped_sine, damped_sine_solution,
+from _helpers import (
+    INTEGRAND_NAMES,
+    T_FINAL,
+    T_INIT,
+    UNIFORM_METHOD_NAMES,
+    VARIABLE_METHOD_NAMES,
 )
 
-from _helpers import UNIFORM_METHOD_NAMES, VARIABLE_METHOD_NAMES, INTEGRAND_NAMES, T_INIT, T_FINAL
-
+from torchpathdiffeq import UNIFORM_METHODS, ODE_dict
+from torchpathdiffeq.base import get_sampling_type, steps
+from torchpathdiffeq.examples import (
+    damped_sine,
+    exp_solution,
+    identity,
+    identity_solution,
+    sine_squared,
+    t_solution,
+    t_squared,
+    t_squared_solution,
+)
+from torchpathdiffeq.examples import (
+    exp as exp_fn,
+)
+from torchpathdiffeq.examples import (
+    t as t_fn,
+)
+from torchpathdiffeq.methods import _VARIABLE_THIRD_ORDER, _get_method
 
 # ---------------------------------------------------------------------------
 # get_sampling_type
 # ---------------------------------------------------------------------------
+
 
 class TestGetSamplingType:
     """Tests for the string-to-enum conversion utility."""
@@ -49,6 +63,7 @@ class TestGetSamplingType:
 # ---------------------------------------------------------------------------
 # _Tableau dtype/device conversion
 # ---------------------------------------------------------------------------
+
 
 class TestTableau:
     """Tests for _Tableau dtype and device conversion."""
@@ -84,6 +99,7 @@ class TestTableau:
 # _get_method factory
 # ---------------------------------------------------------------------------
 
+
 class TestGetMethod:
     """Tests for the method retrieval factory."""
 
@@ -112,6 +128,7 @@ class TestGetMethod:
 # ---------------------------------------------------------------------------
 # _VARIABLE_THIRD_ORDER weight computation
 # ---------------------------------------------------------------------------
+
 
 class TestVariableThirdOrder:
     """Tests for the Sanderse-Veldman 3rd-order variable weight formulas."""
@@ -142,9 +159,9 @@ class TestVariableThirdOrder:
         ba = method._ba(a_vals)
         b1 = method._b1(a_vals)
         sums = b0 + ba + b1
-        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-12), (
-            f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
-        )
+        assert torch.allclose(
+            sums, torch.ones_like(sums), atol=1e-12
+        ), f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
 
     def test_tableau_b_shape(self):
         """tableau_b returns correct shapes for N=5, C=3."""
@@ -173,6 +190,7 @@ class TestVariableThirdOrder:
 # ---------------------------------------------------------------------------
 # Example integrands — known values
 # ---------------------------------------------------------------------------
+
 
 class TestExampleIntegrands:
     """Tests for the example integrand functions at known evaluation points."""

@@ -1,11 +1,11 @@
 """Unit tests for _adaptively_add_steps: core adaptive refinement logic."""
+
 from __future__ import annotations
 
 import torch
+from _helpers import make_solver_for_unit_test
 
 from torchpathdiffeq.base import MethodOutput
-
-from _helpers import make_solver_for_unit_test
 
 
 def _make_method_output(N, D=1):
@@ -33,8 +33,10 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([0.5, 0.3])
         mo = _make_method_output(2)
 
-        mo_out, _, _, barriers_new, trackers_new, er_kept = self.solver._adaptively_add_steps(
-            mo, error_ratios, None, None, barriers, idxs, trackers
+        mo_out, _, _, barriers_new, trackers_new, er_kept = (
+            self.solver._adaptively_add_steps(
+                mo, error_ratios, None, None, barriers, idxs, trackers
+            )
         )
         assert len(barriers_new) == len(barriers)
         assert not torch.any(trackers_new[:2])
@@ -49,8 +51,10 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([2.0, 1.5])
         mo = _make_method_output(2)
 
-        mo_out, _, _, barriers_new, trackers_new, er_kept = self.solver._adaptively_add_steps(
-            mo, error_ratios, None, None, barriers, idxs, trackers
+        mo_out, _, _, barriers_new, trackers_new, er_kept = (
+            self.solver._adaptively_add_steps(
+                mo, error_ratios, None, None, barriers, idxs, trackers
+            )
         )
         # 2 midpoints added: len goes from 3 to 5
         assert len(barriers_new) == 5
@@ -65,8 +69,10 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([0.5, 2.0])
         mo = _make_method_output(2)
 
-        mo_out, _, _, barriers_new, trackers_new, er_kept = self.solver._adaptively_add_steps(
-            mo, error_ratios, None, None, barriers, idxs, trackers
+        mo_out, _, _, barriers_new, trackers_new, er_kept = (
+            self.solver._adaptively_add_steps(
+                mo, error_ratios, None, None, barriers, idxs, trackers
+            )
         )
         # 1 midpoint added: len goes from 3 to 4
         assert len(barriers_new) == 4
@@ -125,8 +131,8 @@ class TestAdaptivelyAddSteps:
             None, error_ratios, None, None, barriers, idxs, trackers
         )
         # After split: barriers = [0, 0.5, 1]. Both step 0 and step 1 need eval.
-        assert trackers_new[0] == True
-        assert trackers_new[1] == True
+        assert trackers_new[0] is True
+        assert trackers_new[1] is True
 
     def test_method_output_filtered(self):
         """3 steps, middle fails: method_output retains 2 accepted rows."""
@@ -150,9 +156,11 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0])
         error_ratios = torch.tensor([0.5])
 
-        _, _, _, barriers_new, trackers_new, er_kept = self.solver._adaptively_add_steps(
-            None, error_ratios, None, None, barriers, idxs, trackers
+        _, _, _, barriers_new, trackers_new, er_kept = (
+            self.solver._adaptively_add_steps(
+                None, error_ratios, None, None, barriers, idxs, trackers
+            )
         )
         assert len(barriers_new) == 2
-        assert trackers_new[0] == False
+        assert trackers_new[0] is False
         assert len(er_kept) == 1

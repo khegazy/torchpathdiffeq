@@ -1,24 +1,24 @@
 """Tests for numerical integral accuracy against known analytical solutions."""
+
 from __future__ import annotations
 
 import pytest
 import torch
-
-from torchpathdiffeq import ODE_dict
-
 from _helpers import (
     ATOL_TIGHT,
+    INTEGRAND_NAMES,
     RTOL_TIGHT,
     SEED,
-    T_INIT,
     T_FINAL,
+    T_INIT,
     UNIFORM_METHOD_NAMES,
-    INTEGRAND_NAMES,
-    make_uniform_solver,
-    assert_time_ordering,
     assert_optimal_mesh_ordering,
     assert_step_continuity,
+    assert_time_ordering,
+    make_uniform_solver,
 )
+
+from torchpathdiffeq import ODE_dict
 
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)

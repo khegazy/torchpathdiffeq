@@ -239,7 +239,9 @@ class DistributedEnvironment:
         logger.info("Process %s: Number of visible CPUs: %s", self.rank, os.cpu_count())
         if self.device_type == "cuda":
             logger.info(
-                "Process %s: Number of visible GPUs: %s", self.rank, torch.cuda.device_count()
+                "Process %s: Number of visible GPUs: %s",
+                self.rank,
+                torch.cuda.device_count(),
             )
 
         # Assign device index by local rank when multiple devices are available
@@ -262,7 +264,9 @@ class DistributedEnvironment:
         if self.device_type == "cuda":
             torch.cuda.set_device(self.device)
             logger.info(
-                "Process %s is on cuda device %s", self.rank, torch.cuda.current_device()
+                "Process %s is on cuda device %s",
+                self.rank,
+                torch.cuda.current_device(),
             )
         elif self.device_type == "cpu":
             torch.set_default_device(self.device)

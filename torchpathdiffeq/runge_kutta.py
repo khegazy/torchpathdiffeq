@@ -26,12 +26,12 @@ from typing import override
 import torch
 
 from .base import MethodOutput, get_sampling_type, steps
-
-logger = logging.getLogger(__name__)
 from .parallel_solver import (
     ParallelUniformAdaptiveStepsizeSolver,
     ParallelVariableAdaptiveStepsizeSolver,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _RK_integral(
@@ -137,7 +137,7 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
             h=h,
         )
 
-    def _get_tableau_b(self, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _get_tableau_b(self, _t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Return the fixed tableau b and b_error weights.
 

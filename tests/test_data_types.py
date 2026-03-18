@@ -1,22 +1,21 @@
 """Tests for correct handling of float32 and float64 dtypes."""
+
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import torch
-
-from torchpathdiffeq import ODE_dict
-
 from _helpers import (
     ATOL_MED,
     RTOL_MED,
     UNIFORM_METHOD_NAMES,
-    REMOVE_CUT,
-    make_uniform_solver,
-    assert_time_ordering,
     assert_optimal_mesh_ordering,
     assert_step_continuity,
+    assert_time_ordering,
+    make_uniform_solver,
 )
+
+from torchpathdiffeq import ODE_dict
 
 INTEGRAND_NAME = "damped_sine"
 

@@ -1,20 +1,20 @@
 """Unit tests for _VARIABLE_SECOND_ORDER.tableau_b, device methods, and variable dtype methods."""
+
 from __future__ import annotations
 
 import torch
 
 from torchpathdiffeq import UNIFORM_METHODS
 from torchpathdiffeq.methods import (
-    _Tableau,
-    MethodClass,
     _VARIABLE_SECOND_ORDER,
     _VARIABLE_THIRD_ORDER,
+    _Tableau,
 )
-
 
 # ---------------------------------------------------------------------------
 # _VARIABLE_SECOND_ORDER.tableau_b
 # ---------------------------------------------------------------------------
+
 
 class TestVariableSecondOrderTableauB:
     """Tests for _VARIABLE_SECOND_ORDER.tableau_b: constant weights."""
@@ -48,6 +48,7 @@ class TestVariableSecondOrderTableauB:
 # ---------------------------------------------------------------------------
 # _Tableau.to_device / MethodClass.to_device
 # ---------------------------------------------------------------------------
+
 
 class TestTableauToDevice:
     """Tests for device movement (CPU-only)."""
@@ -88,6 +89,7 @@ class TestTableauToDevice:
 # ---------------------------------------------------------------------------
 # Variable subclass dtype conversion
 # ---------------------------------------------------------------------------
+
 
 class TestVariableSubclassDtype:
     """Tests for variable method dtype conversion."""
