@@ -11,12 +11,17 @@ is called as f(t, y). This differs from the parallel solvers where the
 integrand is called as f(t) since steps are independent.
 """
 
-import time
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, override
+
 import torch
-from typing import Callable, Optional, Tuple
 from torchdiffeq import odeint
 
-from .base import SolverBase, IntegralOutput
+from .base import IntegralOutput, SolverBase
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class SerialAdaptiveStepsizeSolver(SolverBase):
@@ -35,21 +40,19 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+    @override
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """No-op: the serial solver has no method-specific tensors to convert."""
-        pass
 
+    @override
     def integrate(
-            self,
-            ode_fxn: Optional[Callable] = None,
-            y0: Optional[torch.Tensor] = None,
-            t_init: Optional[torch.Tensor] = None,
-            t_final: Optional[torch.Tensor] = None,
-            t: Optional[torch.Tensor] = None,
-            ode_args: Optional[tuple] = None,
-            max_batch: Optional[int] = None,
-            is_training: bool | None = None
-        ) -> IntegralOutput:
+        self,
+        ode_fxn: Callable | None = None,
+        y0: torch.Tensor | None = None,
+        t_init: torch.Tensor | None = None,
+        t_final: torch.Tensor | None = None,
+        t: torch.Tensor | None = None,
+    ) -> IntegralOutput:
         """
         Perform sequential numerical integration using torchdiffeq.odeint.
 
@@ -69,13 +72,6 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
                 the value from construction.
             t: Time points at which to return the integral value. If None,
                 defaults to [t_init, t_final]. Shape: [N, T].
-            ode_args: Unused (present for interface compatibility with
-                parallel solvers).
-            max_batch: Unused (present for interface compatibility with
-                parallel solvers).
-            is_training: If True, enables training mode. If False, disables it.
-                If None, inferred from whether ode_fxn is an nn.Module in
-                training mode.
 
         Returns:
             IntegralOutput with the computed integral at the final time
@@ -87,13 +83,13 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
         """
         # Fill in any missing arguments with stored defaults
         ode_fxn, t_init, t_final, y0 = self._check_variables(
-            ode_fxn, t_init, t_final, y0, is_training
+            ode_fxn, t_init, t_final, y0, None
         )
-        assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."
+        assert (
+            ode_fxn is not None
+        ), "Must specify ode_fxn or pass it during class initialization."
         if t is None:
-            t=torch.tensor(
-                [t_init, t_final], dtype=torch.float64, device=self.device
-            )
+            t = torch.tensor([t_init, t_final], dtype=torch.float64, device=self.device)
         else:
             assert len(t.shape) == 2
 
@@ -104,7 +100,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
             t=t,
             method=self.method_name,
             rtol=self.rtol,
-            atol=self.atol
+            atol=self.atol,
         )
 
         # Return the integral at the final time point

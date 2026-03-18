@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import numpy as np
 import psutil
@@ -981,6 +981,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         usable = self._get_usable_memory(total_mem_usage)
         return int(usable // (1e-12 + self.ode_unit_mem_size))
 
+    @override
     def integrate(
         self,
         ode_fxn: Callable | None = None,
@@ -1255,7 +1256,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     logger.warning(
                         "%.1f%% of integration steps failed error requirements, "
                         "which is greater than max_path_change (%s), now exiting.",
-                        fail_ratio * 100, self.max_path_change,
+                        fail_ratio * 100,
+                        self.max_path_change,
                     )
                     return None
 
@@ -1393,6 +1395,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = len(self.method.tableau.c)
         self.Cm1 = self.C - 1
 
+    @override
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Re-initialize the method when the solver's dtype changes."""
         self._setup_method(dtype)
@@ -1610,6 +1613,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = self.method.n_tableau_c
         self.Cm1 = self.C - 1
 
+    @override
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Convert variable method tensors to the new dtype."""
         if hasattr(self, "method"):

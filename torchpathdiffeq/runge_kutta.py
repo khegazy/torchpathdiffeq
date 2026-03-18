@@ -21,6 +21,7 @@ method). The error estimate drives the adaptive step refinement.
 from __future__ import annotations
 
 import logging
+from typing import override
 
 import torch
 
@@ -100,6 +101,7 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+    @override
     def _calculate_integral(
         self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor
     ) -> MethodOutput:
@@ -184,6 +186,7 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+    @override
     def _calculate_integral(
         self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor
     ) -> MethodOutput:

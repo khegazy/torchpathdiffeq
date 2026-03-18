@@ -15,6 +15,7 @@ Defines the core abstractions that all solvers build on:
 from __future__ import annotations
 
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -150,7 +151,7 @@ class MethodOutput:
     h: torch.Tensor
 
 
-class SolverBase(DistributedEnvironment):
+class SolverBase(ABC, DistributedEnvironment):
     """
     Abstract base class for all numerical integration solvers.
 
@@ -342,6 +343,7 @@ class SolverBase(DistributedEnvironment):
         elif t_final is not None:
             self._set_dtype(t_final.dtype)
 
+    @abstractmethod
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """
         Update solver-specific state when dtype changes.
@@ -352,7 +354,6 @@ class SolverBase(DistributedEnvironment):
         Args:
             dtype: The new dtype to convert to.
         """
-        raise NotImplementedError
 
     def _check_variables(
         self,
@@ -403,6 +404,7 @@ class SolverBase(DistributedEnvironment):
         """Enable evaluation mode (no gradient computation during integration)."""
         self.training = False
 
+    @abstractmethod
     def _calculate_integral(
         self,
         t: torch.Tensor,
@@ -428,7 +430,6 @@ class SolverBase(DistributedEnvironment):
             MethodOutput containing the integral, error, per-step contributions,
             per-step errors, and step sizes.
         """
-        raise NotImplementedError
 
     def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         """
@@ -446,6 +447,7 @@ class SolverBase(DistributedEnvironment):
         """
         return integral.integral
 
+    @abstractmethod
     def integrate(
         self,
         ode_fxn: Callable,
@@ -489,7 +491,6 @@ class SolverBase(DistributedEnvironment):
             Handling of the input time ``t`` differs between parallel and serial
             solvers. See each solver's documentation for details.
         """
-        raise NotImplementedError
 
     def __del__(self) -> None:
         """Destructor that cleans up the distributed process group."""
