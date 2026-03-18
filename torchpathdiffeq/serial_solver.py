@@ -13,7 +13,7 @@ integrand is called as f(t) since steps are independent.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import torch
 from torchdiffeq import odeint
@@ -40,11 +40,14 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    @override
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """No-op: the serial solver has no method-specific tensors to convert."""
 
-    @override
+    def _calculate_integral(self, _t, _y, _y0):
+        """Not used: the serial solver delegates to torchdiffeq.odeint."""
+        msg = "Serial solver does not use _calculate_integral"
+        raise NotImplementedError(msg)
+
     def integrate(
         self,
         ode_fxn: Callable | None = None,
