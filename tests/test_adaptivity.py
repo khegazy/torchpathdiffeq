@@ -19,7 +19,7 @@ from torchpathdiffeq import RKParallelUniformAdaptiveStepsizeSolver
 
 
 def _integrand(t):
-    """Test integrand: modulated Gaussian × cosine chirp."""
+    """Test integrand: modulated Gaussian * cosine chirp."""
     return torch.exp(-5 * (t - 0.5) ** 2) * 4 * torch.cos(3 * t**2)
 
 

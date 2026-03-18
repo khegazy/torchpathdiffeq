@@ -81,7 +81,7 @@ class TestRecRemove:
         mask = torch.tensor([True, True, False, True])
         result = self.solver._rec_remove(mask.clone())
         self._check_no_adjacent(result)
-        assert result[0] is True  # First kept
+        assert result[0] == True  # noqa: E712  # First kept
 
     def test_all_true(self):
         """All True: result alternates True/False."""
@@ -101,7 +101,7 @@ class TestRecRemove:
         """Single True element is unchanged."""
         mask = torch.tensor([True])
         result = self.solver._rec_remove(mask.clone())
-        assert result[0] is True
+        assert result[0] == True  # noqa: E712
 
     def test_two_both_true(self):
         """Two adjacent Trues: second is removed."""
@@ -115,7 +115,7 @@ class TestRecRemove:
         mask = torch.tensor([True, True, True])
         result = self.solver._rec_remove(mask.clone())
         self._check_no_adjacent(result)
-        assert result[0] is True
+        assert result[0] == True  # noqa: E712
         assert result[2] is True
 
     def test_long_alternating(self):
@@ -150,7 +150,7 @@ class TestComputeErrorRatiosAbsolute:
         sum_step_errors = torch.tensor([[0.01], [0.001]])  # [2, 1]
         integral = torch.tensor([1.0])
 
-        error_ratio, error_ratio_2steps = solver._compute_error_ratios_absolute(
+        error_ratio, _error_ratio_2steps = solver._compute_error_ratios_absolute(
             sum_step_errors, integral
         )
 

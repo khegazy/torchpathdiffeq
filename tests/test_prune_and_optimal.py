@@ -28,7 +28,7 @@ class TestPruneExcessT:
         se = torch.ones(4, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([0.5, 0.8, 0.3])  # All > 0.1
 
-        t_p, ss_p, se_p = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _ss_p, _se_p = solver.prune_excess_t(t, ss, se, er2)
 
         assert t_p.shape[0] == 4
         assert torch.equal(t_p, t)
@@ -53,7 +53,7 @@ class TestPruneExcessT:
         se = torch.ones(1, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([])
 
-        t_p, ss_p, se_p = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _ss_p, _se_p = solver.prune_excess_t(t, ss, se, er2)
 
         assert t_p.shape[0] == 1
         assert torch.equal(t_p, t)

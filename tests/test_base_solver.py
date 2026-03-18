@@ -188,7 +188,7 @@ class TestCheckVariables:
     def test_fills_defaults(self):
         """All None args are replaced with stored defaults."""
         solver = make_solver_for_unit_test()
-        ode_fxn, t_init, t_final, y0 = solver._check_variables()
+        _ode_fxn, t_init, t_final, y0 = solver._check_variables()
         assert t_init is not None
         assert t_final is not None
         assert y0 is not None

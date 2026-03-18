@@ -232,11 +232,9 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
         self.device = device
         self.tableau = _ADAPTIVE_HEUN.tableau
 
-
     def to_device(self, device: str | torch.device) -> None:
         """Move tableau tensors to the specified device."""
         self.tableau.to_device(device)
-
 
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tableau tensors to the specified dtype."""
@@ -296,11 +294,9 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
             [[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device
         )
 
-
     def to_device(self, device: str | torch.device) -> None:
         """Move tensors to the specified device."""
         self.b_delta = self.b_delta.to(device)
-
 
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tensors to the specified dtype."""

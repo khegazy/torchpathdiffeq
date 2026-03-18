@@ -122,7 +122,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64) * 0.1
         se = torch.ones(3, 1, dtype=torch.float64) * 0.01
 
-        t_p, ss_p, se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _ss_p, _se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
 
         assert t_p.shape[0] == 2
         # First merged step spans from 0 to 2/3
@@ -173,12 +173,12 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64)
         se = torch.ones(3, 1, dtype=torch.float64)
 
-        t_p, ss_p, se_p = solver._merge_excess_t(
+        t_p, _ss_p, _se_p = solver._merge_excess_t(
             t, ss, se, torch.tensor([], dtype=torch.long)
         )
 
         assert torch.equal(t_p, t)
-        assert torch.equal(ss_p, ss)
+        assert torch.equal(_ss_p, ss)
 
     def test_time_ordering(self):
         """After merge, flattened t is non-decreasing."""
@@ -217,7 +217,6 @@ class TestVariableEvaluateAdaptiveY:
     def test_reuses_old_evals(self):
         """Split step: old y values appear in y_add."""
         solver = make_variable_solver_for_unit_test("adaptive_heun")
-        C = solver.C  # 2
         t = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
         y = torch.tensor([[[10.0], [20.0]]], dtype=torch.float64)
 
@@ -300,7 +299,7 @@ class TestVariableMergeExcessT:
         ss = torch.tensor([[1.0], [2.0]], dtype=torch.float64)
         se = torch.tensor([[0.01], [0.02]], dtype=torch.float64)
 
-        t_p, ss_p, se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _ss_p, _se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
 
         assert t_p.shape == (1, 2, 1)
         # Subsampled from [0, 0.5, 1.0] at indices [0, 2] → [0, 1.0]

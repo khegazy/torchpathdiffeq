@@ -74,7 +74,7 @@ class TestRKIntegralBasic:
         b = torch.tensor([[[0.5], [0.5]]])  # [1, 2, 1]
         y0 = torch.tensor([0.0, 0.0])
 
-        integral, rk_steps, h = _RK_integral(t, y, b, y0)
+        integral, rk_steps, _h = _RK_integral(t, y, b, y0)
 
         assert integral.shape == (2,)
         assert torch.allclose(integral, torch.tensor([1.0, 2.0]))
@@ -87,7 +87,7 @@ class TestRKIntegralBasic:
         b = torch.tensor([[[0.5], [0.5]]])
         y0 = torch.tensor([3.0])
 
-        integral, rk_steps, h = _RK_integral(t, y, b, y0)
+        integral, _rk_steps, h = _RK_integral(t, y, b, y0)
 
         assert torch.allclose(integral, torch.tensor([3.0]))  # y0 only
         assert torch.allclose(h, torch.tensor([[0.0]]))

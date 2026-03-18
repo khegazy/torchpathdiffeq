@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 import torch
 from _helpers import ATOL_MED, RTOL_MED, SEED, T_FINAL, T_INIT, UNIFORM_METHOD_NAMES
@@ -15,7 +14,7 @@ from torchpathdiffeq import (
 
 
 def _integrand(t, y=0):
-    """Test integrand: modulated Gaussian × cosine chirp."""
+    """Test integrand: modulated Gaussian * cosine chirp."""
     return torch.exp(-5 * (t - 0.5) ** 2) * 4 * torch.cos(3 * t**2)
 
 
@@ -23,7 +22,7 @@ def _integrand(t, y=0):
 def test_wrapper_matches_direct_solver_uniform(method_name):
     """ode_path_integral(computation='parallel', sampling='uniform') matches direct RK solver."""
     torch.manual_seed(SEED)
-    np.random.seed(SEED)
+
     wrapper_output = ode_path_integral(
         ode_fxn=_integrand,
         method=method_name,
@@ -38,7 +37,7 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
     )
 
     torch.manual_seed(SEED)
-    np.random.seed(SEED)
+
     direct_solver = RKParallelUniformAdaptiveStepsizeSolver(
         method=method_name,
         atol=ATOL_MED,

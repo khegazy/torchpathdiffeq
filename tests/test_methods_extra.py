@@ -23,7 +23,7 @@ class TestVariableSecondOrderTableauB:
         """b matches the adaptive_heun tableau b values."""
         method = _VARIABLE_SECOND_ORDER()
         c = torch.rand(5, 2, 1)
-        b, b_error = method.tableau_b(c)
+        b, _b_error = method.tableau_b(c)
         expected_b = UNIFORM_METHODS["adaptive_heun"].tableau.b
         assert torch.allclose(b, expected_b)
 

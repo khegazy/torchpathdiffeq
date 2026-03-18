@@ -21,7 +21,6 @@ from torchpathdiffeq import (
     wolf_schlegel,
 )
 
-
 # Map variable method names to their serial equivalents
 _SERIAL_METHOD_MAP = {"generic3": "bosh3"}
 

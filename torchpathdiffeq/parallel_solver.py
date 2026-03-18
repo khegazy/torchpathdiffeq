@@ -255,7 +255,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_steps = self._initial_t_steps(t, t_init=t_init, t_final=t_final).to(
                 self.dtype
             )
-            N, C, _ = t_steps.shape
+            N, _C, _ = t_steps.shape
 
             # Time points to evaluate, remove repetitive time points at the end
             # of each step to minimize evaluations
@@ -812,14 +812,12 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         idxs_keep, idxs_input = self._get_sorted_indices(
             record["t"][:, 0, 0].detach(), results.t[:, 0, 0].detach()
         )
-        for key in record:
-            is_number = len(record[key].shape) == 1 and record[key].shape[0] == 1
-            is_number = is_number or len(record[key].shape) == 0
+        for key, value in record.items():
             if "integral" in key or "loss" in key:
-                record[key] = record[key] + getattr(results, key).detach()
+                record[key] = value + getattr(results, key).detach()
             else:
                 record[key] = self._insert_sorted_results(
-                    record[key], idxs_keep, getattr(results, key), idxs_input
+                    value, idxs_keep, getattr(results, key), idxs_input
                 )
         assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
 
@@ -983,7 +981,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         """
         usable = self._get_usable_memory(total_mem_usage)
         return int(usable // (1e-12 + self.ode_unit_mem_size))
-
 
     def integrate(
         self,
@@ -1202,7 +1199,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
             # --- Step 2: Evaluate the integrand at all quadrature points ---
             # Flatten [N, C, T] -> [N*C, T] for batch evaluation, then reshape back
-            N, C, T = t_step_eval.shape
+            N, C, _T = t_step_eval.shape
             y_step_eval = ode_fxn(
                 torch.flatten(t_step_eval, start_dim=0, end_dim=-2), *ode_args
             )
@@ -1396,7 +1393,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = len(self.method.tableau.c)
         self.Cm1 = self.C - 1
 
-
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Re-initialize the method when the solver's dtype changes."""
         self._setup_method(dtype)
@@ -1466,7 +1462,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         steps = self.method.tableau.c.unsqueeze(-1) * dt
         return t_left.unsqueeze(1) + steps
 
-
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
@@ -1509,7 +1504,6 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_add = ode_fxn(t_eval_steps.view(-1, D), *ode_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, t_eval_steps
-
 
     def _merge_excess_t(
         self,
@@ -1616,7 +1610,6 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = self.method.n_tableau_c
         self.Cm1 = self.C - 1
 
-
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Convert variable method tensors to the new dtype."""
         if hasattr(self, "method"):
@@ -1674,7 +1667,6 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         t_right = t_right.unsqueeze(1)
         return t_left + steps*(t_right - t_left)
     """
-
 
     def _evaluate_adaptive_y(
         self,
@@ -1747,7 +1739,6 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_add_combined = torch.reshape(y_add_combined, (len(idxs_add) * 2, self.C, D))
 
         return y_add_combined, t_add_combined
-
 
     def _merge_excess_t(
         self,

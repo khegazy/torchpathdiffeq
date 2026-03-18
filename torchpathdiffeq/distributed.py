@@ -115,7 +115,7 @@ class DistributedEnvironment:
         if self.is_slurm:
             self.is_distributed = int(os.environ["SLURM_NTASKS"]) > 1
         else:
-            self.is_distributed = int(os.environ.get("RANK", -1)) != -1
+            self.is_distributed = int(os.environ.get("RANK", "-1")) != -1
 
         # Verify the requested distributed backend is available
         if self.is_distributed:

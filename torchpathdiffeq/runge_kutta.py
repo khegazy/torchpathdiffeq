@@ -100,7 +100,6 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-
     def _calculate_integral(
         self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor
     ) -> MethodOutput:
@@ -184,7 +183,6 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-
 
     def _calculate_integral(
         self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor

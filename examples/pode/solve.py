@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from glob import glob
 from typing import override
 
@@ -157,7 +157,7 @@ experiments = {
 }
 
 
-class BaseODE(abc.ABC):
+class BaseODE(ABC):
     def __init__(self, N_dims, device, dtype=torch.float64):
         self.N_dims = N_dims
         self.dtype = dtype
@@ -298,16 +298,16 @@ class Poisson(BaseODE):
         self.ode = getattr(self, f"_{force_type}")
         self.ode_np = getattr(self, f"_{force_type}_np")
 
-    def _source_analytical(self, t, y):
+    def _source_analytical(self, t, _y):
         return -torch.sin(torch.pi * t)
 
-    def _source_analytical_np(self, t, y):
+    def _source_analytical_np(self, t, _y):
         return -np.sin(np.pi * t)
 
-    def _source_numerical(self, t, y):
+    def _source_numerical(self, t, _y):
         return torch.tanh(5 * (t - 0.5)) - torch.cos(10 * t)
 
-    def _source_numerical_np(self, t, y):
+    def _source_numerical_np(self, t, _y):
         return np.tanh(5 * (t - 0.5)) - np.cos(10 * t)
 
     def solve_ode(self, t_max):

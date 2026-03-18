@@ -51,7 +51,7 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([2.0, 1.5])
         mo = _make_method_output(2)
 
-        mo_out, _, _, barriers_new, trackers_new, er_kept = (
+        mo_out, _, _, barriers_new, _trackers_new, er_kept = (
             self.solver._adaptively_add_steps(
                 mo, error_ratios, None, None, barriers, idxs, trackers
             )
@@ -69,7 +69,7 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([0.5, 2.0])
         mo = _make_method_output(2)
 
-        mo_out, _, _, barriers_new, trackers_new, er_kept = (
+        mo_out, _, _, barriers_new, _trackers_new, er_kept = (
             self.solver._adaptively_add_steps(
                 mo, error_ratios, None, None, barriers, idxs, trackers
             )
@@ -127,12 +127,12 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0])
         error_ratios = torch.tensor([2.0])
 
-        _, _, _, barriers_new, trackers_new, _ = self.solver._adaptively_add_steps(
+        _, _, _, _barriers_new, trackers_new, _ = self.solver._adaptively_add_steps(
             None, error_ratios, None, None, barriers, idxs, trackers
         )
         # After split: barriers = [0, 0.5, 1]. Both step 0 and step 1 need eval.
-        assert trackers_new[0] is True
-        assert trackers_new[1] is True
+        assert trackers_new[0] == True  # noqa: E712
+        assert trackers_new[1] == True  # noqa: E712
 
     def test_method_output_filtered(self):
         """3 steps, middle fails: method_output retains 2 accepted rows."""
@@ -162,5 +162,5 @@ class TestAdaptivelyAddSteps:
             )
         )
         assert len(barriers_new) == 2
-        assert trackers_new[0] is False
+        assert trackers_new[0] == False  # noqa: E712
         assert len(er_kept) == 1
