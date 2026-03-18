@@ -231,6 +231,42 @@ def damped_sine_solution(
     return -1 * (numerator(t_final, w, a) - numerator(t_init, w, a)) / (a**2 + _w**2)
 
 
+# ---------------------------------------------------------------------------
+# Wolf-Schlegel 2D potential energy surface along a linear interpolation path
+# ---------------------------------------------------------------------------
+
+_WS_MIN_INIT = torch.tensor([1.133, -1.486])
+_WS_MIN_FINAL = torch.tensor([-1.166, 1.477])
+
+
+def wolf_schlegel(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
+    """
+    Wolf-Schlegel 2D potential evaluated along a linear path between two minima.
+
+    The path linearly interpolates between (1.133, -1.486) and (-1.166, 1.477)
+    as t goes from 0 to 1. Returns the potential energy:
+    V(x,y) = 10*(x^4 + y^4 - 2x^2 - 4y^2 + xy + 0.2x + 0.1y).
+
+    This is a multi-dimensional output integrand (returns a scalar per time point)
+    useful for testing integration of chemistry potential energy surfaces.
+
+    Args:
+        t: Time points in [0, 1]. Shape: [N, T].
+        _y: Unused. Present for interface compatibility.
+
+    Returns:
+        Potential energy at each time point. Shape: [N, 1].
+    """
+    while len(t.shape) < 2:
+        t = t.unsqueeze(0)
+    interpolate = _WS_MIN_INIT.to(t.device) + t * (_WS_MIN_FINAL - _WS_MIN_INIT).to(
+        t.device
+    )
+    x = interpolate[:, 0].unsqueeze(-1)
+    y = interpolate[:, 1].unsqueeze(-1)
+    return 10 * (x**4 + y**4 - 2 * x**2 - 4 * y**2 + x * y + 0.2 * x + 0.1 * y)
+
+
 # Registry of test integrands: maps name -> (integrand_fn, analytical_solution_fn, error_cutoff).
 # error_cutoff is the maximum acceptable relative error |computed - exact| / |exact|.
 ODE_dict = {
