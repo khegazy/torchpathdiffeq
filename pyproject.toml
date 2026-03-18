@@ -4,37 +4,36 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchpathdiffeq"
-description="Parallelized path integration numerical method built on pytorch with backprop capabilities."
+description = "Parallelized path integration numerical method built on pytorch with backprop capabilities."
 version = "0.1.0"
 readme = "README.md"
-license = { text = "CC-BY 4.0" }
+license = "CC-BY-4.0"
 authors = [{ name = "Kareem Hegazy", email = "khegazy@berkeley.edu" }]
 keywords = ["path integral", "torch"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering",
-    "Operating System :: Microsoft :: Windows",
-    "Operating System :: Unix",
-    "Operating System :: MacOS",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: Unix",
+  "Operating System :: MacOS",
 ]
 requires-python = ">=3.10"
 dependencies = ["numpy", "torch", "torchdiffeq", "einops", "psutil"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4.0", "pytest-cov>=3.10.0", "ruff>=0.0.285"]
+dev = ["pytest>=7.4.0", "pytest-cov>=3.10.0", "mypy", "pre-commit", "ruff>=0.4.0", "typos"]
 docs = [
-    "mkdocs-material>=9.4.0",
-    "mkdocstrings[python]>=0.22.0",
-    "mkdocs-gen-files>=0.5.0",
-    "mkdocs-literate-nav>=0.6.0",
-    "pillow>=10.0.0",
-    "cairosvg>=2.7.1"
+  "mkdocs-material>=9.4.0",
+  "mkdocstrings[python]>=0.22.0",
+  "mkdocs-gen-files>=0.5.0",
+  "mkdocs-literate-nav>=0.6.0",
+  "pillow>=10.0.0",
+  "cairosvg>=2.7.1",
 ]
 
 [project.urls]
@@ -57,31 +56,23 @@ log_cli_level = "warn"
 pythonpath = "torchpathdiffeq"
 testpaths = ["tests"]
 
-[tool.black]
-exclude = '''
-/(
-    \.git
-  | \.tox
-)/
-'''
-skip-magic-trailing-comma = true
-
-[tool.isort]
-profile = 'black'
-skip_gitignore = true
-
 [tool.coverage.run]
 source = ["torchpathdiffeq"]
 
 [tool.coverage.report]
 exclude_also = [
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
-    "except ImportError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "except ImportError",
 ]
 
 [tool.ruff]
-lint.select = [
+line-length = 88
+src = ["torchpathdiffeq"]
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
   "A",      # flake8-builtins
   "ARG",    # flake8-unused-arguments
   "ASYNC",  # flake8-async
@@ -120,29 +111,33 @@ lint.select = [
   "W",      # pycodestyle warning
   "YTT",    # flake8-2020
 ]
-lint.ignore = [
-  "E501",   # Line too long
+ignore = [
+  "E501",     # Line too long
   "ISC001",   # single-line-implicit-string-concatenation
   "PERF203",  # try-except-in-loop
-  "PLR",    # Design related pylint codes
-  "PT004",  # Fixture does not return anything
-  "PT011",  # pytest.raises
-  "PT012",  # pytest.raises
-  "RET505", # Unnecessary `elif` after `return`
+  "PLR",      # Design related pylint codes
+  "PT004",    # Fixture does not return anything
+  "PT011",    # pytest.raises
+  "PT012",    # pytest.raises
+  "RET505",   # Unnecessary `elif` after `return`
 ]
-src = ["torchpathdiffeq"]
-lint.unfixable = [
+unfixable = [
   "T20",  # Removes print statements
   "F841", # Removes unused variables
 ]
-lint.pydocstyle.convention = "numpy"
-lint.isort.known-first-party = ["torchpathdiffeq"]
-lint.isort.required-imports = ["from __future__ import annotations"]
-extend-include = ["*.ipynb"]
+pydocstyle.convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = ["torchpathdiffeq"]
+required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**" = ["ANN", "ARG", "D", "E402", "PTH", "S101"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
 
 [tool.docformatter]
 pre-summary-newline = true
