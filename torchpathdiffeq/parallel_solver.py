@@ -42,8 +42,8 @@ from __future__ import annotations
 
 import logging
 import time
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, override
+from abc import abstractmethod
+from typing import TYPE_CHECKING
 
 import numpy as np
 import psutil
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ParallelAdaptiveStepsizeSolver(ABC, SolverBase):
+class ParallelAdaptiveStepsizeSolver(SolverBase):
     """
     Base class for parallel adaptive-stepsize numerical integration.
 
@@ -984,7 +984,7 @@ class ParallelAdaptiveStepsizeSolver(ABC, SolverBase):
         usable = self._get_usable_memory(total_mem_usage)
         return int(usable // (1e-12 + self.ode_unit_mem_size))
 
-    @override
+
     def integrate(
         self,
         ode_fxn: Callable | None = None,
@@ -1396,7 +1396,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = len(self.method.tableau.c)
         self.Cm1 = self.C - 1
 
-    @override
+
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Re-initialize the method when the solver's dtype changes."""
         self._setup_method(dtype)
@@ -1466,7 +1466,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         steps = self.method.tableau.c.unsqueeze(-1) * dt
         return t_left.unsqueeze(1) + steps
 
-    @override
+
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
@@ -1510,7 +1510,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, t_eval_steps
 
-    @override
+
     def _merge_excess_t(
         self,
         t: torch.Tensor,
@@ -1616,7 +1616,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         self.C = self.method.n_tableau_c
         self.Cm1 = self.C - 1
 
-    @override
+
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """Convert variable method tensors to the new dtype."""
         if hasattr(self, "method"):
@@ -1675,7 +1675,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return t_left + steps*(t_right - t_left)
     """
 
-    @override
+
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
@@ -1748,7 +1748,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
 
         return y_add_combined, t_add_combined
 
-    @override
+
     def _merge_excess_t(
         self,
         t: torch.Tensor,

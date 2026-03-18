@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import override
 
 import torch
 
@@ -233,12 +232,12 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
         self.device = device
         self.tableau = _ADAPTIVE_HEUN.tableau
 
-    @override
+
     def to_device(self, device: str | torch.device) -> None:
         """Move tableau tensors to the specified device."""
         self.tableau.to_device(device)
 
-    @override
+
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tableau tensors to the specified dtype."""
         self.tableau.to_dtype(dtype)
@@ -297,12 +296,12 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
             [[0.5, 0.0, 0.5]], dtype=torch.float64, device=self.device
         )
 
-    @override
+
     def to_device(self, device: str | torch.device) -> None:
         """Move tensors to the specified device."""
         self.b_delta = self.b_delta.to(device)
 
-    @override
+
     def to_dtype(self, dtype: torch.dtype) -> None:
         """Convert tensors to the specified dtype."""
         self.b_delta = self.b_delta.to(dtype)
