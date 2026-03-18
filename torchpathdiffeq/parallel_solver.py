@@ -990,6 +990,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             N_init_steps: int = 13,
             ode_args: tuple = (),
             take_gradient: bool = False,
+            is_training: bool | None = None,
             total_mem_usage: Optional[float] = None,
             loss_fxn: Optional[Callable] = None,
             max_batch: Optional[int] = None,
@@ -1029,6 +1030,10 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             ode_args: Extra arguments passed to ode_fxn after the time tensor.
             take_gradient: If True, calls loss.backward() after each batch
                 to compute gradients through the integration.
+            is_training: If True, enables training mode so that take_gradient
+                is activated. If False, disables gradient computation regardless
+                of take_gradient. If None, inferred from whether ode_fxn is an
+                nn.Module in training mode.
             total_mem_usage: Fraction of memory to use for batching. Overrides
                 the value from construction if provided.
             loss_fxn: Custom loss function. Takes an IntegralOutput, returns a
@@ -1078,7 +1083,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         
         # Get variables or populate with default values, send to correct device
         ode_fxn, t_init, t_final, y0 = self._check_variables(
-            ode_fxn, t_init, t_final, y0
+            ode_fxn, t_init, t_final, y0, is_training
         )
         assert t_init < t_final, "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
         total_mem_usage = self.total_mem_usage if total_mem_usage is None\
@@ -1259,7 +1264,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
             # --- Step 6: Record accepted results and handle gradients ---
             if t_step_eval.shape[0] > 0:
-                take_gradient = torch.any(t_step_trackers) or take_gradient
+                take_gradient = take_gradient or (self.is_training and (torch.any(t_step_trackers) or take_gradient))
                 intermediate_results = IntegralOutput(
                     integral=method_output.integral,
                     loss=None,

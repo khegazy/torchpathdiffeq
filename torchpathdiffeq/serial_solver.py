@@ -47,7 +47,8 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
             t_final: Optional[torch.Tensor] = None,
             t: Optional[torch.Tensor] = None,
             ode_args: Optional[tuple] = None,
-            max_batch: Optional[int] = None
+            max_batch: Optional[int] = None,
+            is_training: bool | None = None
         ) -> IntegralOutput:
         """
         Perform sequential numerical integration using torchdiffeq.odeint.
@@ -72,6 +73,9 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
                 parallel solvers).
             max_batch: Unused (present for interface compatibility with
                 parallel solvers).
+            is_training: If True, enables training mode. If False, disables it.
+                If None, inferred from whether ode_fxn is an nn.Module in
+                training mode.
 
         Returns:
             IntegralOutput with the computed integral at the final time
@@ -83,7 +87,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
         """
         # Fill in any missing arguments with stored defaults
         ode_fxn, t_init, t_final, y0 = self._check_variables(
-            ode_fxn, t_init, t_final, y0
+            ode_fxn, t_init, t_final, y0, is_training
         )
         assert ode_fxn is not None, "Must specify ode_fxn or pass it during class initialization."
         if t is None:

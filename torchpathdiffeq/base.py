@@ -14,8 +14,6 @@ Defines the core abstractions that all solvers build on:
 
 from __future__ import annotations
 
-asdfasdfasdf
-dddddlklklklklklklklakdslkjasdlfk;jasd;lkfjas;dklfjal;skfejkfhlkajdsfhlakjsdflkasdjfkajsddfhslasdfasdfaf;awdfj;oasidjflaskdfn;lkasdhg;lkasdjf
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -179,12 +177,12 @@ class SolverBase(DistributedEnvironment):
         method: str,
         atol: float,
         rtol: float,
-        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        y0: torch.Tensor | None = None,
         ode_fxn: Callable | None = None,
-        t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-        t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
+        t_init: torch.Tensor | None = None,
+        t_final: torch.Tensor | None = None,
+        is_training: bool | None = None,
         dtype: torch.dtype = torch.float64,
-        eval: bool = False,
         device: str | None = None,
         *args,
         **kwargs,
@@ -205,9 +203,9 @@ class SolverBase(DistributedEnvironment):
                 Can also be provided at integrate() call time.
             t_init: Lower bound of integration. Shape: [T].
             t_final: Upper bound of integration. Shape: [T].
+            is_training: If False, disables training mode (no gradient computation). If unspecified it will infer training mode by 'ode_fxn'.
             dtype: Floating point precision for all computations. Supported:
                 torch.float64, torch.float32, torch.float16.
-            eval: If True, disables training mode (no gradient computation).
             device: Device string (e.g. 'cuda', 'cpu'). Passed to
                 DistributedEnvironment for device assignment.
             *args: Additional arguments forwarded to DistributedEnvironment.
@@ -220,10 +218,23 @@ class SolverBase(DistributedEnvironment):
         self.atol = atol
         self.rtol = rtol
         self.ode_fxn = ode_fxn
-        self.y0 = y0.to(self.device)
-        self.t_init = t_init.to(self.device)
-        self.t_final = t_final.to(self.device)
-        self.training = not eval
+        self.y0 = (
+            y0.to(self.device)
+            if y0 is not None
+            else torch.tensor([0], dtype=torch.float64, device=self.device)
+        )
+        self.t_init = (
+            t_init.to(self.device)
+            if t_init is not None
+            else torch.tensor([0], dtype=torch.float64, device=self.device)
+        )
+        self.t_final = (
+            t_final.to(self.device)
+            if t_final is not None
+            else torch.tensor([1], dtype=torch.float64, device=self.device)
+        )
+        # Determine if in training or eval mode
+        self._infer_training(is_training, ode_fxn)
         # Cached time barriers from last integration for warm-starting
         self.t_step_barriers_previous = None
         # Name of the last integrated function (for warm-start matching)
@@ -231,6 +242,16 @@ class SolverBase(DistributedEnvironment):
 
         self._set_dtype(dtype)
 
+    def _infer_training(self, is_training: bool | None = None, ode_fxn: Callable | None = None):
+        if is_training is not None:
+            self.training = is_training
+        elif ode_fxn is None:
+            self.training = False
+        elif not isinstance(ode_fxn, torch.nn.Module):
+            self.training = False
+        else:
+            self.training = ode_fxn.training
+        
     def _set_dtype(self, dtype: torch.dtype) -> None:
         """
         Set the floating-point precision for all solver tensors.
@@ -323,6 +344,7 @@ class SolverBase(DistributedEnvironment):
         t_init: torch.Tensor | None = None,
         t_final: torch.Tensor | None = None,
         y0: torch.Tensor | None = None,
+        is_training: bool | None = None,
     ) -> tuple[
         Callable | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None
     ]:
@@ -348,12 +370,13 @@ class SolverBase(DistributedEnvironment):
         t_final = self.t_final if t_final is None else t_final
         y0 = self.y0 if y0 is None else y0
 
-        if t_init is not None:
-            t_init = t_init.to(self.dtype).to(self.device)
-        if t_final is not None:
-            t_final = t_final.to(self.dtype).to(self.device)
-        if y0 is not None:
-            y0 = y0.to(self.dtype).to(self.device)
+        t_init = t_init.to(self.dtype).to(self.device)
+        t_final = t_final.to(self.dtype).to(self.device)
+        y0 = y0.to(self.dtype).to(self.device)
+        
+        # Determine if in training mode
+        self._infer_training(is_training, ode_fxn)
+
         return ode_fxn, t_init, t_final, y0
 
     def train(self) -> None:
@@ -368,7 +391,7 @@ class SolverBase(DistributedEnvironment):
         self,
         t: torch.Tensor,
         y: torch.Tensor,
-        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        y0: torch.Tensor | None,
     ) -> MethodOutput:
         """
         Compute the integral and error estimate for a batch of integration steps.
@@ -391,7 +414,7 @@ class SolverBase(DistributedEnvironment):
         """
         raise NotImplementedError
 
-    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor:
+    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor: #noqa: ARG002
         """
         Default loss function: returns the integral value itself.
 
@@ -410,11 +433,12 @@ class SolverBase(DistributedEnvironment):
     def integrate(
         self,
         ode_fxn: Callable,
-        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-        t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-        t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
+        y0: torch.Tensor | None = None,
+        t_init: torch.Tensor | None = None,
+        t_final: torch.Tensor | None = None,
         t: torch.Tensor | None = None,
         ode_args: tuple = (),
+        is_training: bool | None = None,
     ) -> IntegralOutput:
         """
         Perform numerical path integration of ode_fxn from t_init to t_final.
@@ -437,6 +461,9 @@ class SolverBase(DistributedEnvironment):
                 starting mesh for adaptive refinement. Shape depends on solver:
                 [N, T] for step barriers, [N, C, T] for full quadrature points.
             ode_args: Extra arguments passed to ode_fxn after the time tensor.
+            is_training: If True, enables training mode (gradient computation
+                via take_gradient). If False, disables it. If None, inferred
+                from whether ode_fxn is an nn.Module in training mode.
 
         Returns:
             IntegralOutput containing the computed integral, error estimates,
