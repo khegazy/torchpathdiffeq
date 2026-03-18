@@ -12,12 +12,19 @@ Defines the core abstractions that all solvers build on:
   that concrete solvers must implement.
 """
 
-import torch
+from __future__ import annotations
+
+asdfasdfasdf
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional, Tuple
+from typing import TYPE_CHECKING
+
+import torch
 
 from .distributed import DistributedEnvironment
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class steps(Enum):
@@ -31,6 +38,7 @@ class steps(Enum):
       positions. Tableau b weights are recomputed dynamically based on actual
       point positions.
     """
+
     FIXED = 0
     ADAPTIVE_UNIFORM = 1
     ADAPTIVE_VARIABLE = 2
@@ -54,17 +62,17 @@ def get_sampling_type(sampling_type: str) -> steps:
         KeyError: If sampling_type is not a recognized name.
     """
     types = {
-        'fixed' : steps.FIXED,
-        'adaptive_uniform' : steps.ADAPTIVE_UNIFORM,
-        'uniform' : steps.ADAPTIVE_UNIFORM,
-        'adaptive_variable' : steps.ADAPTIVE_VARIABLE,
-        'variable' : steps.ADAPTIVE_VARIABLE
+        "fixed": steps.FIXED,
+        "adaptive_uniform": steps.ADAPTIVE_UNIFORM,
+        "uniform": steps.ADAPTIVE_UNIFORM,
+        "adaptive_variable": steps.ADAPTIVE_VARIABLE,
+        "variable": steps.ADAPTIVE_VARIABLE,
     }
     return types[sampling_type]
 
 
 @dataclass
-class IntegralOutput():
+class IntegralOutput:
     """
     Complete output of a numerical integration run.
 
@@ -97,6 +105,7 @@ class IntegralOutput():
         t_final: Upper integration bound used. Shape: [T].
         y0: Initial integral value used. Shape: [D].
     """
+
     integral: torch.Tensor
     loss: torch.Tensor = None
     gradient_taken: bool = None
@@ -114,7 +123,7 @@ class IntegralOutput():
 
 
 @dataclass
-class MethodOutput():
+class MethodOutput:
     """
     Output from a single batch of RK integration steps.
 
@@ -133,6 +142,7 @@ class MethodOutput():
             order-p and order-(p-1) methods. Shape: [N, D].
         h: Step sizes (t_right - t_left) for each step. Shape: [N, T].
     """
+
     integral: torch.Tensor
     integral_error: torch.Tensor
     sum_steps: torch.Tensor
@@ -164,20 +174,20 @@ class SolverBase(DistributedEnvironment):
     """
 
     def __init__(
-            self,
-            method: str,
-            atol: float,
-            rtol: float,
-            y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-            ode_fxn: Optional[Callable] = None,
-            t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-            t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
-            dtype: torch.dtype = torch.float64,
-            eval: bool = False,
-            device: Optional[str] = None,
-            *args,
-            **kwargs
-        ) -> None:
+        self,
+        method: str,
+        atol: float,
+        rtol: float,
+        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        ode_fxn: Callable | None = None,
+        t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
+        dtype: torch.dtype = torch.float64,
+        eval: bool = False,
+        device: str | None = None,
+        *args,
+        **kwargs,
+    ) -> None:
         """
         Initialize the solver base with integration parameters.
 
@@ -263,16 +273,18 @@ class SolverBase(DistributedEnvironment):
             self.atol_assert = 1e-3
             self.rtol_assert = 1e-1
         else:
-            raise ValueError("Given dtype must be torch.float64, torch.float32, or torch.float16")
+            raise ValueError(
+                "Given dtype must be torch.float64, torch.float32, or torch.float16"
+            )
 
         self._set_solver_dtype(self.dtype)
 
     def set_dtype_by_input(
-            self,
-            t: Optional[torch.Tensor] = None,
-            t_init: Optional[torch.Tensor] = None,
-            t_final: Optional[torch.Tensor] = None
-        ) -> None:
+        self,
+        t: torch.Tensor | None = None,
+        t_init: torch.Tensor | None = None,
+        t_final: torch.Tensor | None = None,
+    ) -> None:
         """
         Infer and set the solver dtype from the dtype of input tensors.
 
@@ -304,14 +316,15 @@ class SolverBase(DistributedEnvironment):
         """
         raise NotImplementedError
 
-
     def _check_variables(
-            self,
-            ode_fxn: Optional[Callable] = None,
-            t_init: Optional[torch.Tensor] = None,
-            t_final: Optional[torch.Tensor] = None,
-            y0: Optional[torch.Tensor] = None
-        ) -> Tuple[Optional[Callable], Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        self,
+        ode_fxn: Callable | None = None,
+        t_init: torch.Tensor | None = None,
+        t_final: torch.Tensor | None = None,
+        y0: torch.Tensor | None = None,
+    ) -> tuple[
+        Callable | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None
+    ]:
         """
         Fill in missing arguments with stored defaults and move to correct device.
 
@@ -350,13 +363,12 @@ class SolverBase(DistributedEnvironment):
         """Enable evaluation mode (no gradient computation during integration)."""
         self.training = False
 
-
     def _calculate_integral(
-            self,
-            t: torch.Tensor,
-            y: torch.Tensor,
-            y0: torch.Tensor = torch.tensor([0], dtype=torch.float64)
-        ) -> 'MethodOutput':
+        self,
+        t: torch.Tensor,
+        y: torch.Tensor,
+        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+    ) -> MethodOutput:
         """
         Compute the integral and error estimate for a batch of integration steps.
 
@@ -378,7 +390,7 @@ class SolverBase(DistributedEnvironment):
         """
         raise NotImplementedError
 
-    def _integral_loss(self, integral: 'IntegralOutput', *args, **kwargs) -> torch.Tensor:
+    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor:
         """
         Default loss function: returns the integral value itself.
 
@@ -395,14 +407,14 @@ class SolverBase(DistributedEnvironment):
         return integral.integral
 
     def integrate(
-            self,
-            ode_fxn: Callable,
-            y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-            t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
-            t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
-            t: Optional[torch.Tensor] = None,
-            ode_args: tuple = ()
-        ) -> IntegralOutput:
+        self,
+        ode_fxn: Callable,
+        y0: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        t_init: torch.Tensor = torch.tensor([0], dtype=torch.float64),
+        t_final: torch.Tensor = torch.tensor([1], dtype=torch.float64),
+        t: torch.Tensor | None = None,
+        ode_args: tuple = (),
+    ) -> IntegralOutput:
         """
         Perform numerical path integration of ode_fxn from t_init to t_final.
 
@@ -434,7 +446,6 @@ class SolverBase(DistributedEnvironment):
             solvers. See each solver's documentation for details.
         """
         raise NotImplementedError
-
 
     def __del__(self) -> None:
         """Destructor that cleans up the distributed process group."""
