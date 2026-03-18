@@ -14,6 +14,7 @@ Defines the core abstractions that all solvers build on:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -182,6 +183,7 @@ class SolverBase(DistributedEnvironment):
         t_init: torch.Tensor | None = None,
         t_final: torch.Tensor | None = None,
         is_training: bool | None = None,
+        output_speed_info: bool = False,
         dtype: torch.dtype = torch.float64,
         device: str | None = None,
         *args,
@@ -204,6 +206,9 @@ class SolverBase(DistributedEnvironment):
             t_init: Lower bound of integration. Shape: [T].
             t_final: Upper bound of integration. Shape: [T].
             is_training: If False, disables training mode (no gradient computation). If unspecified it will infer training mode by 'ode_fxn'.
+            output_speed_info: If True, logs timing information for each
+                sub-operation during integration to a dedicated file
+                ``torchpathdiffeq_speed.log``.
             dtype: Floating point precision for all computations. Supported:
                 torch.float64, torch.float32, torch.float16.
             device: Device string (e.g. 'cuda', 'cpu'). Passed to
@@ -213,6 +218,17 @@ class SolverBase(DistributedEnvironment):
                 DistributedEnvironment.
         """
         super().__init__(*args, **kwargs, device_type=device)
+
+        # Speed timing logger — writes to a dedicated file, no other output
+        if output_speed_info:
+            self.speed_logger = logging.getLogger("torchpathdiffeq.speed")
+            self.speed_logger.propagate = False
+            self.speed_logger.setLevel(logging.DEBUG)
+            handler = logging.FileHandler("torchpathdiffeq_speed.log")
+            handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+            self.speed_logger.addHandler(handler)
+        else:
+            self.speed_logger = None
 
         self.method_name = method.lower()
         self.atol = atol
@@ -242,16 +258,16 @@ class SolverBase(DistributedEnvironment):
 
         self._set_dtype(dtype)
 
-    def _infer_training(self, is_training: bool | None = None, ode_fxn: Callable | None = None):
+    def _infer_training(
+        self, is_training: bool | None = None, ode_fxn: Callable | None = None
+    ):
         if is_training is not None:
             self.training = is_training
-        elif ode_fxn is None:
-            self.training = False
-        elif not isinstance(ode_fxn, torch.nn.Module):
+        elif ode_fxn is None or not isinstance(ode_fxn, torch.nn.Module):
             self.training = False
         else:
             self.training = ode_fxn.training
-        
+
     def _set_dtype(self, dtype: torch.dtype) -> None:
         """
         Set the floating-point precision for all solver tensors.
@@ -373,7 +389,7 @@ class SolverBase(DistributedEnvironment):
         t_init = t_init.to(self.dtype).to(self.device)
         t_final = t_final.to(self.dtype).to(self.device)
         y0 = y0.to(self.dtype).to(self.device)
-        
+
         # Determine if in training mode
         self._infer_training(is_training, ode_fxn)
 
@@ -414,7 +430,7 @@ class SolverBase(DistributedEnvironment):
         """
         raise NotImplementedError
 
-    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor: #noqa: ARG002
+    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         """
         Default loss function: returns the integral value itself.
 

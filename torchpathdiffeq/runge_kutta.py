@@ -18,20 +18,27 @@ and an error estimate (using b_error weights from the embedded lower-order
 method). The error estimate drives the adaptive step refinement.
 """
 
-import torch
-from typing import Tuple, Union
+from __future__ import annotations
 
-from .base import steps, get_sampling_type, MethodOutput
-from .parallel_solver import ParallelVariableAdaptiveStepsizeSolver, ParallelUniformAdaptiveStepsizeSolver
+import logging
+
+import torch
+
+from .base import MethodOutput, get_sampling_type, steps
+
+logger = logging.getLogger(__name__)
+from .parallel_solver import (
+    ParallelUniformAdaptiveStepsizeSolver,
+    ParallelVariableAdaptiveStepsizeSolver,
+)
 
 
 def _RK_integral(
-        t: torch.Tensor,
-        y: torch.Tensor,
-        tableau_b: torch.Tensor,
-        y0: torch.Tensor,
-        verbose: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    t: torch.Tensor,
+    y: torch.Tensor,
+    tableau_b: torch.Tensor,
+    y0: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute the Runge-Kutta weighted sum for a batch of integration steps.
 
@@ -56,7 +63,6 @@ def _RK_integral(
             For uniform methods these are the same for all steps [1, C, 1].
             For variable methods these differ per step [N, C, 1].
         y0: Starting accumulator value. Shape: [D].
-        verbose: If True, print intermediate shapes and values for debugging.
 
     Returns:
         Tuple of:
@@ -67,15 +73,13 @@ def _RK_integral(
             - h: Step sizes (t_last - t_first) for each step. Shape: [N, T].
     """
     # Step size: difference between last and first time point in each step
-    h = t[:,-1] - t[:,0]
-    if verbose:
-        print("H", h.shape, h)
+    h = t[:, -1] - t[:, 0]
+    logger.debug("H shape=%s values=%s", h.shape, h)
 
     # Weighted sum of integrand evaluations within each step, scaled by step size.
     # tableau_b*y: weight each evaluation, dim=1 sums over C quadrature points
-    RK_steps = h*torch.sum(tableau_b*y, dim=1)
-    if verbose:
-        print("RK STEPS", RK_steps.shape, RK_steps)
+    RK_steps = h * torch.sum(tableau_b * y, dim=1)
+    logger.debug("RK_steps shape=%s values=%s", RK_steps.shape, RK_steps)
     # Sum all step contributions to get the total integral
     integral = y0 + torch.sum(RK_steps, dim=0)
     return integral, RK_steps, h
@@ -97,11 +101,8 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
         super().__init__(*args, **kwargs)
 
     def _calculate_integral(
-            self,
-            t: torch.Tensor,
-            y: torch.Tensor,
-            y0: torch.Tensor
-        ) -> MethodOutput:
+        self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor
+    ) -> MethodOutput:
         """
         Compute RK integral and error estimate for a batch of steps.
 
@@ -131,11 +132,10 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
             integral_error=integral_error.detach(),
             sum_steps=RK_steps,
             sum_step_errors=step_errors.detach(),
-            h=h
+            h=h,
         )
 
-
-    def _get_tableau_b(self, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_tableau_b(self, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Return the fixed tableau b and b_error weights.
 
@@ -151,9 +151,9 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
             Tuple of (b, b_error) with shape [C, 1] or [1, C, 1], ready
             for broadcasting with y of shape [N, C, D].
         """
-        return self.method.tableau.b.unsqueeze(-1),\
-            self.method.tableau.b_error.unsqueeze(-1)
-
+        return self.method.tableau.b.unsqueeze(
+            -1
+        ), self.method.tableau.b_error.unsqueeze(-1)
 
     def _get_num_tableau_c(self) -> int:
         """
@@ -185,11 +185,8 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
         super().__init__(*args, **kwargs)
 
     def _calculate_integral(
-            self,
-            t: torch.Tensor,
-            y: torch.Tensor,
-            y0: torch.Tensor
-        ) -> MethodOutput:
+        self, t: torch.Tensor, y: torch.Tensor, y0: torch.Tensor
+    ) -> MethodOutput:
         """
         Compute RK integral and error estimate with dynamically computed weights.
 
@@ -217,10 +214,10 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
             integral_error=integral_error,
             sum_steps=RK_steps,
             sum_step_errors=step_errors,
-            h=h
+            h=h,
         )
 
-    def _get_tableau_b(self, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_tableau_b(self, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute tableau b weights from the actual quadrature point positions.
 
@@ -237,8 +234,8 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
         """
         # Normalize time points to [0, 1] within each step:
         # shift so first point is 0, then divide by step size
-        norm_dt = t - t[:,0,None]
-        norm_dt = norm_dt/norm_dt[:,-1,None]
+        norm_dt = t - t[:, 0, None]
+        norm_dt = norm_dt / norm_dt[:, -1, None]
         # Compute weights from normalized positions
         b, b_error = self.method.tableau_b(norm_dt)
         return b.unsqueeze(-1), b_error.unsqueeze(-1)
@@ -254,10 +251,8 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
 
 
 def get_parallel_RK_solver(
-        sampling_type: Union[str, steps],
-        *args,
-        **kwargs
-    ) -> Union[RKParallelUniformAdaptiveStepsizeSolver, RKParallelVariableAdaptiveStepsizeSolver]:
+    sampling_type: str | steps, *args, **kwargs
+) -> RKParallelUniformAdaptiveStepsizeSolver | RKParallelVariableAdaptiveStepsizeSolver:
     """
     Factory function to create the appropriate parallel RK solver.
 
@@ -285,4 +280,4 @@ def get_parallel_RK_solver(
     elif sampling_type == steps.ADAPTIVE_VARIABLE:
         return RKParallelVariableAdaptiveStepsizeSolver(*args, **kwargs)
     else:
-        raise ValueError()
+        raise ValueError
