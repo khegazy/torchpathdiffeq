@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import time
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, override
 
 import numpy as np
@@ -58,7 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ParallelAdaptiveStepsizeSolver(SolverBase):
+class ParallelAdaptiveStepsizeSolver(ABC, SolverBase):
     """
     Base class for parallel adaptive-stepsize numerical integration.
 
@@ -161,6 +162,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         """
         raise NotImplementedError
 
+    @abstractmethod
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
@@ -188,8 +190,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             Tuple of (y_new, t_new): integrand evaluations and time points
             for the replacement (split) steps.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def _merge_excess_t(self, t, sum_steps, sum_step_errors, remove_idxs):
         """
         Merges neighboring time steps or removes and one time steps and extends
@@ -204,7 +206,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t : [N, C, T]
             removed_idxs : [n]
         """
-        raise NotImplementedError
 
     def _error_norm(self, error: torch.Tensor) -> torch.Tensor:
         """
@@ -934,9 +935,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t0 = time.time()
             t_input = torch.tile(t_test, (N, 1))
             mem_before = self._get_memory()
-            if self.ode_unit_mem_size is not None:
-                if self.ode_unit_mem_size * N > mem_before[0]:
-                    return
+            if (
+                self.ode_unit_mem_size is not None
+                and self.ode_unit_mem_size * N > mem_before[0]
+            ):
+                return
             result = ode_fxn(t_input, *ode_args)
             mem_after = self._get_memory()
             del result
@@ -1058,15 +1061,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         if t is not None:
             assert len(t.shape) == 2
             t = t.to(self.dtype).to(self.device)
-            if t_init is not None or t_final is not None:
-                assert (
-                    t_init is not None and t_final is not None
-                ), "Must provide both 't_init' and 't_final' or leave them both as None"
+            if t_init is not None:
                 t_init = t_init.to(self.dtype).to(self.device)
-                t_final = t_final.to(self.dtype).to(self.device)
                 assert torch.allclose(
                     t[0], t_init, atol=self.atol_assert, rtol=self.rtol_assert
                 )
+            if t_final is not None:
+                t_final = t_final.to(self.dtype).to(self.device)
                 assert torch.allclose(
                     t[-1], t_final, atol=self.atol_assert, rtol=self.rtol_assert
                 )
@@ -1094,9 +1095,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         total_mem_usage = (
             self.total_mem_usage if total_mem_usage is None else total_mem_usage
         )
-        assert (
-            total_mem_usage <= 1.0 and total_mem_usage > 0
-        ), "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
+        MEM_ERROR = "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
+        assert total_mem_usage <= 1.0, MEM_ERROR
+        assert total_mem_usage > 0, MEM_ERROR
         # Check if this is the same integrand as the previous call (for warm-starting)
         same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
         # Benchmark memory footprint on first call with a new integrand
@@ -1465,11 +1466,12 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         steps = self.method.tableau.c.unsqueeze(-1) * dt
         return t_left.unsqueeze(1) + steps
 
+    @override
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
         idxs_add: torch.Tensor,
-        y: torch.Tensor,
+        _y: torch.Tensor,
         t: torch.Tensor,
         ode_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1508,6 +1510,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, t_eval_steps
 
+    @override
     def _merge_excess_t(
         self,
         t: torch.Tensor,
@@ -1672,6 +1675,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return t_left + steps*(t_right - t_left)
     """
 
+    @override
     def _evaluate_adaptive_y(
         self,
         ode_fxn: Callable,
@@ -1744,6 +1748,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
 
         return y_add_combined, t_add_combined
 
+    @override
     def _merge_excess_t(
         self,
         t: torch.Tensor,
