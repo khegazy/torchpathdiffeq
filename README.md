@@ -12,15 +12,26 @@ torchpathdiffeq (TPD) is a PyTorch library that makes path integral computation 
 pip install torchpathdiffeq
 ```
 
-Or install from source for development:
+Or install from source:
 
 ```bash
 git clone https://github.com/khegazy/torchpathdiffeq.git
 cd torchpathdiffeq
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 **Requirements**: Python 3.10+, PyTorch, torchdiffeq, einops, psutil
+
+### For Developers
+
+Install with dev dependencies and enable pre-commit hooks:
+
+```bash
+pip install -e .[dev]
+pre-commit install
+```
+
+This sets up linting (ruff) and spell checking (typos) to run automatically on every `git commit`.
 
 ## Quick Start
 
@@ -33,9 +44,11 @@ TPD computes definite integrals of the form $\int_{t_i}^{t_f} f(t, \phi(t))\, dt
 def my_integrand(t):
     return torch.sin(t)
 
+
 # Multi-dimensional integrand: returns shape [N, 2]
 def vector_integrand(t):
     return torch.cat([torch.sin(t), torch.cos(t)], dim=-1)
+
 
 # Integrand that evaluates a neural network path phi_theta(t)
 def path_loss(t):
@@ -53,7 +66,7 @@ from torchpathdiffeq import ode_path_integral
 # Compute integral of sin(t) from 0 to pi (exact answer: 2.0)
 result = ode_path_integral(
     ode_fxn=lambda t: torch.sin(t),
-    method='dopri5',
+    method="dopri5",
     t_init=torch.tensor([0.0]),
     t_final=torch.tensor([3.14159265]),
 )
@@ -71,7 +84,7 @@ from torchpathdiffeq import get_parallel_RK_solver, steps
 # Create the solver once
 solver = get_parallel_RK_solver(
     sampling_type=steps.ADAPTIVE_UNIFORM,
-    method='dopri5',
+    method="dopri5",
     atol=1e-6,
     rtol=1e-4,
     remove_cut=0.1,
@@ -102,28 +115,35 @@ import torch
 import torch.nn as nn
 from torchpathdiffeq import get_parallel_RK_solver, steps
 
+
 # A neural network representing a path phi_theta(t)
 class PathNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(1, 64), nn.Tanh(),
-            nn.Linear(64, 64), nn.Tanh(),
+            nn.Linear(1, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
             nn.Linear(64, 1),
         )
+
     def forward(self, t):
         return self.net(t)
 
+
 path_net = PathNet()
 optimizer = torch.optim.Adam(path_net.parameters(), lr=1e-3)
+
 
 # Define a loss integrand that evaluates the path
 def loss_integrand(t):
     return (path_net(t) - target_function(t)) ** 2
 
+
 solver = get_parallel_RK_solver(
     sampling_type=steps.ADAPTIVE_UNIFORM,
-    method='bosh3',
+    method="bosh3",
     atol=1e-5,
     rtol=1e-3,
 )
@@ -158,14 +178,14 @@ result = solver.integrate(
 ```python
 result = solver.integrate(ode_fxn=my_integrand)
 
-result.integral         # Computed integral value, shape [D]
-result.integral_error   # Estimated total error, shape [D]
-result.t                # Evaluation time points, shape [N, C, T]
-result.y                # Integrand values at each point, shape [N, C, D]
-result.sum_steps        # Per-step contributions to the integral, shape [N, D]
-result.error_ratios     # Per-step error ratios (< 1 means accepted), shape [N]
-result.t_optimal        # Optimized mesh for reuse, shape [M, T]
-result.gradient_taken   # Whether .backward() was already called (always True if take_gradient=True)
+result.integral  # Computed integral value, shape [D]
+result.integral_error  # Estimated total error, shape [D]
+result.t  # Evaluation time points, shape [N, C, T]
+result.y  # Integrand values at each point, shape [N, C, D]
+result.sum_steps  # Per-step contributions to the integral, shape [N, D]
+result.error_ratios  # Per-step error ratios (< 1 means accepted), shape [N]
+result.t_optimal  # Optimized mesh for reuse, shape [M, T]
+result.gradient_taken  # Whether .backward() was already called (always True if take_gradient=True)
 ```
 
 ### Choosing a Method and Tolerances
@@ -188,7 +208,7 @@ Error is controlled by `atol` (absolute) and `rtol` (relative). A step is accept
 # Tight tolerances for high accuracy
 result = ode_path_integral(
     ode_fxn=my_function,
-    method='dopri5',
+    method="dopri5",
     atol=1e-10,
     rtol=1e-8,
     t_init=torch.tensor([0.0]),
@@ -204,14 +224,15 @@ Traditional ODE solvers are inherently sequential: each step depends on the prev
 # The ODE: dx/dt = f(t, x), x(0) = x0
 # Train phi_theta(t) such that d/dt phi_theta(t) ≈ f(t, phi_theta(t))
 
+
 def ode_residual_loss(t):
     t = t.requires_grad_(True)
     phi = path_net(t)
     dphi_dt = torch.autograd.grad(
-        phi, t, grad_outputs=torch.ones_like(phi),
-        create_graph=True
+        phi, t, grad_outputs=torch.ones_like(phi), create_graph=True
     )[0]
     return (dphi_dt - f(t, phi)) ** 2
+
 
 # Integrate the residual over [t0, T] — the integral is the loss
 result = solver.integrate(ode_fxn=ode_residual_loss, t_init=t0, t_final=T)
@@ -236,8 +257,8 @@ TPD offers two sampling strategies for placing quadrature points within each int
 # Variable sampling — reuses evaluations on split, good for expensive integrands
 result = ode_path_integral(
     ode_fxn=expensive_function,
-    method='generic3',
-    sampling='variable',
+    method="generic3",
+    sampling="variable",
     atol=1e-6,
     rtol=1e-4,
 )
@@ -262,8 +283,8 @@ For comparison or when the integrand depends on accumulated state (traditional O
 ```python
 result = ode_path_integral(
     ode_fxn=lambda t, y: -y,  # dy/dt = -y (serial mode uses f(t, y) signature)
-    method='dopri5',
-    computation='serial',
+    method="dopri5",
+    computation="serial",
     y0=torch.tensor([1.0]),
     t_init=torch.tensor([0.0]),
     t_final=torch.tensor([1.0]),
@@ -339,7 +360,7 @@ TPD exploits this by:
 
 ## Speed and Complexity
 
-For a single integration, TPD is generally **two orders of magnitude faster** than sequential integrators. Let us consider an integral that requires O(N) integration steps, and the smallest integration step requires R mesh refinements. A sequential integrator scales superlinearly as O(RN). TPD instead requires O(RN/G) evaluations, since TPD batches G integration steps to simultaneosly evaluate. Typically G is of O(100) and often N/G < 1, making TPD's complexity O(1). After convergence, the solver **prunes** the mesh by merging step pairs with very low error, producing an optimized mesh that is cached for subsequent calls.
+For a single integration, TPD is generally **two orders of magnitude faster** than sequential integrators. Let us consider an integral that requires O(N) integration steps, and the smallest integration step requires R mesh refinements. A sequential integrator scales superlinearly as O(RN). TPD instead requires O(RN/G) evaluations, since TPD batches G integration steps to simultaneously evaluate. Typically G is of O(100) and often N/G < 1, making TPD's complexity O(1). After convergence, the solver **prunes** the mesh by merging step pairs with very low error, producing an optimized mesh that is cached for subsequent calls.
 
 On repeated integrations, where the path has changed due to optimization, using the pruned mesh as a warm-starting often eliminates refinement entirely — the cached mesh generally satisfies the error tolerance, so integration completes in a single parallel pass in the typical case where G > N. In practice, when the pruned mesh needs to be updated this requires 1 or 2 extra calls to the GPU.
 
@@ -350,23 +371,34 @@ You can compare TPD's parallel solver against the sequential torchdiffeq backend
 ```python
 import time
 import torch
-from torchpathdiffeq import ode_path_integral, get_parallel_RK_solver, SerialAdaptiveStepsizeSolver, steps
+from torchpathdiffeq import (
+    ode_path_integral,
+    get_parallel_RK_solver,
+    SerialAdaptiveStepsizeSolver,
+    steps,
+)
 
-device = 'cuda'  # or 'cpu'
-method = 'dopri5'
+device = "cuda"  # or 'cpu'
+method = "dopri5"
 atol, rtol = 1e-9, 1e-7
 t_init = torch.tensor([0.0], dtype=torch.float64, device=device)
 t_final = torch.tensor([1.0], dtype=torch.float64, device=device)
 y0 = torch.tensor([0.0], dtype=torch.float64, device=device)
 
+
 def my_integrand(t, y=None):
     return torch.sin(t * 10) ** 2
 
+
 # --- Sequential (torchdiffeq) ---
 serial = SerialAdaptiveStepsizeSolver(
-    ode_fxn=my_integrand, method=method,
-    atol=atol, rtol=rtol,
-    t_init=t_init, t_final=t_final, device=device,
+    ode_fxn=my_integrand,
+    method=method,
+    atol=atol,
+    rtol=rtol,
+    t_init=t_init,
+    t_final=t_final,
+    device=device,
 )
 t0 = time.time()
 for _ in range(100):
@@ -376,16 +408,22 @@ serial_time = (time.time() - t0) / 100
 # --- Parallel (torchpathdiffeq) ---
 parallel = get_parallel_RK_solver(
     sampling_type=steps.ADAPTIVE_UNIFORM,
-    ode_fxn=my_integrand, method=method,
-    atol=atol, rtol=rtol,
-    t_init=t_init, t_final=t_final, device=device,
+    ode_fxn=my_integrand,
+    method=method,
+    atol=atol,
+    rtol=rtol,
+    t_init=t_init,
+    t_final=t_final,
+    device=device,
 )
 t0 = time.time()
 for _ in range(100):
     parallel.integrate(y0=y0)
 parallel_time = (time.time() - t0) / 100
 
-print(f"Sequential: {serial_time:.4f}s | Parallel: {parallel_time:.4f}s | Speedup: {serial_time/parallel_time:.1f}x")
+print(
+    f"Sequential: {serial_time:.4f}s | Parallel: {parallel_time:.4f}s | Speedup: {serial_time/parallel_time:.1f}x"
+)
 ```
 
 ## License
