@@ -89,9 +89,9 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
         ode_fxn, t_init, t_final, y0 = self._check_variables(
             ode_fxn, t_init, t_final, y0, None
         )
-        assert (
-            ode_fxn is not None
-        ), "Must specify ode_fxn or pass it during class initialization."
+        assert ode_fxn is not None, (
+            "Must specify ode_fxn or pass it during class initialization."
+        )
         if t is None:
             t = torch.tensor([t_init, t_final], dtype=torch.float64, device=self.device)
         else:

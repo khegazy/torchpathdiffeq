@@ -843,9 +843,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 record[key] = record[key][sorted_idxs]
         all_ascending = torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
         all_descending = torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] < 0)
-        assert (
-            all_ascending or all_descending
-        ), "Times are required to be either in ascending or descending order"
+        assert all_ascending or all_descending, (
+            "Times are required to be either in ascending or descending order"
+        )
         return record
 
     def _get_cpu_memory(self) -> tuple[float, float]:
@@ -1070,9 +1070,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 )
             t_init = t[0]
             t_final = t[-1]
-            assert (
-                t_init < t_final
-            ), "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider effects to your ode_fxn."
+            assert t_init < t_final, (
+                "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider effects to your ode_fxn."
+            )
         else:
             t_init = self.t_init if t_init is None else t_init
             t_final = self.t_final if t_final is None else t_final
@@ -1086,9 +1086,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         ode_fxn, t_init, t_final, y0 = self._check_variables(
             ode_fxn, t_init, t_final, y0, is_training
         )
-        assert (
-            t_init < t_final
-        ), "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
+        assert t_init < t_final, (
+            "Integrator requires t_init < t_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
+        )
         total_mem_usage = (
             self.total_mem_usage if total_mem_usage is None else total_mem_usage
         )
@@ -1100,15 +1100,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         # Benchmark memory footprint on first call with a new integrand
         if not same_ode_fxn and max_batch is None:
             self._setup_memory_checks(ode_fxn, t_init, ode_args=ode_args)
-        assert (
-            self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1)
-        ), "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
+            "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        )
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
 
         # Make sure ode_fxn exists and provides the correct output
-        assert (
-            ode_fxn is not None
-        ), "Must specify ode_fxn or pass it during class initialization."
+        assert ode_fxn is not None, (
+            "Must specify ode_fxn or pass it during class initialization."
+        )
         test_output = ode_fxn(
             torch.tensor([[t_init]], dtype=self.dtype, device=self.device), *ode_args
         )
@@ -1241,9 +1241,9 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             if self.speed_logger:
                 self.speed_logger.debug("calculate errors: %s", time.time() - t0)
             assert len(y_step_eval) == len(error_ratios)
-            assert (
-                len(y_step_eval) - 1 == len(error_ratios_2steps)
-            ), f" y: {y_step_eval.shape} | ratios: {error_ratios_2steps.shape} | t: {t.shape}"
+            assert len(y_step_eval) - 1 == len(error_ratios_2steps), (
+                f" y: {y_step_eval.shape} | ratios: {error_ratios_2steps.shape} | t: {t.shape}"
+            )
             logger.debug("error_ratios: %s", error_ratios)
             logger.debug("error_ratios_2steps: %s", error_ratios_2steps)
 
@@ -1603,9 +1603,9 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     def __init__(self, *args, **kwargs) -> None:
         """Initialize the variable solver and set up its RK method."""
         super().__init__(*args, **kwargs)
-        assert (
-            self.method_name in VARIABLE_METHODS
-        ), f"Cannot find method '{self.method_name}' in supported methods: {list(VARIABLE_METHODS.keys())}"
+        assert self.method_name in VARIABLE_METHODS, (
+            f"Cannot find method '{self.method_name}' in supported methods: {list(VARIABLE_METHODS.keys())}"
+        )
         self.method = VARIABLE_METHODS[self.method_name]()
         self.method.to_dtype(self.dtype)
         self.order = self.method.order
