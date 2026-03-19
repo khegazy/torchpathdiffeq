@@ -107,7 +107,7 @@ select = [
   "T20",    # flake8-print
   "TCH",    # flake8-type-checking
   "TID",    # flake8-tidy-imports
-  "TRIO",   # flake8-trio
+  "ASYNC1", # flake8-trio (renamed from TRIO)
   "UP",     # pyupgrade
   "W",      # pycodestyle warning
   "YTT",    # flake8-2020
@@ -117,7 +117,7 @@ ignore = [
   "ISC001",   # single-line-implicit-string-concatenation
   "PERF203",  # try-except-in-loop
   "PLR",      # Design related pylint codes
-  "PT004",    # Fixture does not return anything
+
   "PT011",    # pytest.raises
   "PT012",    # pytest.raises
   "RET505",   # Unnecessary `elif` after `return`
