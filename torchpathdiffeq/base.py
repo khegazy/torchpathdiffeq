@@ -262,6 +262,10 @@ class SolverBase(ABC, DistributedEnvironment):
     def _infer_training(
         self, is_training: bool | None = None, ode_fxn: Callable | None = None
     ):
+        """Set solver training mode from explicit flag or ode_fxn's module state.
+
+        Priority: explicit is_training > ode_fxn.training (if nn.Module) > False.
+        """
         if is_training is not None:
             self.training = is_training
         elif ode_fxn is None or not isinstance(ode_fxn, torch.nn.Module):

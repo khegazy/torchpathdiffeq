@@ -32,10 +32,12 @@ class _ExpIntegrand(nn.Module):
     __name__ = "_ExpIntegrand"
 
     def __init__(self, scale=1.0):
+        """Initialize with a learnable scale parameter."""
         super().__init__()
         self.scale = nn.Parameter(torch.tensor([scale], dtype=torch.float64))
 
     def forward(self, t, *args):
+        """Evaluate scale * (exp(-2t) + 3*exp(-3t)), returning shape [N, 1]."""
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
         return self.scale * (torch.exp(-2 * t) + 3 * torch.exp(-3 * t))
@@ -63,6 +65,7 @@ class _PathIntegrand(nn.Module):
     __name__ = "_PathIntegrand"
 
     def __init__(self, n_control=5):
+        """Initialize with n_control learnable 2D offset points."""
         super().__init__()
         self.offsets = nn.Parameter(
             torch.randn(n_control, 2, dtype=torch.float64) * 0.1
@@ -75,6 +78,7 @@ class _PathIntegrand(nn.Module):
         self.register_buffer("ws_delta", (_WS_MIN_FINAL - _WS_MIN_INIT).double())
 
     def forward(self, t, *args):
+        """Evaluate the WS potential along the parameterized path, returning [N, 1]."""
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
         # Base linear path: [N, 2]
@@ -97,6 +101,7 @@ class _DerivativeNet(nn.Module):
     __name__ = "_DerivativeNet"
 
     def __init__(self, hidden=32):
+        """Initialize a 2-layer tanh MLP with given hidden size."""
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(1, hidden, dtype=torch.float64),
@@ -107,6 +112,7 @@ class _DerivativeNet(nn.Module):
         )
 
     def forward(self, t, *args):
+        """Pass t through the MLP, returning shape [N, 1]."""
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
         return self.net(t)

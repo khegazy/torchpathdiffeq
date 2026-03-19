@@ -131,6 +131,7 @@ class ScaledIntegrand(nn.Module):
         self.scale = nn.Parameter(torch.tensor([scale], dtype=torch.float64))
 
     def forward(self, t, *args):
+        """Evaluate scale * t^2, returning shape [N, 1]."""
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
         return self.scale * t**2

@@ -38,6 +38,7 @@ class SerialAdaptiveStepsizeSolver(SolverBase):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the serial solver wrapping torchdiffeq."""
         super().__init__(*args, **kwargs)
 
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:

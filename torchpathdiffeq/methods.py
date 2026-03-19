@@ -89,6 +89,7 @@ class MethodClass:
     tableau: _Tableau
 
     def __init__(self, order: int, tableau: _Tableau) -> None:
+        """Initialize with the method's convergence order and Butcher tableau."""
         self.order = order
         self.tableau = tableau
 
@@ -200,6 +201,7 @@ class _VariableSubclass(ABC):
     """
 
     def __init__(self, device: str | torch.device | None = None) -> None:
+        """Initialize with an optional device for tensor placement."""
         self.device = device
 
     @abstractmethod
@@ -228,6 +230,7 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
     n_tableau_c = 2
 
     def __init__(self, device: str | torch.device | None = None) -> None:
+        """Initialize the 2nd-order variable method using adaptive Heun's tableau."""
         super().__init__(device)
         self.device = device
         self.tableau = _ADAPTIVE_HEUN.tableau
@@ -287,6 +290,7 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
     n_tableau_c = 3
 
     def __init__(self, device: str | torch.device | None = None) -> None:
+        """Initialize the 3rd-order variable method with Sanderse-Veldman weights."""
         super().__init__(device)
         self.device = device
         # Reference weights (trapezoidal rule) used for error estimation

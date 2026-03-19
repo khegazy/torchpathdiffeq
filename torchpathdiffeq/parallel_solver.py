@@ -1367,6 +1367,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the uniform solver and set up its RK method."""
         super().__init__(*args, **kwargs)
         self._setup_method(self.dtype)
 
@@ -1600,6 +1601,7 @@ class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the variable solver and set up its RK method."""
         super().__init__(*args, **kwargs)
         assert (
             self.method_name in VARIABLE_METHODS

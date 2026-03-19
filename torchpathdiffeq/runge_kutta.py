@@ -98,6 +98,7 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the uniform RK solver."""
         super().__init__(*args, **kwargs)
 
     def _calculate_integral(
@@ -182,6 +183,7 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the variable RK solver."""
         super().__init__(*args, **kwargs)
 
     def _calculate_integral(

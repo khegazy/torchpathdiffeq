@@ -32,6 +32,7 @@ class _DummyModule(nn.Module):
     """Minimal nn.Module for _infer_training tests."""
 
     def forward(self, t, *args):
+        """Return t unchanged, ensuring at least 2D output."""
         while len(t.shape) < 2:
             t = t.unsqueeze(0)
         return t

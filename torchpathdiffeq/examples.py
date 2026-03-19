@@ -225,6 +225,7 @@ def damped_sine_solution(
     _w = 2 * torch.pi * w
 
     def numerator(t, _w, a):
+        """Evaluate the antiderivative numerator exp(-at)(a*sin(wt) + w*cos(wt))."""
         t = torch.tensor([t])
         return torch.exp(-a * t) * (a * torch.sin(_w * t) + _w * torch.cos(_w * t))
 
