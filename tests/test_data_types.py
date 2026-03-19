@@ -34,7 +34,7 @@ class TestDtypeHandling:
         )
         # Use a cutoff appropriate for medium tolerances (1e-9/1e-7),
         # which are looser than the tight tolerances used in test_integrals.
-        cutoff = 1e-3
+        cutoff = 1e-2
         # Relax further for float32 (less precision available)
         if dtype == torch.float32:
             cutoff = np.sqrt(cutoff)

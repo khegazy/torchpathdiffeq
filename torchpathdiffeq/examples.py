@@ -228,7 +228,7 @@ def damped_sine_solution(
         t = torch.tensor([t])
         return torch.exp(-a * t) * (a * torch.sin(_w * t) + _w * torch.cos(_w * t))
 
-    return -1 * (numerator(t_final, w, a) - numerator(t_init, w, a)) / (a**2 + _w**2)
+    return -1 * (numerator(t_final, _w, a) - numerator(t_init, _w, a)) / (a**2 + _w**2)
 
 
 # ---------------------------------------------------------------------------

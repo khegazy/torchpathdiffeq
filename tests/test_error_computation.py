@@ -116,7 +116,7 @@ class TestRecRemove:
         result = self.solver._rec_remove(mask.clone())
         self._check_no_adjacent(result)
         assert result[0] == True  # noqa: E712
-        assert result[2] is True
+        assert result[2] == True  # noqa: E712
 
     def test_long_alternating(self):
         """Already alternating mask of length 20 is unchanged."""
