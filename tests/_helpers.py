@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+from torch import nn
 
 from torchpathdiffeq import (
     UNIFORM_METHODS,
@@ -113,3 +114,23 @@ def assert_step_continuity(integral_output):
     assert torch.allclose(
         integral_output.t[1:, 0, :], integral_output.t[:-1, -1, :]
     ), "Consecutive steps do not share boundary points"
+
+
+# ---------------------------------------------------------------------------
+# Parameterized nn.Module integrands for gradient tests
+# ---------------------------------------------------------------------------
+
+
+class ScaledIntegrand(nn.Module):
+    """f(t) = scale * t^2, with learnable scale. Returns [N, 1]."""
+
+    __name__ = "ScaledIntegrand"
+
+    def __init__(self, scale=2.0):
+        super().__init__()
+        self.scale = nn.Parameter(torch.tensor([scale], dtype=torch.float64))
+
+    def forward(self, t, *args):
+        while len(t.shape) < 2:
+            t = t.unsqueeze(0)
+        return self.scale * t**2
