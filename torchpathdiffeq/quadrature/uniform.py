@@ -126,31 +126,32 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
                     assert torch.allclose(t[:-1,-1], t[1:,0], atol=self.atol_assert, rtol=self.rtol_assert)
                 t = t[:,torch.tensor([0,-1], dtype=torch.int, device=self.device),:]
                 t = torch.flatten(t, start_dim=0, end_dim=1)
-        return self._t_step_interpolate(t[:-1], t[1:])
+        return self._compute_nodes(t[:-1], t[1:])
     """
 
-    def _t_step_interpolate(
-        self, t_left: torch.Tensor, t_right: torch.Tensor
+    def _compute_nodes(
+        self, mesh_left: torch.Tensor, mesh_right: torch.Tensor
     ) -> torch.Tensor:
         """
         Place quadrature points within each step using the tableau's c values.
 
         For uniform sampling, quadrature points are at fixed fractional positions
-        within each step: t_i = t_left + c_i * (t_right - t_left). For example,
-        with c = [0, 0.5, 1], points are placed at the start, midpoint, and end.
+        within each step: node_i = mesh_left + c_i * (mesh_right - mesh_left).
+        For example, with c = [0, 0.5, 1], points are placed at the start,
+        midpoint, and end.
 
         Args:
-            t_left: Left boundary of each step. Shape: [N, T].
-            t_right: Right boundary of each step. Shape: [N, T].
+            mesh_left: Left barrier of each step. Shape: [N, T].
+            mesh_right: Right barrier of each step. Shape: [N, T].
 
         Returns:
             Quadrature point positions. Shape: [N, C, T] where C is the
             number of tableau c values.
         """
         # Compute step width and scale by tableau c positions
-        dt = (t_right - t_left).unsqueeze(1)
+        dt = (mesh_right - mesh_left).unsqueeze(1)
         steps = self.method.tableau.c.unsqueeze(-1) * dt
-        return t_left.unsqueeze(1) + steps
+        return mesh_left.unsqueeze(1) + steps
 
     def _evaluate_adaptive_y(
         self,
@@ -185,12 +186,16 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         """
         T = nodes.shape[-1]
         # Compute the midpoint of each failed step
-        t_mid = (nodes[idxs_add, -1] + nodes[idxs_add, 0]) / 2.0
-        # Build left and right boundaries for the two new sub-steps
-        t_left = torch.concatenate([nodes[idxs_add, None, 0], t_mid[:, None]], dim=1)
-        t_right = torch.concatenate([t_mid[:, None], nodes[idxs_add, None, -1]], dim=1)
+        mesh_mid = (nodes[idxs_add, -1] + nodes[idxs_add, 0]) / 2.0
+        # Build left and right barriers for the two new sub-steps
+        mesh_left = torch.concatenate(
+            [nodes[idxs_add, None, 0], mesh_mid[:, None]], dim=1
+        )
+        mesh_right = torch.concatenate(
+            [mesh_mid[:, None], nodes[idxs_add, None, -1]], dim=1
+        )
         # Place quadrature points in each sub-step and evaluate
-        nodes_new = self._t_step_interpolate(t_left.view(-1, T), t_right.view(-1, T))
+        nodes_new = self._compute_nodes(mesh_left.view(-1, T), mesh_right.view(-1, T))
         y_add = f(nodes_new.view(-1, T), *ode_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, nodes_new
@@ -228,7 +233,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
 
         # Create merged steps spanning from the left edge of the first step
         # to the right edge of the second step, with new c-based quadrature points
-        nodes_replace = self._t_step_interpolate(
+        nodes_replace = self._compute_nodes(
             nodes[remove_idxs, 0], nodes[remove_idxs + 1, -1]
         )
 

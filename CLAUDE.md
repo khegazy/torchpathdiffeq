@@ -79,15 +79,15 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 | `test_rk_integral.py` | `_RK_integral`: constant / linear / multi-step / multi-dim / zero-width / variable-b inputs |
 | `test_base_and_methods.py` | `get_sampling_type`, `_Tableau` dtype conversion, `_get_method` factory, weight formulas |
 | `test_error_computation.py` | `_error_norm`, `_rec_remove`, `_compute_error_ratios_absolute`/`_cumulative` |
-| `test_interpolation.py` | `_t_step_interpolate`: endpoints, shapes, monotonicity, tableau-c matching |
+| `test_interpolation.py` | `_compute_nodes`: endpoints, shapes, monotonicity, tableau-c matching |
 | `test_sorted_insert.py` | `_get_sorted_indices` and `_insert_sorted_results` |
 | `test_base_solver.py` | `SolverBase._set_dtype`, `set_dtype_by_input`, `_check_variables`, `_integral_loss` |
 | `test_methods_extra.py` | Variable subclass `tableau_b`, `to_device`, dtype conversion |
 | `test_rk_solver_methods.py` | `adaptive_quadrature` factory, `_get_tableau_b`, `_get_num_tableau_c` |
 | `test_adaptive_steps.py` | `_adaptively_add_steps`: pass/fail/mixed error ratios, midpoint placement |
 | `test_record_and_sort.py` | `_record_results` and `_sort_record` |
-| `test_evaluate_and_merge.py` | `_evaluate_adaptive_y` + `_merge_excess_t` for both uniform and variable solvers |
-| `test_prune_and_optimal.py` | `prune_excess_t`, `_get_optimal_t_step_barriers` |
+| `test_evaluate_and_merge.py` | `_evaluate_adaptive_y` + `_merge_excess_nodes` for both uniform and variable solvers |
+| `test_prune_and_optimal.py` | `prune_excess_t`, `_get_optimal_mesh` |
 | `test_gradient.py` / `test_gradient_integration.py` | Per-batch backward, learnable integrand training loops |
 
 **Snapshot tests** are the regression net for internal refactors: the
@@ -182,20 +182,20 @@ Key tensors: `t: [N, C, T]`, `y: [N, C, D]`, `tableau_b: [1, C, 1]` or
 
 ### Core algorithm (`AdaptiveQuadrature.integrate()` in `quadrature/base.py`)
 
-`t_step_barriers` are boundary points dividing `[mesh_init, mesh_final]`
-into integration steps (panels). Between consecutive barriers, C
-quadrature points are placed per the tableau. `t_step_trackers` is a
-boolean array where `True` means the panel still needs evaluation.
+`mesh` is the boundary array dividing `[mesh_init, mesh_final]` into
+integration steps (panels). Between consecutive barriers, C
+quadrature points (`nodes`) are placed per the tableau. `mesh_trackers`
+is a boolean array where `True` means the panel still needs evaluation.
 
 1. **Initialize barriers.** When `mesh=None`, generate
    ~$\sqrt{N_\text{init}}$ evenly-spaced top-level segments with random
    sub-barriers (random by default — uniform aliases on
    uniform-feature integrands). When `reuse_mesh=True`, seed from the
    cached `mesh_optimal` of the previous successful run.
-2. **Main loop.** While any `t_step_trackers` are `True`:
+2. **Main loop.** While any `mesh_trackers` are `True`:
    - Determine `max_steps` from GPU memory budget or explicit `max_batch`.
    - Select up to `max_steps` unevaluated panels.
-   - Place C nodes per panel via `_t_step_interpolate`.
+   - Place C nodes per panel via `_compute_nodes`.
    - Evaluate `f` on all flattened nodes; reshape to `[N, C, D]`.
    - Compute integral + error via `_calculate_integral` (RK weighted
      sum using `b` and `b_error` tableaux).
@@ -206,7 +206,7 @@ boolean array where `True` means the panel still needs evaluation.
    - Record accepted results into the running record.
    - If `take_gradient`: per-batch `loss.backward()`.
 3. **Post-convergence.** Sort the record, compute `mesh_optimal` via
-   `_get_optimal_t_step_barriers` (prune low-error pairs, refine
+   `_get_optimal_mesh` (prune low-error pairs, refine
    high-error gaps), cache for reuse on the next call.
 
 ### Error computation modes

@@ -79,8 +79,8 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         if hasattr(self, "method"):
             self.method.to_dtype(dtype)
 
-    def _t_step_interpolate(
-        self, t_left: torch.Tensor, t_right: torch.Tensor
+    def _compute_nodes(
+        self, mesh_left: torch.Tensor, mesh_right: torch.Tensor
     ) -> torch.Tensor:
         """
         Place initial quadrature points uniformly within each step.
@@ -99,18 +99,18 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         tests/test_exactness.py for the reduction check.
 
         Args:
-            t_left: Left boundary of each step. Shape: [N, T].
-            t_right: Right boundary of each step. Shape: [N, T].
+            mesh_left: Left barrier of each step. Shape: [N, T].
+            mesh_right: Right barrier of each step. Shape: [N, T].
 
         Returns:
             Quadrature point positions. Shape: [N, C, T].
         """
-        dt = (t_right - t_left).unsqueeze(1)
+        dt = (mesh_right - mesh_left).unsqueeze(1)
         # Uniformly-spaced fractions of [0, 1] across C points.
         fractions = torch.linspace(
             0.0, 1.0, self.C, dtype=self.dtype, device=self.device
         ).view(self.C, 1)
-        return t_left.unsqueeze(1) + fractions * dt
+        return mesh_left.unsqueeze(1) + fractions * dt
 
     def _evaluate_adaptive_y(
         self,

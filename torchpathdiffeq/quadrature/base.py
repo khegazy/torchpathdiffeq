@@ -71,7 +71,7 @@ class AdaptiveQuadrature(SolverBase):
     6. Computes an optimal mesh for potential reuse.
 
     Subclasses must implement:
-        - ``_t_step_interpolate(t_left, t_right)``: Place quadrature points within steps.
+        - ``_compute_nodes(mesh_left, mesh_right)``: Place quadrature points within steps.
         - ``_evaluate_adaptive_y(...)``: Evaluate integrand at refined points.
         - ``_merge_excess_nodes(...)``: Merge consecutive low-error steps.
         - ``_calculate_integral(t, y, y0)``: Compute RK integral + error for a batch.
@@ -358,7 +358,7 @@ class AdaptiveQuadrature(SolverBase):
           new steps will be evaluated in the next iteration.
 
         The midpoint barrier is placed at the average of the two neighboring
-        barriers: t_new = (t_left + t_right) / 2.
+        barriers: mesh_new = (mesh_left + mesh_right) / 2.
 
         Args:
             method_output: RK results from the current batch (may be None when
@@ -1312,7 +1312,7 @@ class AdaptiveQuadrature(SolverBase):
             step_idxs = step_idxs[mesh_trackers]
             step_idxs = step_idxs[:max_steps]
             # Place C quadrature points within each selected step
-            nodes = self._t_step_interpolate(mesh[step_idxs], mesh[step_idxs + 1])
+            nodes = self._compute_nodes(mesh[step_idxs], mesh[step_idxs + 1])
             t_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
             assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
             error_ratios = None

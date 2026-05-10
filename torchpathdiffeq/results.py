@@ -99,7 +99,7 @@ class MethodOutput:
             h_i * sum(b_j * y_ij) for step i. Shape: [N, D].
         sum_step_errors: Per-step error estimates from the difference between
             order-p and order-(p-1) methods. Shape: [N, D].
-        h: Step sizes (t_right - t_left) for each step. Shape: [N, T].
+        h: Step sizes (mesh_right - mesh_left) for each step. Shape: [N, T].
     """
 
     integral: torch.Tensor

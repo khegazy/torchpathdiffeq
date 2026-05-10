@@ -22,7 +22,7 @@ class TestUniformEvaluateAdaptiveY:
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
         boundaries = torch.linspace(t_start, t_end, N + 1, dtype=torch.float64)
-        return solver._t_step_interpolate(
+        return solver._compute_nodes(
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
 
@@ -111,7 +111,7 @@ class TestUniformMergeExcessT:
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
         boundaries = torch.linspace(t_start, t_end, N + 1, dtype=torch.float64)
-        return solver._t_step_interpolate(
+        return solver._compute_nodes(
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
 

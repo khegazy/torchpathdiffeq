@@ -16,7 +16,7 @@ class TestPruneExcessT:
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
         boundaries = torch.linspace(t_start, t_end, N + 1, dtype=torch.float64)
-        return solver._t_step_interpolate(
+        return solver._compute_nodes(
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
 
@@ -98,7 +98,7 @@ class TestGetOptimalTStepBarriers:
     def _make_record(self, solver, N, integral_val=1.0, error_scale=0.001):
         """Build a record dict with N uniform steps in [0, 1]."""
         boundaries = torch.linspace(0, 1, N + 1, dtype=torch.float64)
-        t = solver._t_step_interpolate(
+        t = solver._compute_nodes(
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
         return {
