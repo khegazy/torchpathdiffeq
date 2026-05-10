@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from .base import steps
 from .examples import ODE_dict, wolf_schlegel
 from .integrate import integrate
@@ -12,22 +10,3 @@ from .runge_kutta import (
     VariableAdaptiveQuadrature,
     adaptive_quadrature,
 )
-
-
-def setup_logging(level=logging.WARNING, filename=None):
-    """Configure torchpathdiffeq logging.
-
-    Sets up a handler on the ``torchpathdiffeq`` logger hierarchy.
-    Call with ``logging.DEBUG`` to see all debug output.
-
-    Args:
-        level: Logging level (e.g. ``logging.DEBUG``, ``logging.INFO``).
-        filename: If provided, log to this file instead of stderr.
-    """
-    logger = logging.getLogger("torchpathdiffeq")
-    logger.setLevel(level)
-    handler = logging.FileHandler(filename) if filename else logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(handler)

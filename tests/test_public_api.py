@@ -27,7 +27,6 @@ from torchpathdiffeq import (
     VariableAdaptiveQuadrature,
     adaptive_quadrature,
     integrate,
-    setup_logging,
     steps,
     wolf_schlegel,
 )
@@ -44,7 +43,6 @@ class TestPublicExports:
     def test_functions_exist(self):
         assert callable(integrate)
         assert callable(adaptive_quadrature)
-        assert callable(setup_logging)
 
     def test_data_exports_exist(self):
         assert isinstance(UNIFORM_METHODS, dict)

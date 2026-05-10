@@ -19,7 +19,7 @@ Key concepts:
   Shape: [M, T] where M is the number of barriers. Step i spans from
   barrier[i] to barrier[i+1].
 
-- **t_step_trackers**: Boolean array of length M. True means the step starting
+- **mesh_trackers**: Boolean array of length M. True means the step starting
   at that barrier still needs to be evaluated (or re-evaluated after splitting).
 
 - **Batching**: When there are more steps than fit in GPU memory, the solver
@@ -337,7 +337,7 @@ class AdaptiveQuadrature(SolverBase):
         nodes: torch.Tensor | None,
         mesh: torch.Tensor,
         mesh_idxs: torch.Tensor,
-        t_step_trackers: torch.Tensor,
+        mesh_trackers: torch.Tensor,
     ) -> tuple[
         MethodOutput | None,
         torch.Tensor | None,
@@ -350,7 +350,7 @@ class AdaptiveQuadrature(SolverBase):
         Accept accurate steps and split inaccurate ones.
 
         This is the core adaptive refinement operation. For each evaluated step:
-        - If error_ratio < 1.0: ACCEPT the step. Mark it as done in t_step_trackers.
+        - If error_ratio < 1.0: ACCEPT the step. Mark it as done in mesh_trackers.
           Keep its integral contribution.
         - If error_ratio >= 1.0: REJECT the step. Insert a new midpoint barrier
           between its start and end, splitting it into two smaller steps. These
@@ -369,22 +369,22 @@ class AdaptiveQuadrature(SolverBase):
             mesh: All barrier positions. Shape: [M, T].
             mesh_idxs: Indices into mesh for the steps
                 in the current batch. Shape: [N_batch].
-            t_step_trackers: Boolean array tracking which steps need evaluation.
+            mesh_trackers: Boolean array tracking which steps need evaluation.
                 Shape: [M].
 
         Returns:
             Tuple of (method_output, y_step_eval, nodes,
-            mesh_new, t_step_trackers_new, error_ratios_kept):
+            mesh_new, mesh_trackers_new, error_ratios_kept):
                 - method_output: Updated with rejected steps removed.
                 - y_step_eval: Kept evaluations only.
                 - nodes: Kept time points only.
                 - mesh_new: Barriers with new midpoints inserted.
-                - t_step_trackers_new: Updated tracker with new steps marked True.
+                - mesh_trackers_new: Updated tracker with new steps marked True.
                 - error_ratios_kept: Error ratios for accepted steps only.
         """
         # Steps that pass the error tolerance are accepted (done)
         keep_mask = error_ratios < 1.0
-        t_step_trackers[mesh_idxs[keep_mask]] = False
+        mesh_trackers[mesh_idxs[keep_mask]] = False
 
         # Steps that fail the error tolerance need to be split
         remove_mask = error_ratios >= 1.0
@@ -395,7 +395,7 @@ class AdaptiveQuadrature(SolverBase):
             dtype=self.dtype,
             device=self.device,
         )
-        t_step_trackers_new = torch.ones(
+        mesh_trackers_new = torch.ones(
             N_t_add + len(mesh), dtype=bool, device=self.device
         )
 
@@ -407,7 +407,7 @@ class AdaptiveQuadrature(SolverBase):
         idx_offset = torch.cumsum(idx_offset, dim=0)
         idxs_transfer = idx_offset + torch.arange(len(mesh), device=self.device)
         mesh_new[idxs_transfer] = mesh.clone()
-        t_step_trackers_new[idxs_transfer] = t_step_trackers.clone()
+        mesh_trackers_new[idxs_transfer] = mesh_trackers.clone()
 
         # Insert new midpoint barriers between the start and end of rejected steps.
         # The midpoint is placed at (left_barrier + right_barrier) / 2.
@@ -434,7 +434,7 @@ class AdaptiveQuadrature(SolverBase):
             y_step_eval,
             nodes,
             mesh_new,
-            t_step_trackers_new,
+            mesh_trackers_new,
             error_ratios[keep_mask],
         )
 
@@ -525,9 +525,7 @@ class AdaptiveQuadrature(SolverBase):
             nodes=None,
             mesh=mesh_pruned,
             mesh_idxs=torch.arange(len(mesh_pruned) - 1, device=self.device),
-            t_step_trackers=torch.zeros(
-                len(mesh_pruned), dtype=bool, device=self.device
-            ),
+            mesh_trackers=torch.zeros(len(mesh_pruned), dtype=bool, device=self.device),
         )
         _, _, _, mesh_optimal, _, _ = adaptive_step
 
@@ -1282,8 +1280,8 @@ class AdaptiveQuadrature(SolverBase):
             mesh[0] = mesh_init
             mesh[-1] = mesh_final
             assert torch.all(mesh[1:] - mesh[:-1] > 0)
-        t_step_trackers = torch.ones(len(mesh), device=self.device).to(bool)
-        t_step_trackers[-1] = False  # mesh_final cannot be a step starting point
+        mesh_trackers = torch.ones(len(mesh), device=self.device).to(bool)
+        mesh_trackers[-1] = False  # mesh_final cannot be a step starting point
         """
         t_steps_init = self._get_initial_t_steps(
             mesh, mesh_init, mesh_final, enforce_endpoints=True
@@ -1294,8 +1292,8 @@ class AdaptiveQuadrature(SolverBase):
         record = {}
         # === Main integration loop ===
         # Continues until all steps have been evaluated and accepted
-        # (t_step_trackers[i] == False for all i)
-        while torch.any(t_step_trackers):
+        # (mesh_trackers[i] == False for all i)
+        while torch.any(mesh_trackers):
             # Determine how many steps fit in one batch based on memory
             if max_batch is not None:
                 max_steps = max_batch // self.C
@@ -1306,9 +1304,9 @@ class AdaptiveQuadrature(SolverBase):
                 assert max_steps >= len(y), f"{max_steps}  {len(y)}"
 
             # --- Step 1: Select a batch of unevaluated steps ---
-            # Find barrier indices where t_step_trackers is True, take up to max_steps
+            # Find barrier indices where mesh_trackers is True, take up to max_steps
             step_idxs = torch.arange(len(mesh), device=self.device)
-            step_idxs = step_idxs[t_step_trackers]
+            step_idxs = step_idxs[mesh_trackers]
             step_idxs = step_idxs[:max_steps]
             # Place C quadrature points within each selected step
             nodes = self._t_step_interpolate(mesh[step_idxs], mesh[step_idxs + 1])
@@ -1406,7 +1404,7 @@ class AdaptiveQuadrature(SolverBase):
                 y_step_eval,
                 nodes,
                 mesh,
-                t_step_trackers,
+                mesh_trackers,
                 error_ratios,
             ) = self._adaptively_add_steps(
                 method_output=method_output,
@@ -1415,7 +1413,7 @@ class AdaptiveQuadrature(SolverBase):
                 nodes=nodes,
                 mesh=mesh,
                 mesh_idxs=step_idxs,
-                t_step_trackers=t_step_trackers,
+                mesh_trackers=mesh_trackers,
             )
             # Verify barrier ordering after adaptive refinement
             mesh_diff = mesh[1:, 0] - mesh[:-1, 0]
@@ -1426,7 +1424,7 @@ class AdaptiveQuadrature(SolverBase):
             # --- Step 6: Record accepted results and handle gradients ---
             if nodes.shape[0] > 0:
                 take_gradient = take_gradient or (
-                    self.training and (torch.any(t_step_trackers) or take_gradient)
+                    self.training and (torch.any(mesh_trackers) or take_gradient)
                 )
                 intermediate_results = IntegrationResult(
                     integral=method_output.integral,
