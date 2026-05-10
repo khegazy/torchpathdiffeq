@@ -26,7 +26,7 @@ from torchpathdiffeq import (
     UniformAdaptiveQuadrature,
     VariableAdaptiveQuadrature,
     adaptive_quadrature,
-    ode_path_integral,
+    integrate,
     setup_logging,
     steps,
     wolf_schlegel,
@@ -42,7 +42,7 @@ class TestPublicExports:
         assert IntegrationResult is not None
 
     def test_functions_exist(self):
-        assert callable(ode_path_integral)
+        assert callable(integrate)
         assert callable(adaptive_quadrature)
         assert callable(setup_logging)
 
@@ -65,16 +65,16 @@ class TestPublicExports:
 
 
 class TestOdePathIntegralEntryPoint:
-    """The free function `ode_path_integral` works for the simplest case."""
+    """The free function `integrate` works for the simplest case."""
 
     def test_simple_sine_integral(self):
-        result = ode_path_integral(
-            ode_fxn=torch.sin,
+        result = integrate(
+            f=torch.sin,
             method="dopri5",
             atol=1e-8,
             rtol=1e-6,
-            t_init=torch.tensor([0.0], dtype=torch.float64),
-            t_final=torch.tensor([math.pi], dtype=torch.float64),
+            mesh_init=torch.tensor([0.0], dtype=torch.float64),
+            mesh_final=torch.tensor([math.pi], dtype=torch.float64),
         )
         assert isinstance(result, IntegrationResult)
         # int_0^pi sin(t) dt = 2
@@ -82,13 +82,13 @@ class TestOdePathIntegralEntryPoint:
 
     def test_constant_integral(self):
         # int_0^1 1 dt = 1
-        result = ode_path_integral(
-            ode_fxn=torch.ones_like,
+        result = integrate(
+            f=torch.ones_like,
             method="bosh3",
             atol=1e-10,
             rtol=1e-10,
-            t_init=torch.tensor([0.0], dtype=torch.float64),
-            t_final=torch.tensor([1.0], dtype=torch.float64),
+            mesh_init=torch.tensor([0.0], dtype=torch.float64),
+            mesh_final=torch.tensor([1.0], dtype=torch.float64),
         )
         assert abs(result.integral.item() - 1.0) < 1e-9
 
@@ -97,17 +97,17 @@ class TestIntegrationResultFields:
     """The IntegrationResult dataclass exposes the documented fields.
 
     Phase 3 renames: value/error/mesh_*/nodes replace the old
-    ODE-flavored names integral/integral_error/t_optimal/t/t_init/t_final.
+    ODE-flavored names integral/integral_error/t_optimal/t/mesh_init/mesh_final.
     """
 
     def _run(self):
-        return ode_path_integral(
-            ode_fxn=torch.sin,
+        return integrate(
+            f=torch.sin,
             method="dopri5",
             atol=1e-8,
             rtol=1e-6,
-            t_init=torch.tensor([0.0], dtype=torch.float64),
-            t_final=torch.tensor([math.pi], dtype=torch.float64),
+            mesh_init=torch.tensor([0.0], dtype=torch.float64),
+            mesh_final=torch.tensor([math.pi], dtype=torch.float64),
         )
 
     def test_documented_fields_present(self):

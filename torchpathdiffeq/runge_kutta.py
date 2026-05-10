@@ -267,7 +267,7 @@ def adaptive_quadrature(
             ('uniform', 'adaptive_uniform', 'variable', 'adaptive_variable').
         *args: Positional arguments forwarded to the solver constructor.
         **kwargs: Keyword arguments forwarded to the solver constructor
-            (e.g., method, atol, rtol, ode_fxn, etc.).
+            (e.g., method, atol, rtol, f, etc.).
 
     Returns:
         An initialized parallel RK solver instance.

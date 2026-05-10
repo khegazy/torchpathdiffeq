@@ -42,7 +42,7 @@ import pytest
 import torch
 from tests._helpers import make_uniform_solver
 
-from torchpathdiffeq import IntegrationResult, ode_path_integral
+from torchpathdiffeq import IntegrationResult, integrate
 
 # -----------------------------------------------------------------------------
 # Anchor: the no-warm-start path is correct as-is. Phase 1 must not regress it.
@@ -54,13 +54,13 @@ def test_no_warm_start_path_correctness():
     solver's reported error estimate. This anchors the no-warm-start
     path so Phase 1 fixes cannot accidentally regress it.
     """
-    out = ode_path_integral(
-        ode_fxn=lambda t: torch.exp(-(t**2)),
+    out = integrate(
+        f=lambda t: torch.exp(-(t**2)),
         method="dopri5",
         atol=1e-8,
         rtol=1e-8,
-        t_init=torch.tensor([-2.0], dtype=torch.float64),
-        t_final=torch.tensor([2.0], dtype=torch.float64),
+        mesh_init=torch.tensor([-2.0], dtype=torch.float64),
+        mesh_final=torch.tensor([2.0], dtype=torch.float64),
     )
     expected = math.sqrt(math.pi) * math.erf(2.0)
     actual = out.integral.item()
@@ -84,8 +84,8 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
     'previous integrand' identifier must distinguish the two —
     otherwise the warm-start mechanism cannot be made correct.
 
-    Phase 1 fix (Bug B2): the identifier was ``ode_fxn.__name__`` which
-    is ``'<lambda>'`` for every lambda. It now stores ``id(ode_fxn)``,
+    Phase 1 fix (Bug B2): the identifier was ``f.__name__`` which
+    is ``'<lambda>'`` for every lambda. It now stores ``id(f)``,
     a stable per-function value that distinguishes any two function
     objects.
     """
@@ -94,13 +94,13 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
     f1 = lambda t, *_: torch.sin(t)  # noqa: E731
     f2 = lambda t, *_: torch.cos(5 * t) ** 2  # noqa: E731
 
-    t_init = torch.tensor([0.0], dtype=torch.float64)
-    t_final = torch.tensor([math.pi], dtype=torch.float64)
+    mesh_init = torch.tensor([0.0], dtype=torch.float64)
+    mesh_final = torch.tensor([math.pi], dtype=torch.float64)
 
-    solver.integrate(ode_fxn=f1, t_init=t_init, t_final=t_final)
+    solver.integrate(f=f1, mesh_init=mesh_init, mesh_final=mesh_final)
     key_after_f1 = solver.previous_ode_fxn_id
 
-    solver.integrate(ode_fxn=f2, t_init=t_init, t_final=t_final)
+    solver.integrate(f=f2, mesh_init=mesh_init, mesh_final=mesh_final)
     key_after_f2 = solver.previous_ode_fxn_id
 
     assert key_after_f1 != key_after_f2, (
@@ -110,7 +110,7 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
 
 
 # -----------------------------------------------------------------------------
-# B1: t_init/t_final swap. The bug is in the cache-load path, but the
+# B1: mesh_init/mesh_final swap. The bug is in the cache-load path, but the
 # random-mesh generation at line 1135 overwrites the cached barriers
 # unconditionally, so end-to-end the bug is invisible. Document this.
 # -----------------------------------------------------------------------------
@@ -118,9 +118,9 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
 
 def test_warm_start_with_new_t_final_yields_correct_mesh():
     """After Phase 1's reuse_mesh opt-in, calling the solver a second
-    time with ``reuse_mesh=True`` and a *different* ``t_final`` than
+    time with ``reuse_mesh=True`` and a *different* ``mesh_final`` than
     the first call must still produce a monotone mesh that ends at
-    the new ``t_final``. This exercises the warm-start path which
+    the new ``mesh_final``. This exercises the warm-start path which
     Phase 1's Bug B1 fix activated.
     """
     solver = make_uniform_solver("dopri5", atol=1e-6, rtol=1e-6)
@@ -128,25 +128,25 @@ def test_warm_start_with_new_t_final_yields_correct_mesh():
     def f(t, *args):
         return torch.sin(t)
 
-    t_init = torch.tensor([0.0], dtype=torch.float64)
+    mesh_init = torch.tensor([0.0], dtype=torch.float64)
     out_first = solver.integrate(
-        ode_fxn=f, t_init=t_init, t_final=torch.tensor([1.0], dtype=torch.float64)
+        f=f, mesh_init=mesh_init, mesh_final=torch.tensor([1.0], dtype=torch.float64)
     )
     expected_first = 1.0 - math.cos(1.0)
     assert abs(out_first.integral.item() - expected_first) < 1e-5
 
     out_second = solver.integrate(
-        ode_fxn=f,
-        t_init=t_init,
-        t_final=torch.tensor([1.5], dtype=torch.float64),
+        f=f,
+        mesh_init=mesh_init,
+        mesh_final=torch.tensor([1.5], dtype=torch.float64),
         reuse_mesh=True,
     )
     assert out_second is not None
     expected_second = 1.0 - math.cos(1.5)
     assert abs(out_second.integral.item() - expected_second) < 1e-5
 
-    # Bug B1 fix: the warm-started mesh ends at the new t_final
-    # (previously the buggy concatenation appended t_init here,
+    # Bug B1 fix: the warm-started mesh ends at the new mesh_final
+    # (previously the buggy concatenation appended mesh_init here,
     # producing non-monotone barriers).
     assert abs(out_second.mesh_optimal[-1].item() - 1.5) < 1e-12
 
@@ -176,8 +176,8 @@ def test_max_path_change_returns_integral_output_not_none():
     t = torch.linspace(0.0, 4.0, 4, dtype=torch.float64).unsqueeze(-1)
 
     out = solver.integrate(
-        ode_fxn=lambda t, *_: torch.sin(10 * t) * torch.exp(-0.1 * t),
-        t=t,
+        f=lambda t, *_: torch.sin(10 * t) * torch.exp(-0.1 * t),
+        mesh=t,
     )
     assert isinstance(out, IntegrationResult), (
         f"max_path_change early-exit returned {type(out).__name__}, "
@@ -193,13 +193,13 @@ def test_normal_completion_has_converged_true():
     """A normal integration call returns ``converged=True``. Pins the
     default value of the new field.
     """
-    out = ode_path_integral(
-        ode_fxn=torch.sin,
+    out = integrate(
+        f=torch.sin,
         method="dopri5",
         atol=1e-6,
         rtol=1e-6,
-        t_init=torch.tensor([0.0], dtype=torch.float64),
-        t_final=torch.tensor([math.pi], dtype=torch.float64),
+        mesh_init=torch.tensor([0.0], dtype=torch.float64),
+        mesh_final=torch.tensor([math.pi], dtype=torch.float64),
     )
     assert out.converged is True
 

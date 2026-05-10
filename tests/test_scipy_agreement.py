@@ -27,7 +27,7 @@ import torch
 from scipy import integrate as scipy_integrate
 from tests._helpers import SEED, UNIFORM_METHOD_NAMES
 
-from torchpathdiffeq import ode_path_integral
+from torchpathdiffeq import integrate
 
 # Canonical smooth integrands. Each is a tuple of:
 #   (name, torch_callable, scipy_callable, intervals_to_test)
@@ -100,13 +100,13 @@ def test_method_agrees_with_scipy_quad(method, integrand_name, a, b):
     scipy_fn = next(s for n, _, s, _ in _INTEGRANDS if n == integrand_name)
 
     scipy_value, scipy_err = scipy_integrate.quad(scipy_fn, a, b, epsabs=ATOL)
-    library_result = ode_path_integral(
-        ode_fxn=torch_fn,
+    library_result = integrate(
+        f=torch_fn,
         method=method,
         atol=ATOL,
         rtol=RTOL,
-        t_init=torch.tensor([a], dtype=torch.float64),
-        t_final=torch.tensor([b], dtype=torch.float64),
+        mesh_init=torch.tensor([a], dtype=torch.float64),
+        mesh_final=torch.tensor([b], dtype=torch.float64),
     )
     library_value = library_result.integral.item()
 

@@ -74,9 +74,9 @@ def _run_case(method: str, integrand: str, atol: float, rtol: float) -> dict:
     """
     _force_cpu_float64()
     torch.manual_seed(SEED)
-    ode_fxn, _solution_fxn, _cutoff = ODE_dict[integrand]
+    f, _solution_fxn, _cutoff = ODE_dict[integrand]
     solver = make_uniform_solver(method, atol=atol, rtol=rtol)
-    output = solver.integrate(ode_fxn, t_init=T_INIT, t_final=T_FINAL)
+    output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
     return {
         "integral": output.integral.tolist(),
         "integral_error": output.integral_error.tolist(),

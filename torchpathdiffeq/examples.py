@@ -2,7 +2,7 @@
 Example integrand functions with known analytical solutions for testing.
 
 Each function computes f(t) and has a corresponding ``*_solution`` function that
-returns the exact value of the integral from t_init to t_final. These are used
+returns the exact value of the integral from mesh_init to mesh_final. These are used
 by the test suite to verify numerical integration accuracy.
 
 The ``ODE_dict`` maps names to ``(integrand, solution, error_cutoff)`` tuples,
@@ -18,7 +18,7 @@ def identity(_t: torch.Tensor, _y: torch.Tensor | None = None) -> int:
     """
     Constant integrand f(t) = 1.
 
-    Analytical integral: t_final - t_init.
+    Analytical integral: mesh_final - mesh_init.
 
     Args:
         t: Time points at which to evaluate the integrand. Shape: [N, T].
@@ -30,25 +30,25 @@ def identity(_t: torch.Tensor, _y: torch.Tensor | None = None) -> int:
     return 1
 
 
-def identity_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Tensor:
+def identity_solution(mesh_init: torch.Tensor, mesh_final: torch.Tensor) -> torch.Tensor:
     """
-    Analytical solution for the integral of 1 from t_init to t_final.
+    Analytical solution for the integral of 1 from mesh_init to mesh_final.
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
 
     Returns:
         Exact integral value. Shape: [T].
     """
-    return t_final - t_init
+    return mesh_final - mesh_init
 
 
 def t(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     """
     Linear integrand f(t) = t.
 
-    Analytical integral: (t_final^2 - t_init^2) / 2.
+    Analytical integral: (mesh_final^2 - mesh_init^2) / 2.
 
     Args:
         t: Time points at which to evaluate the integrand. Shape: [N, T].
@@ -60,25 +60,25 @@ def t(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     return t
 
 
-def t_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Tensor:
+def t_solution(mesh_init: torch.Tensor, mesh_final: torch.Tensor) -> torch.Tensor:
     """
-    Analytical solution for the integral of t from t_init to t_final.
+    Analytical solution for the integral of t from mesh_init to mesh_final.
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
 
     Returns:
         Exact integral value. Shape: [T].
     """
-    return 0.5 * (t_final**2 - t_init**2)
+    return 0.5 * (mesh_final**2 - mesh_init**2)
 
 
 def t_squared(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     """
     Quadratic integrand f(t) = t^2.
 
-    Analytical integral: (t_final^3 - t_init^3) / 3.
+    Analytical integral: (mesh_final^3 - mesh_init^3) / 3.
 
     Args:
         t: Time points at which to evaluate the integrand. Shape: [N, T].
@@ -90,18 +90,18 @@ def t_squared(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     return t**2
 
 
-def t_squared_solution(t_init: torch.Tensor, t_final: torch.Tensor) -> torch.Tensor:
+def t_squared_solution(mesh_init: torch.Tensor, mesh_final: torch.Tensor) -> torch.Tensor:
     """
-    Analytical solution for the integral of t^2 from t_init to t_final.
+    Analytical solution for the integral of t^2 from mesh_init to mesh_final.
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
 
     Returns:
         Exact integral value. Shape: [T].
     """
-    return (t_final**3 - t_init**3) / 3.0
+    return (mesh_final**3 - mesh_init**3) / 3.0
 
 
 def sine_squared(
@@ -125,24 +125,24 @@ def sine_squared(
 
 
 def sine_squared_solution(
-    t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7
+    mesh_init: torch.Tensor, mesh_final: torch.Tensor, w: float = 3.7
 ) -> torch.Tensor:
     """
-    Analytical solution for the integral of sin^2(2*pi*w*t) from t_init to t_final.
+    Analytical solution for the integral of sin^2(2*pi*w*t) from mesh_init to mesh_final.
 
     Uses the identity sin^2(x) = (1 - cos(2x))/2 to derive the closed form.
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
         w: Frequency parameter (must match the integrand).
 
     Returns:
         Exact integral value. Shape: [T].
     """
     _w = 4 * torch.pi * w
-    return (t_final - t_init) / 2.0 - (
-        torch.sin(torch.tensor([_w * t_final])) - torch.sin(torch.tensor([_w * t_init]))
+    return (mesh_final - mesh_init) / 2.0 - (
+        torch.sin(torch.tensor([_w * mesh_final])) - torch.sin(torch.tensor([_w * mesh_init]))
     ) / (2 * _w)
 
 
@@ -165,21 +165,21 @@ def exp(t: torch.Tensor, a: float = 5, _y: torch.Tensor | None = None) -> torch.
 
 
 def exp_solution(
-    t_init: torch.Tensor, t_final: torch.Tensor, a: float = 5
+    mesh_init: torch.Tensor, mesh_final: torch.Tensor, a: float = 5
 ) -> torch.Tensor:
     """
-    Analytical solution for the integral of exp(a*t) from t_init to t_final.
+    Analytical solution for the integral of exp(a*t) from mesh_init to mesh_final.
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
         a: Growth rate parameter (must match the integrand).
 
     Returns:
         Exact integral value. Shape: [T].
     """
     return (
-        torch.exp(torch.tensor([t_final * a])) - torch.exp(torch.tensor([t_init * a]))
+        torch.exp(torch.tensor([mesh_final * a])) - torch.exp(torch.tensor([mesh_init * a]))
     ) / a
 
 
@@ -206,16 +206,16 @@ def damped_sine(
 
 
 def damped_sine_solution(
-    t_init: torch.Tensor, t_final: torch.Tensor, w: float = 3.7, a: float = 5
+    mesh_init: torch.Tensor, mesh_final: torch.Tensor, w: float = 3.7, a: float = 5
 ) -> torch.Tensor:
     """
-    Analytical solution for the integral of exp(-a*t)*sin(2*pi*w*t) from t_init to t_final.
+    Analytical solution for the integral of exp(-a*t)*sin(2*pi*w*t) from mesh_init to mesh_final.
 
     Derived via integration by parts (or Laplace transform tables).
 
     Args:
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
         w: Frequency parameter (must match the integrand).
         a: Damping rate parameter (must match the integrand).
 
@@ -229,7 +229,7 @@ def damped_sine_solution(
         t = torch.tensor([t])
         return torch.exp(-a * t) * (a * torch.sin(_w * t) + _w * torch.cos(_w * t))
 
-    return -1 * (numerator(t_final, _w, a) - numerator(t_init, _w, a)) / (a**2 + _w**2)
+    return -1 * (numerator(mesh_final, _w, a) - numerator(mesh_init, _w, a)) / (a**2 + _w**2)
 
 
 # ---------------------------------------------------------------------------

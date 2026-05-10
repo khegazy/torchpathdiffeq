@@ -42,7 +42,7 @@ import pytest
 import torch
 from tests._helpers import make_uniform_solver
 
-from torchpathdiffeq import ode_path_integral
+from torchpathdiffeq import integrate
 
 ATOL = 1e-8
 RTOL = 1e-8
@@ -68,8 +68,8 @@ _INTEGRANDS = [
 def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
     """Path A (take_gradient=True + theta.grad) and Path B (integrate g) match."""
     a, b = interval
-    t_init = torch.tensor([a], dtype=torch.float64)
-    t_final = torch.tensor([b], dtype=torch.float64)
+    mesh_init = torch.tensor([a], dtype=torch.float64)
+    mesh_final = torch.tensor([b], dtype=torch.float64)
     method = "dopri5"
 
     # --- Path A: solver class directly so we can pass take_gradient/is_training. ---
@@ -80,9 +80,9 @@ def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
 
     solver = make_uniform_solver(method, atol=ATOL, rtol=RTOL)
     solver.integrate(
-        ode_fxn=f_theta,
-        t_init=t_init,
-        t_final=t_final,
+        f=f_theta,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         take_gradient=True,
         is_training=True,
     )
@@ -93,13 +93,13 @@ def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
     grad_a = theta.grad.item()
 
     # --- Path B: directly integrate g(t) = df_theta / dtheta. ---
-    out_b = ode_path_integral(
-        ode_fxn=g,
+    out_b = integrate(
+        f=g,
         method=method,
         atol=ATOL,
         rtol=RTOL,
-        t_init=t_init,
-        t_final=t_final,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
     )
     grad_b = out_b.integral.item()
 
@@ -119,13 +119,13 @@ def test_single_batch_autograd_grad_works():
     ``test_grad_of_integral_matches_integral_of_grad``).
     """
     theta = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
-    out = ode_path_integral(
-        ode_fxn=lambda t: theta * (t**2),  # very simple, fits in one batch
+    out = integrate(
+        f=lambda t: theta * (t**2),  # very simple, fits in one batch
         method="dopri5",
         atol=ATOL,
         rtol=RTOL,
-        t_init=torch.tensor([0.0], dtype=torch.float64),
-        t_final=torch.tensor([1.0], dtype=torch.float64),
+        mesh_init=torch.tensor([0.0], dtype=torch.float64),
+        mesh_final=torch.tensor([1.0], dtype=torch.float64),
     )
     grad_a = torch.autograd.grad(out.integral.sum(), theta)[0].item()
     # int_0^1 t^2 dt = 1/3
@@ -138,25 +138,25 @@ def test_take_gradient_does_not_corrupt_integral_value():
     not perturb the forward computation.
     """
     a, b = 0.0, math.pi
-    t_init = torch.tensor([a], dtype=torch.float64)
-    t_final = torch.tensor([b], dtype=torch.float64)
+    mesh_init = torch.tensor([a], dtype=torch.float64)
+    mesh_final = torch.tensor([b], dtype=torch.float64)
     method = "dopri5"
 
-    out_no_grad = ode_path_integral(
-        ode_fxn=lambda t: 1.7 * torch.sin(t),
+    out_no_grad = integrate(
+        f=lambda t: 1.7 * torch.sin(t),
         method=method,
         atol=ATOL,
         rtol=RTOL,
-        t_init=t_init,
-        t_final=t_final,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
     )
 
     theta = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
     solver = make_uniform_solver(method, atol=ATOL, rtol=RTOL)
     out_with_grad = solver.integrate(
-        ode_fxn=lambda t: theta * torch.sin(t),
-        t_init=t_init,
-        t_final=t_final,
+        f=lambda t: theta * torch.sin(t),
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         take_gradient=True,
         is_training=True,
     )

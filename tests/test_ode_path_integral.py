@@ -1,4 +1,4 @@
-"""Tests that the ode_path_integral() wrapper produces identical results to direct solver usage."""
+"""Tests that the integrate() wrapper produces identical results to direct solver usage."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from _helpers import ATOL_MED, RTOL_MED, SEED, T_FINAL, T_INIT, UNIFORM_METHOD_N
 
 from torchpathdiffeq import (
     UniformAdaptiveQuadrature,
-    ode_path_integral,
+    integrate,
 )
 
 
@@ -19,19 +19,19 @@ def _integrand(t, y=0):
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
 def test_wrapper_matches_direct_solver_uniform(method_name):
-    """ode_path_integral(sampling='uniform') matches direct RK solver."""
+    """integrate(sampling='uniform') matches direct RK solver."""
     torch.manual_seed(SEED)
 
-    wrapper_output = ode_path_integral(
-        ode_fxn=_integrand,
+    wrapper_output = integrate(
+        f=_integrand,
         method=method_name,
         sampling="uniform",
         atol=ATOL_MED,
         rtol=RTOL_MED,
-        t_init=T_INIT,
-        t_final=T_FINAL,
+        mesh_init=T_INIT,
+        mesh_final=T_FINAL,
         y0=torch.tensor([0], dtype=torch.float64),
-        t=None,
+        mesh=None,
     )
 
     torch.manual_seed(SEED)
@@ -40,9 +40,9 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
         method=method_name,
         atol=ATOL_MED,
         rtol=RTOL_MED,
-        ode_fxn=_integrand,
+        f=_integrand,
     )
-    direct_output = direct_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
+    direct_output = direct_solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
 
     assert torch.allclose(wrapper_output.integral, direct_output.integral), (
         f"Integral mismatch for {method_name}: "

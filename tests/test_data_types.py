@@ -27,10 +27,10 @@ class TestDtypeHandling:
 
     def _integrate(self, method_name, dtype):
         """Run damped_sine integration at the given dtype."""
-        ode_fxn, solution_fxn, _ = ODE_dict[INTEGRAND_NAME]
+        f, solution_fxn, _ = ODE_dict[INTEGRAND_NAME]
         correct = solution_fxn(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
         )
         # Use a cutoff appropriate for medium tolerances (1e-9/1e-7),
         # which are looser than the tight tolerances used in test_integrals.
@@ -41,9 +41,9 @@ class TestDtypeHandling:
 
         solver = make_uniform_solver(method_name, atol=ATOL_MED, rtol=RTOL_MED)
         output = solver.integrate(
-            ode_fxn,
-            t_init=torch.tensor([0], dtype=dtype),
-            t_final=torch.tensor([1], dtype=dtype),
+            f,
+            mesh_init=torch.tensor([0], dtype=dtype),
+            mesh_final=torch.tensor([1], dtype=dtype),
         )
         return output, correct, cutoff
 

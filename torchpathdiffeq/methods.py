@@ -263,7 +263,7 @@ def _build_gauss_kronrod_tableau(
     # integral would be off by that factor. Standard fix: pad with two
     # zero-weight nodes at 0 and 1; they're evaluated but contribute
     # nothing to the integral or error estimate. The cost is 2 wasted
-    # ode_fxn evaluations per panel — negligible for an N+2 = 23-node rule.
+    # f evaluations per panel — negligible for an N+2 = 23-node rule.
     c_padded = np.concatenate([[0.0], c_unit, [1.0]])
     b_padded = np.concatenate([[0.0], b_unit, [0.0]])
     b_g_padded = np.concatenate([[0.0], b_g_unit, [0.0]])

@@ -142,7 +142,7 @@ class TestVariableGetTableauB:
         assert b_error.shape == (1, 2, 1)
 
     def test_normalizes_to_unit(self):
-        """generic3: t=[2,3,4] normalizes to c=[0, 0.5, 1] → Simpson weights."""
+        """generic3: mesh=[2,3,4] normalizes to c=[0, 0.5, 1] → Simpson weights."""
         solver = make_variable_solver_for_unit_test("generic3")
         t = torch.tensor([[[2.0], [3.0], [4.0]]], dtype=torch.float64)
         b, _ = solver._get_tableau_b(t)

@@ -258,6 +258,6 @@ class TestExampleSolutions:
     def test_solution_consistency_with_ode_dict(self, integrand_name):
         """Each ODE_dict solution function gives a finite result on [0, 1]."""
         _, solution_fxn, _ = ODE_dict[integrand_name]
-        result = solution_fxn(t_init=T_INIT, t_final=T_FINAL)
+        result = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         assert torch.isfinite(result).all(), f"{integrand_name} solution is not finite"
         assert result.numel() > 0, f"{integrand_name} solution is empty"

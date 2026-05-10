@@ -1,7 +1,7 @@
 """
 High-level public API for adaptive numerical quadrature.
 
-Provides ``ode_path_integral()``, the main entry point for users who want
+Provides ``integrate()``, the main entry point for users who want
 to compute a definite integral without manually constructing solver objects.
 This function creates the appropriate solver, runs the integration, and
 returns the result.
@@ -20,15 +20,15 @@ if TYPE_CHECKING:
     import torch
 
 
-def ode_path_integral(
-    ode_fxn: Callable,
+def integrate(
+    f: Callable,
     method: str,
     sampling: str = "uniform",
     atol: float = 1e-5,
     rtol: float = 1e-5,
-    t: torch.Tensor | None = None,
-    t_init: torch.Tensor | None = None,
-    t_final: torch.Tensor | None = None,
+    mesh: torch.Tensor | None = None,
+    mesh_init: torch.Tensor | None = None,
+    mesh_final: torch.Tensor | None = None,
     y0: torch.Tensor | None = None,
     remove_cut: float = 0.1,
     total_mem_usage: float = 0.9,
@@ -37,29 +37,29 @@ def ode_path_integral(
     **kwargs,
 ) -> IntegrationResult:
     """
-    Compute the definite integral of ode_fxn from t_init to t_final.
+    Compute the definite integral of f from mesh_init to mesh_final.
 
     This is the main public API. It creates a parallel adaptive quadrature
     solver, runs the integration in batched evaluations on GPU/CPU, and
     returns the result.
 
-    The integrand ode_fxn depends only on time t (not on accumulated state
+    The integrand f depends only on time t (not on accumulated state
     y). This independence is what enables batched parallel evaluation.
 
     Example::
 
-        result = ode_path_integral(
-            ode_fxn=lambda t: torch.sin(t),
+        result = integrate(
+            f=lambda t: torch.sin(t),
             method='gk21',
             atol=1e-8,
             rtol=1e-6,
-            t_init=torch.tensor([0.0]),
-            t_final=torch.tensor([3.14159]),
+            mesh_init=torch.tensor([0.0]),
+            mesh_final=torch.tensor([3.14159]),
         )
         print(result.integral)  # Should be close to 2.0
 
     Args:
-        ode_fxn: The integrand function. Takes time points of shape [N, T]
+        f: The integrand function. Takes time points of shape [N, T]
             and returns evaluations of shape [N, D].
         method: Name of the quadrature method. Available:
             uniform sampling: 'adaptive_heun', 'fehlberg2', 'bosh3',
@@ -74,8 +74,8 @@ def ode_path_integral(
         t: Optional initial time mesh (step barrier positions). If None,
             the solver generates an initial mesh automatically. Shape:
             [N, T] for step barriers.
-        t_init: Lower integration bound. Shape: [T].
-        t_final: Upper integration bound. Shape: [T].
+        mesh_init: Lower integration bound. Shape: [T].
+        mesh_final: Upper integration bound. Shape: [T].
         y0: Initial value of the integral accumulator. Shape: [D].
         remove_cut: Threshold for merging consecutive steps whose
             combined error ratio is below this value. Must be < 1. Lower
@@ -102,7 +102,7 @@ def ode_path_integral(
     Note:
         If t is None, the solver creates an initial mesh of
         ~sqrt(N_init_steps) barriers with random sub-divisions in
-        [t_init, t_final]. Steps are adaptively added (split) or removed
+        [mesh_init, mesh_final]. Steps are adaptively added (split) or removed
         (merged) based on error estimates until all steps meet tolerance.
     """
     # Select the sampling strategy for the parallel solver
@@ -120,12 +120,12 @@ def ode_path_integral(
     integrator = adaptive_quadrature(
         sampling_type=sampling_type,
         method=method,
-        ode_fxn=ode_fxn,
+        f=f,
         atol=atol,
         rtol=rtol,
         remove_cut=remove_cut,
-        t_init=t_init,
-        t_final=t_final,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         use_absolute_error_ratio=use_absolute_error_ratio,
         device=device,
         **kwargs,
@@ -133,8 +133,8 @@ def ode_path_integral(
 
     return integrator.integrate(
         y0=y0,
-        t=t,
-        t_init=t_init,
-        t_final=t_final,
+        mesh=mesh,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         total_mem_usage=total_mem_usage,
     )

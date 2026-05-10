@@ -63,7 +63,7 @@ def make_uniform_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT, **kwargs)
 
 
 def make_solver_for_unit_test(method_name="bosh3", atol=1e-6, rtol=1e-6):
-    """Create a minimal solver for testing internal methods (no ode_fxn needed)."""
+    """Create a minimal solver for testing internal methods (no f needed)."""
     return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,

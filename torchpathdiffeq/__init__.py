@@ -5,7 +5,7 @@ import logging
 from .base import IntegrationResult, steps
 from .examples import ODE_dict, wolf_schlegel
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
-from .path_integral import ode_path_integral
+from .integrate import integrate
 from .runge_kutta import (
     UniformAdaptiveQuadrature,
     VariableAdaptiveQuadrature,

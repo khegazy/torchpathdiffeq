@@ -34,8 +34,8 @@ device = "cuda"
 method = "dopri5"
 atol = 1e-9
 rtol = 1e-7
-t_init = torch.tensor([0], dtype=torch.float64, device=device)
-t_final = torch.tensor([1], dtype=torch.float64, device=device)
+mesh_init = torch.tensor([0], dtype=torch.float64, device=device)
+mesh_final = torch.tensor([1], dtype=torch.float64, device=device)
 y0 = torch.tensor([0], dtype=torch.float64, device=device)
 
 ########################
@@ -52,16 +52,16 @@ integrands = [wolf_schlegel, damped_sine, sine_squared, exp, t_squared]
 # quadrature alignment plan; calling torchdiffeq directly is a more
 # honest comparison anyway.
 logger.info("torchdiffeq")
-t_eval = torch.stack([t_init, t_final]).reshape(-1)
+t_eval = torch.stack([mesh_init, mesh_final]).reshape(-1)
 tdiffeq_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
     for _ in range(n_runs):
         t0 = time.time()
         _ = odeint(
-            ode_fxn,
+            f,
             y0=y0,
-            t=t_eval,
+            mesh=t_eval,
             method=method,
             atol=atol,
             rtol=rtol,
@@ -76,18 +76,18 @@ for ode_fxn in integrands:
 
 logger.info("torchpathdiffeq api")
 tpdiffeq_api_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
     for _ in range(n_runs):
         t0 = time.time()
-        _ = tpdiffeq.ode_path_integral(
-            ode_fxn=ode_fxn,
+        _ = tpdiffeq.integrate(
+            f=f,
             method=method,
             sampling="uniform",
             atol=atol,
             rtol=rtol,
-            t_init=t_init,
-            t_final=t_final,
+            mesh_init=mesh_init,
+            mesh_final=mesh_final,
             y0=y0,
             device=device,
         )
@@ -97,16 +97,16 @@ for ode_fxn in integrands:
 
 logger.info("torchpathdiffeq integrator")
 tpdiffeq_int_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
     integrator = tpdiffeq.adaptive_quadrature(
         sampling_type="uniform",
-        ode_fxn=ode_fxn,
+        f=f,
         method=method,
         atol=atol,
         rtol=rtol,
-        t_init=t_init,
-        t_final=t_final,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         y0=y0,
         device=device,
     )

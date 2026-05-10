@@ -94,13 +94,13 @@ class TestSetDtype:
             _restore_tableau("bosh3", saved)
 
     def test_converts_t_init_t_final(self):
-        """t_init and t_final dtype match after conversion."""
+        """mesh_init and mesh_final dtype match after conversion."""
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
             solver._set_dtype(torch.float32)
-            assert solver.t_init.dtype == torch.float32
-            assert solver.t_final.dtype == torch.float32
+            assert solver.mesh_init.dtype == torch.float32
+            assert solver.mesh_final.dtype == torch.float32
         finally:
             _restore_tableau("bosh3", saved)
 
@@ -131,30 +131,30 @@ class TestSetDtypeByInput:
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
-            solver.set_dtype_by_input(t=torch.tensor([0.0], dtype=torch.float32))
+            solver.set_dtype_by_input(mesh=torch.tensor([0.0], dtype=torch.float32))
             assert solver.dtype == torch.float32
         finally:
             _restore_tableau("bosh3", saved)
 
     def test_infers_from_t_init(self):
-        """Dtype inferred from t_init when t is None."""
+        """Dtype inferred from mesh_init when t is None."""
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
             solver.set_dtype_by_input(
-                t=None, t_init=torch.tensor([0.0], dtype=torch.float32)
+                mesh=None, mesh_init=torch.tensor([0.0], dtype=torch.float32)
             )
             assert solver.dtype == torch.float32
         finally:
             _restore_tableau("bosh3", saved)
 
     def test_infers_from_t_final(self):
-        """Dtype inferred from t_final when t and t_init are None."""
+        """Dtype inferred from mesh_final when t and mesh_init are None."""
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
             solver.set_dtype_by_input(
-                t=None, t_init=None, t_final=torch.tensor([1.0], dtype=torch.float32)
+                mesh=None, mesh_init=None, mesh_final=torch.tensor([1.0], dtype=torch.float32)
             )
             assert solver.dtype == torch.float32
         finally:
@@ -163,17 +163,17 @@ class TestSetDtypeByInput:
     def test_all_none_noop(self):
         """All None leaves dtype unchanged."""
         solver = make_solver_for_unit_test()
-        solver.set_dtype_by_input(t=None, t_init=None, t_final=None)
+        solver.set_dtype_by_input(mesh=None, mesh_init=None, mesh_final=None)
         assert solver.dtype == torch.float64
 
     def test_priority_t_over_t_init(self):
-        """t takes priority over t_init."""
+        """t takes priority over mesh_init."""
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
             solver.set_dtype_by_input(
-                t=torch.tensor([0.0], dtype=torch.float32),
-                t_init=torch.tensor([0.0], dtype=torch.float64),
+                mesh=torch.tensor([0.0], dtype=torch.float32),
+                mesh_init=torch.tensor([0.0], dtype=torch.float64),
             )
             assert solver.dtype == torch.float32
         finally:
@@ -191,12 +191,12 @@ class TestCheckVariables:
     def test_fills_defaults(self):
         """All None args are replaced with stored defaults."""
         solver = make_solver_for_unit_test()
-        _ode_fxn, t_init, t_final, y0 = solver._check_variables()
-        assert t_init is not None
-        assert t_final is not None
+        _ode_fxn, mesh_init, mesh_final, y0 = solver._check_variables()
+        assert mesh_init is not None
+        assert mesh_final is not None
         assert y0 is not None
-        assert torch.equal(t_init, solver.t_init)
-        assert torch.equal(t_final, solver.t_final)
+        assert torch.equal(mesh_init, solver.mesh_init)
+        assert torch.equal(mesh_final, solver.mesh_final)
         assert torch.equal(y0, solver.y0)
 
     def test_overrides_with_args(self):
@@ -206,19 +206,19 @@ class TestCheckVariables:
         custom_t_final = torch.tensor([5.0], dtype=torch.float64)
         custom_y0 = torch.tensor([10.0], dtype=torch.float64)
 
-        _, t_init, t_final, y0 = solver._check_variables(
-            t_init=custom_t_init, t_final=custom_t_final, y0=custom_y0
+        _, mesh_init, mesh_final, y0 = solver._check_variables(
+            mesh_init=custom_t_init, mesh_final=custom_t_final, y0=custom_y0
         )
-        assert torch.equal(t_init, custom_t_init)
-        assert torch.equal(t_final, custom_t_final)
+        assert torch.equal(mesh_init, custom_t_init)
+        assert torch.equal(mesh_final, custom_t_final)
         assert torch.equal(y0, custom_y0)
 
     def test_converts_dtype(self):
         """Tensors are converted to solver's dtype."""
         solver = make_solver_for_unit_test()
         t_init_f32 = torch.tensor([0.0], dtype=torch.float32)
-        _, t_init, _, _ = solver._check_variables(t_init=t_init_f32)
-        assert t_init.dtype == torch.float64
+        _, mesh_init, _, _ = solver._check_variables(mesh_init=t_init_f32)
+        assert mesh_init.dtype == torch.float64
 
 
 # ---------------------------------------------------------------------------

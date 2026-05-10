@@ -67,11 +67,11 @@ class TestVariableIntegralAccuracy:
 
     def _integrate(self, method_name, integrand_name):
         """Run integration; return (output, correct, cutoff)."""
-        ode_fxn, solution_fxn, cutoff = ODE_dict[integrand_name]
-        correct = solution_fxn(t_init=T_INIT, t_final=T_FINAL)
+        f, solution_fxn, cutoff = ODE_dict[integrand_name]
+        correct = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         torch.manual_seed(SEED)
         solver = _make_variable_solver(method_name)
-        output = solver.integrate(ode_fxn, t_init=T_INIT, t_final=T_FINAL)
+        output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
         return output, correct, cutoff
 
     def test_integral_value(self, method_name, integrand_name):

@@ -49,10 +49,10 @@ def test_wolf_schlegel_parallel_vs_scipy(method_name):
         atol=ATOL_LOOSE,
         rtol=RTOL_LOOSE,
         remove_cut=REMOVE_CUT,
-        ode_fxn=wolf_schlegel,
+        f=wolf_schlegel,
     )
 
-    parallel_output = parallel_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
+    parallel_output = parallel_solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
 
     scipy_value, scipy_err = scipy_integrate.quad(
         _wolf_schlegel_scalar,

@@ -171,7 +171,7 @@ class SolverBase(ABC, DistributedEnvironment):
       dtype-appropriate assertion tolerances (atol_assert, rtol_assert) used
       for internal sanity checks (e.g., verifying time ordering).
     - Device management: inherited from DistributedEnvironment.
-    - Default parameter storage: ode_fxn, y0, t_init, t_final can be set at
+    - Default parameter storage: f, y0, mesh_init, mesh_final can be set at
       construction and reused across multiple integrate() calls.
     - Warm-start caching: stores t_step_barriers_previous and previous_ode_fxn_id
       so that repeated integration of the same function can reuse the optimized
@@ -189,9 +189,9 @@ class SolverBase(ABC, DistributedEnvironment):
         atol: float,
         rtol: float,
         y0: torch.Tensor | None = None,
-        ode_fxn: Callable | None = None,
-        t_init: torch.Tensor | None = None,
-        t_final: torch.Tensor | None = None,
+        f: Callable | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
         is_training: bool | None = None,
         output_speed_info: bool = False,
         dtype: torch.dtype = torch.float64,
@@ -210,12 +210,12 @@ class SolverBase(ABC, DistributedEnvironment):
             rtol: Relative error tolerance for adaptive step control.
             y0: Initial value of the integral (accumulator starting point).
                 Shape: [D].
-            ode_fxn: The integrand function f(t) -> Tensor. Takes time points
+            f: The integrand function f(t) -> Tensor. Takes time points
                 of shape [N, T] and returns evaluations of shape [N, D].
                 Can also be provided at integrate() call time.
-            t_init: Lower bound of integration. Shape: [T].
-            t_final: Upper bound of integration. Shape: [T].
-            is_training: If False, disables training mode (no gradient computation). If unspecified it will infer training mode by 'ode_fxn'.
+            mesh_init: Lower bound of integration. Shape: [T].
+            mesh_final: Upper bound of integration. Shape: [T].
+            is_training: If False, disables training mode (no gradient computation). If unspecified it will infer training mode by 'f'.
             output_speed_info: If True, logs timing information for each
                 sub-operation during integration to a dedicated file
                 ``torchpathdiffeq_speed.log``.
@@ -246,24 +246,24 @@ class SolverBase(ABC, DistributedEnvironment):
         self.method_name = method.lower()
         self.atol = atol
         self.rtol = rtol
-        self.ode_fxn = ode_fxn
+        self.f = f
         self.y0 = (
             y0.to(self.device)
             if y0 is not None
             else torch.tensor([0], dtype=torch.float64, device=self.device)
         )
-        self.t_init = (
-            t_init.to(self.device)
-            if t_init is not None
+        self.mesh_init = (
+            mesh_init.to(self.device)
+            if mesh_init is not None
             else torch.tensor([0], dtype=torch.float64, device=self.device)
         )
-        self.t_final = (
-            t_final.to(self.device)
-            if t_final is not None
+        self.mesh_final = (
+            mesh_final.to(self.device)
+            if mesh_final is not None
             else torch.tensor([1], dtype=torch.float64, device=self.device)
         )
         # Determine if in training or eval mode
-        self._infer_training(is_training, ode_fxn)
+        self._infer_training(is_training, f)
         # Cached time barriers from last integration for warm-starting.
         # Used only when integrate(..., reuse_mesh=True) is passed; otherwise
         # ignored. The cached barriers are the *optimal* mesh from the
@@ -278,24 +278,24 @@ class SolverBase(ABC, DistributedEnvironment):
         self._set_dtype(dtype)
 
     def _infer_training(
-        self, is_training: bool | None = None, ode_fxn: Callable | None = None
+        self, is_training: bool | None = None, f: Callable | None = None
     ):
-        """Set solver training mode from explicit flag or ode_fxn's module state.
+        """Set solver training mode from explicit flag or f's module state.
 
-        Priority: explicit is_training > ode_fxn.training (if nn.Module) > False.
+        Priority: explicit is_training > f.training (if nn.Module) > False.
         """
         if is_training is not None:
             self.training = is_training
-        elif ode_fxn is None or not isinstance(ode_fxn, torch.nn.Module):
+        elif f is None or not isinstance(f, torch.nn.Module):
             self.training = False
         else:
-            self.training = ode_fxn.training
+            self.training = f.training
 
     def _set_dtype(self, dtype: torch.dtype) -> None:
         """
         Set the floating-point precision for all solver tensors.
 
-        Converts y0, t_init, t_final, and cached barriers to the new dtype.
+        Converts y0, mesh_init, mesh_final, and cached barriers to the new dtype.
         Also sets dtype-appropriate assertion tolerances used for internal
         sanity checks (e.g., verifying that time points are monotonically
         ordered despite floating-point rounding).
@@ -333,8 +333,8 @@ class SolverBase(ABC, DistributedEnvironment):
 
         self.dtype = dtype
         self.y0 = self.y0.to(self.dtype)
-        self.t_init = self.t_init.to(self.dtype)
-        self.t_final = self.t_final.to(self.dtype)
+        self.mesh_init = self.mesh_init.to(self.dtype)
+        self.mesh_final = self.mesh_final.to(self.dtype)
         if self.t_step_barriers_previous is not None:
             self.t_step_barriers_previous = self.t_step_barriers_previous.to(self.dtype)
 
@@ -352,28 +352,28 @@ class SolverBase(ABC, DistributedEnvironment):
 
     def set_dtype_by_input(
         self,
-        t: torch.Tensor | None = None,
-        t_init: torch.Tensor | None = None,
-        t_final: torch.Tensor | None = None,
+        mesh: torch.Tensor | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
     ) -> None:
         """
         Infer and set the solver dtype from the dtype of input tensors.
 
-        Checks t first, then t_init, then t_final. The first non-None
-        tensor's dtype is used. This allows the solver to automatically
-        match the precision of user-provided inputs.
+        Checks mesh first, then mesh_init, then mesh_final. The first
+        non-None tensor's dtype is used. This allows the solver to
+        automatically match the precision of user-provided inputs.
 
         Args:
-            t: Optional time points tensor.
-            t_init: Optional lower integration bound tensor.
-            t_final: Optional upper integration bound tensor.
+            mesh: Optional mesh-of-barriers tensor.
+            mesh_init: Optional lower integration bound tensor.
+            mesh_final: Optional upper integration bound tensor.
         """
-        if t is not None:
-            self._set_dtype(t.dtype)
-        elif t_init is not None:
-            self._set_dtype(t_init.dtype)
-        elif t_final is not None:
-            self._set_dtype(t_final.dtype)
+        if mesh is not None:
+            self._set_dtype(mesh.dtype)
+        elif mesh_init is not None:
+            self._set_dtype(mesh_init.dtype)
+        elif mesh_final is not None:
+            self._set_dtype(mesh_final.dtype)
 
     @abstractmethod
     def _set_solver_dtype(self, dtype: torch.dtype) -> None:
@@ -389,9 +389,9 @@ class SolverBase(ABC, DistributedEnvironment):
 
     def _check_variables(
         self,
-        ode_fxn: Callable | None = None,
-        t_init: torch.Tensor | None = None,
-        t_final: torch.Tensor | None = None,
+        f: Callable | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
         y0: torch.Tensor | None = None,
         is_training: bool | None = None,
     ) -> tuple[
@@ -405,28 +405,28 @@ class SolverBase(ABC, DistributedEnvironment):
         and moved to the solver's device.
 
         Args:
-            ode_fxn: Integrand function, or None to use self.ode_fxn.
-            t_init: Lower integration bound, or None to use self.t_init.
-            t_final: Upper integration bound, or None to use self.t_final.
+            f: Integrand function, or None to use self.f.
+            mesh_init: Lower integration bound, or None to use self.mesh_init.
+            mesh_final: Upper integration bound, or None to use self.mesh_final.
             y0: Initial integral value, or None to use self.y0.
 
         Returns:
-            Tuple of (ode_fxn, t_init, t_final, y0) with defaults filled
+            Tuple of (f, mesh_init, mesh_final, y0) with defaults filled
             in and tensors on the correct device/dtype.
         """
-        ode_fxn = self.ode_fxn if ode_fxn is None else ode_fxn
-        t_init = self.t_init if t_init is None else t_init
-        t_final = self.t_final if t_final is None else t_final
+        f = self.f if f is None else f
+        mesh_init = self.mesh_init if mesh_init is None else mesh_init
+        mesh_final = self.mesh_final if mesh_final is None else mesh_final
         y0 = self.y0 if y0 is None else y0
 
-        t_init = t_init.to(self.dtype).to(self.device)
-        t_final = t_final.to(self.dtype).to(self.device)
+        mesh_init = mesh_init.to(self.dtype).to(self.device)
+        mesh_final = mesh_final.to(self.dtype).to(self.device)
         y0 = y0.to(self.dtype).to(self.device)
 
         # Determine if in training mode
-        self._infer_training(is_training, ode_fxn)
+        self._infer_training(is_training, f)
 
-        return ode_fxn, t_init, t_final, y0
+        return f, mesh_init, mesh_final, y0
 
     def train(self) -> None:
         """Enable training mode (gradients will be computed during integration)."""
@@ -487,38 +487,38 @@ class SolverBase(ABC, DistributedEnvironment):
     @abstractmethod
     def integrate(
         self,
-        ode_fxn: Callable,
+        f: Callable,
         y0: torch.Tensor | None = None,
-        t_init: torch.Tensor | None = None,
-        t_final: torch.Tensor | None = None,
-        t: torch.Tensor | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
+        mesh: torch.Tensor | None = None,
         ode_args: tuple = (),
         is_training: bool | None = None,
     ) -> IntegrationResult:
         """
-        Perform numerical path integration of ode_fxn from t_init to t_final.
+        Perform numerical path integration of f from mesh_init to mesh_final.
 
         This is the main entry point that users call. Subclasses implement
         the actual integration logic (serial or parallel adaptive).
 
-        The integrand ode_fxn should be a function of time only: f(t) -> Tensor.
+        The integrand f should be a function of time only: f(t) -> Tensor.
         It does NOT depend on accumulated state y (this is numerical quadrature,
         not ODE solving). This independence between steps is what enables
         parallel evaluation.
 
         Args:
-            ode_fxn: The integrand function. Takes time points of shape [N, T]
+            f: The integrand function. Takes time points of shape [N, T]
                 and returns values of shape [N, D].
             y0: Initial value of the integral (accumulator start). Shape: [D].
-            t_init: Lower integration bound. Shape: [T].
-            t_final: Upper integration bound. Shape: [T].
+            mesh_init: Lower integration bound. Shape: [T].
+            mesh_final: Upper integration bound. Shape: [T].
             t: Optional initial time points. If provided, these serve as the
                 starting mesh for adaptive refinement. Shape depends on solver:
                 [N, T] for step barriers, [N, C, T] for full quadrature points.
-            ode_args: Extra arguments passed to ode_fxn after the time tensor.
+            ode_args: Extra arguments passed to f after the time tensor.
             is_training: If True, enables training mode (gradient computation
                 via take_gradient). If False, disables it. If None, inferred
-                from whether ode_fxn is an nn.Module in training mode.
+                from whether f is an nn.Module in training mode.
 
         Returns:
             IntegrationResult containing the computed integral, error estimates,
