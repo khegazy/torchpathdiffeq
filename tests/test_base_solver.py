@@ -154,7 +154,9 @@ class TestSetDtypeByInput:
         solver = make_solver_for_unit_test()
         try:
             solver.set_dtype_by_input(
-                mesh=None, mesh_init=None, mesh_final=torch.tensor([1.0], dtype=torch.float32)
+                mesh=None,
+                mesh_init=None,
+                mesh_final=torch.tensor([1.0], dtype=torch.float32),
             )
             assert solver.dtype == torch.float32
         finally:

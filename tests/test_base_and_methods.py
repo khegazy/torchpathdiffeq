@@ -159,9 +159,9 @@ class TestVariableThirdOrder:
         ba = method._ba(a_vals)
         b1 = method._b1(a_vals)
         sums = b0 + ba + b1
-        assert torch.allclose(
-            sums, torch.ones_like(sums), atol=1e-12
-        ), f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
+        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-12), (
+            f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
+        )
 
     def test_tableau_b_shape(self):
         """tableau_b returns correct shapes for N=5, C=3."""

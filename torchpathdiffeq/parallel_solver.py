@@ -253,9 +253,9 @@ class AdaptiveQuadrature(SolverBase):
         if t is None or error_ratios is None:
             if t is not None and len(t.shape) == 1:
                 t = t.unsqueeze(-1)
-            t_steps = self._initial_t_steps(t, mesh_init=mesh_init, mesh_final=mesh_final).to(
-                self.dtype
-            )
+            t_steps = self._initial_t_steps(
+                t, mesh_init=mesh_init, mesh_final=mesh_final
+            ).to(self.dtype)
             N, _C, _ = t_steps.shape
 
             # Time points to evaluate, remove repetitive time points at the end
@@ -300,7 +300,9 @@ class AdaptiveQuadrature(SolverBase):
         if t is None or len(t.shape) != 3 or t.shape[1] != self.C:
             if t is not None:
                 logger.debug("Reshaping t, current shape: %s", t.shape)
-            t = self._initial_t_steps(t, mesh_init=mesh_init, mesh_final=mesh_final).to(self.dtype)
+            t = self._initial_t_steps(t, mesh_init=mesh_init, mesh_final=mesh_final).to(
+                self.dtype
+            )
 
         if enforce_endpoints:
             if mesh_init != t[0, 0]:
@@ -312,9 +314,9 @@ class AdaptiveQuadrature(SolverBase):
                 )
                 if t.shape[-1] == 1:
                     inp = inp.unsqueeze(-1)
-                t[0] = self._initial_t_steps(inp, mesh_init=mesh_init, mesh_final=mesh_final).to(
-                    self.dtype
-                )
+                t[0] = self._initial_t_steps(
+                    inp, mesh_init=mesh_init, mesh_final=mesh_final
+                ).to(self.dtype)
             if mesh_final != t[-1, -1]:
                 # Remove time steps where last point is greater than mesh_final
                 t = t[t[:, 0, 0] < mesh_final[0]]
@@ -324,9 +326,9 @@ class AdaptiveQuadrature(SolverBase):
                 )
                 if t.shape[-1] == 1:
                     inp = inp.unsqueeze(-1)
-                t[-1] = self._initial_t_steps(inp, mesh_init=mesh_init, mesh_final=mesh_final).to(
-                    self.dtype
-                )
+                t[-1] = self._initial_t_steps(
+                    inp, mesh_init=mesh_init, mesh_final=mesh_final
+                ).to(self.dtype)
         return t
 
     def _adaptively_add_steps(
@@ -1184,8 +1186,7 @@ class AdaptiveQuadrature(SolverBase):
         # versions which compared f.__name__ (every lambda has
         # __name__ == "<lambda>").
         same_ode_fxn = (
-            self.previous_ode_fxn_id is not None
-            and id(f) == self.previous_ode_fxn_id
+            self.previous_ode_fxn_id is not None and id(f) == self.previous_ode_fxn_id
         )
         # Benchmark memory footprint on first call with a new integrand
         if not same_ode_fxn and max_batch is None:
@@ -1196,9 +1197,7 @@ class AdaptiveQuadrature(SolverBase):
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
 
         # Make sure f exists and provides the correct output
-        assert f is not None, (
-            "Must specify f or pass it during class initialization."
-        )
+        assert f is not None, "Must specify f or pass it during class initialization."
         test_output = f(
             torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *ode_args
         )
@@ -1231,7 +1230,9 @@ class AdaptiveQuadrature(SolverBase):
             )
             t_step_barriers = self.t_step_barriers_previous[mask]
             # Ensure the warm-started mesh starts at mesh_init.
-            if len(t_step_barriers) == 0 or not torch.all(t_step_barriers[0] == mesh_init):
+            if len(t_step_barriers) == 0 or not torch.all(
+                t_step_barriers[0] == mesh_init
+            ):
                 t_step_barriers = torch.concatenate(
                     [mesh_init.unsqueeze(0), t_step_barriers], dim=0
                 )
@@ -1262,7 +1263,8 @@ class AdaptiveQuadrature(SolverBase):
             )
             dt = (mesh_final - mesh_init) / N_even_t
             t_step_barriers = (
-                mesh_init + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
+                mesh_init
+                + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
             )  # TODO: this assumes time is 1d
 
             n_sub = N_even_t + 1  # sub-barriers per segment

@@ -62,9 +62,9 @@ class TestTStepInterpolate:
 
         for i in range(N):
             diffs = result[i, 1:, 0] - result[i, :-1, 0]
-            assert torch.all(
-                diffs >= -1e-15
-            ), f"Step {i}: non-monotonic points {result[i, :, 0]}"
+            assert torch.all(diffs >= -1e-15), (
+                f"Step {i}: non-monotonic points {result[i, :, 0]}"
+            )
 
     def test_matches_tableau_c_on_unit_step(self, method_name):
         """On a unit step [0,1], points equal the tableau c values."""

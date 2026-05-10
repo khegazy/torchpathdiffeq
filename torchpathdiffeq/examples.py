@@ -30,7 +30,9 @@ def identity(_t: torch.Tensor, _y: torch.Tensor | None = None) -> int:
     return 1
 
 
-def identity_solution(mesh_init: torch.Tensor, mesh_final: torch.Tensor) -> torch.Tensor:
+def identity_solution(
+    mesh_init: torch.Tensor, mesh_final: torch.Tensor
+) -> torch.Tensor:
     """
     Analytical solution for the integral of 1 from mesh_init to mesh_final.
 
@@ -90,7 +92,9 @@ def t_squared(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tensor:
     return t**2
 
 
-def t_squared_solution(mesh_init: torch.Tensor, mesh_final: torch.Tensor) -> torch.Tensor:
+def t_squared_solution(
+    mesh_init: torch.Tensor, mesh_final: torch.Tensor
+) -> torch.Tensor:
     """
     Analytical solution for the integral of t^2 from mesh_init to mesh_final.
 
@@ -142,7 +146,8 @@ def sine_squared_solution(
     """
     _w = 4 * torch.pi * w
     return (mesh_final - mesh_init) / 2.0 - (
-        torch.sin(torch.tensor([_w * mesh_final])) - torch.sin(torch.tensor([_w * mesh_init]))
+        torch.sin(torch.tensor([_w * mesh_final]))
+        - torch.sin(torch.tensor([_w * mesh_init]))
     ) / (2 * _w)
 
 
@@ -179,7 +184,8 @@ def exp_solution(
         Exact integral value. Shape: [T].
     """
     return (
-        torch.exp(torch.tensor([mesh_final * a])) - torch.exp(torch.tensor([mesh_init * a]))
+        torch.exp(torch.tensor([mesh_final * a]))
+        - torch.exp(torch.tensor([mesh_init * a]))
     ) / a
 
 
@@ -229,7 +235,11 @@ def damped_sine_solution(
         t = torch.tensor([t])
         return torch.exp(-a * t) * (a * torch.sin(_w * t) + _w * torch.cos(_w * t))
 
-    return -1 * (numerator(mesh_final, _w, a) - numerator(mesh_init, _w, a)) / (a**2 + _w**2)
+    return (
+        -1
+        * (numerator(mesh_final, _w, a) - numerator(mesh_init, _w, a))
+        / (a**2 + _w**2)
+    )
 
 
 # ---------------------------------------------------------------------------
