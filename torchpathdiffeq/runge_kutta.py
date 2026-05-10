@@ -25,7 +25,7 @@ import logging
 import torch
 
 from .base import get_sampling_type, steps
-from .parallel_solver import (
+from .quadrature import (
     _UniformAdaptiveQuadratureBase,
     _VariableAdaptiveQuadratureBase,
 )
