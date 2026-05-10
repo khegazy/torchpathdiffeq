@@ -645,7 +645,7 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
         return b, b_error
 
 
-class _VARIABLE_THIRD_ORDER(_VariableSubclass):
+class _Interpolatory3Variable(_VariableSubclass):
     """
     Variable-sampling 3rd-order method (generic Sanderse-Veldman).
 
@@ -743,7 +743,7 @@ class _VARIABLE_THIRD_ORDER(_VariableSubclass):
 # These are classes (not instances) since they need per-device initialization.
 VARIABLE_METHODS = {
     "adaptive_heun": _VARIABLE_SECOND_ORDER,
-    "generic3": _VARIABLE_THIRD_ORDER,
+    "interpolatory3_variable": _Interpolatory3Variable,
 }
 
 
@@ -762,7 +762,7 @@ def _get_method(
 
     Args:
         sampling_type: Whether to use uniform or variable sampling.
-        method_name: Name of the method (e.g. 'dopri5', 'generic3').
+        method_name: Name of the method (e.g. 'dopri5', 'interpolatory3_variable').
         device: Device to place the method's tensors on.
         dtype: Floating-point dtype for the method's tensors.
 

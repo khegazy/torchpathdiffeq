@@ -64,7 +64,7 @@ def integrate(
         method: Name of the quadrature method. Available:
             uniform sampling: 'adaptive_heun', 'fehlberg2', 'bosh3',
               'dopri5', 'gk15', 'gk21', 'gk31', 'cc17', 'cc33', 'cc65';
-            variable sampling: 'adaptive_heun', 'generic3'.
+            variable sampling: 'adaptive_heun', 'interpolatory3_variable'.
         sampling: 'uniform' uses fixed quadrature point positions within
             each step; 'variable' computes weights dynamically based on
             actual point positions.

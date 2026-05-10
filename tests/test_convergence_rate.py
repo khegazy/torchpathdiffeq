@@ -147,7 +147,7 @@ VARIABLE_RATE = {
     "adaptive_heun": 2,
     # Variable generic3 with uniformly-placed inner node (a=1/2 per panel)
     # reduces to Simpson's rule which is order 4 — rate 4, NOT 3.
-    "generic3": 4,
+    "interpolatory3_variable": 4,
 }
 
 

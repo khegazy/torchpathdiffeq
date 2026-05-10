@@ -147,7 +147,7 @@ class TestSolverFactory:
     def test_variable_dispatch(self):
         solver = adaptive_quadrature(
             sampling_type=steps.ADAPTIVE_VARIABLE,
-            method="generic3",
+            method="interpolatory3_variable",
             atol=1e-6,
             rtol=1e-6,
         )
@@ -162,5 +162,5 @@ class TestMethodRegistries:
             assert name in UNIFORM_METHODS, f"missing uniform method {name!r}"
 
     def test_variable_methods_present(self):
-        for name in ("adaptive_heun", "generic3"):
+        for name in ("adaptive_heun", "interpolatory3_variable"):
             assert name in VARIABLE_METHODS, f"missing variable method {name!r}"

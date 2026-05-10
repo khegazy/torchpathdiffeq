@@ -1761,7 +1761,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
     spaced indices to fit C points, and the b weights are recomputed for
     their new fractional positions.
 
-    Supported methods: 'adaptive_heun', 'generic3'.
+    Supported methods: 'adaptive_heun', 'interpolatory3_variable'.
 
     Attributes:
         method: The variable method instance with a ``tableau_b(c)`` method.

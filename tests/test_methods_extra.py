@@ -7,7 +7,7 @@ import torch
 from torchpathdiffeq import UNIFORM_METHODS
 from torchpathdiffeq.methods import (
     _VARIABLE_SECOND_ORDER,
-    _VARIABLE_THIRD_ORDER,
+    _Interpolatory3Variable,
     _Tableau,
 )
 
@@ -73,8 +73,8 @@ class TestTableauToDevice:
         assert method.tableau.b.device.type == "cpu"
 
     def test_variable_third_order_to_device(self):
-        """_VARIABLE_THIRD_ORDER().to_device('cpu') moves b_delta to CPU."""
-        method = _VARIABLE_THIRD_ORDER()
+        """_Interpolatory3Variable().to_device('cpu') moves b_delta to CPU."""
+        method = _Interpolatory3Variable()
         method.to_device("cpu")
         assert method.b_delta.device.type == "cpu"
 
@@ -95,8 +95,8 @@ class TestVariableSubclassDtype:
     """Tests for variable method dtype conversion."""
 
     def test_third_order_to_dtype_float32(self):
-        """_VARIABLE_THIRD_ORDER b_delta converts to float32."""
-        method = _VARIABLE_THIRD_ORDER()
+        """_Interpolatory3Variable b_delta converts to float32."""
+        method = _Interpolatory3Variable()
         method.to_dtype(torch.float32)
         assert method.b_delta.dtype == torch.float32
 

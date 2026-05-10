@@ -143,7 +143,7 @@ class TestVariableGetTableauB:
 
     def test_normalizes_to_unit(self):
         """generic3: mesh=[2,3,4] normalizes to c=[0, 0.5, 1] → Simpson weights."""
-        solver = make_variable_solver_for_unit_test("generic3")
+        solver = make_variable_solver_for_unit_test("interpolatory3_variable")
         t = torch.tensor([[[2.0], [3.0], [4.0]]], dtype=torch.float64)
         b, _ = solver._get_tableau_b(t)
         # At a=0.5: b0=1/6, ba=2/3, b1=1/6
@@ -154,7 +154,7 @@ class TestVariableGetTableauB:
 
     def test_different_positions_different_weights(self):
         """generic3: two steps with different midpoints produce different weights."""
-        solver = make_variable_solver_for_unit_test("generic3")
+        solver = make_variable_solver_for_unit_test("interpolatory3_variable")
         t = torch.tensor(
             [
                 [[0.0], [0.3], [1.0]],  # a=0.3
@@ -190,4 +190,9 @@ class TestGetNumTableauC:
         )
 
     def test_variable_generic3(self):
-        assert make_variable_solver_for_unit_test("generic3")._get_num_tableau_c() == 3
+        assert (
+            make_variable_solver_for_unit_test(
+                "interpolatory3_variable"
+            )._get_num_tableau_c()
+            == 3
+        )

@@ -30,7 +30,7 @@ from torchpathdiffeq.examples import (
 from torchpathdiffeq.examples import (
     t as t_fn,
 )
-from torchpathdiffeq.methods import _VARIABLE_THIRD_ORDER, _get_method
+from torchpathdiffeq.methods import _get_method, _Interpolatory3Variable
 
 # ---------------------------------------------------------------------------
 # get_sampling_type
@@ -126,7 +126,7 @@ class TestGetMethod:
 
 
 # ---------------------------------------------------------------------------
-# _VARIABLE_THIRD_ORDER weight computation
+# _Interpolatory3Variable weight computation
 # ---------------------------------------------------------------------------
 
 
@@ -135,25 +135,25 @@ class TestVariableThirdOrder:
 
     def test_b0_at_half(self):
         """b0(0.5) = 0.5 - 1/(6*0.5) = 1/6."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._b0(a), torch.tensor([1.0 / 6]))
 
     def test_ba_at_half(self):
         """ba(0.5) = 1/(6*0.5*0.5) = 2/3."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._ba(a), torch.tensor([2.0 / 3]))
 
     def test_b1_at_half(self):
         """b1(0.5) = (2-1.5)/(6*0.5) = 1/6."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._b1(a), torch.tensor([1.0 / 6]))
 
     def test_weights_sum_to_one_sweep(self):
         """b0 + ba + b1 = 1 for many values of a in (0, 1)."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a_vals = torch.linspace(0.01, 0.99, 50)
         b0 = method._b0(a_vals)
         ba = method._ba(a_vals)
@@ -165,7 +165,7 @@ class TestVariableThirdOrder:
 
     def test_tableau_b_shape(self):
         """tableau_b returns correct shapes for N=5, C=3."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         c = torch.rand(5, 3, 1)
         # Ensure c[:,0,:] = 0 and c[:,2,:] = 1 (endpoints)
         c[:, 0, :] = 0.0
@@ -180,7 +180,7 @@ class TestVariableThirdOrder:
 
     def test_tableau_b_midpoint_weights(self):
         """With a=0.5 (midpoint), weights should be [1/6, 2/3, 1/6] (Simpson's rule)."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         c = torch.tensor([[[0.0], [0.5], [1.0]]])  # [1, 3, 1]
         b, _ = method.tableau_b(c)
         expected = torch.tensor([[1.0 / 6, 2.0 / 3, 1.0 / 6]])

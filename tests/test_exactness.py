@@ -187,7 +187,7 @@ class TestVariableThirdOrderExactness:
 
     @pytest.fixture
     def method(self):
-        cls = VARIABLE_METHODS["generic3"]
+        cls = VARIABLE_METHODS["interpolatory3_variable"]
         instance = cls(device="cpu")
         instance.to_dtype(torch.float64)
         return instance
