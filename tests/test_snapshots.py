@@ -60,28 +60,34 @@ def _case_key(method: str, integrand: str, tol_label: str) -> str:
     return f"{method}|{integrand}|{tol_label}"
 
 
-def _force_cpu_float64():
-    """Snapshot tests run on CPU + float64 for cross-machine determinism."""
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    torch.set_default_dtype(torch.float64)
-
-
 def _run_case(method: str, integrand: str, atol: float, rtol: float) -> dict:
     """Run one solver call and record the values we want to pin.
 
     Sets the manual seed before each call so the random initial mesh
-    is reproducible.
+    is reproducible. Also temporarily sets the global default dtype to
+    float64 (snapshots run CPU + float64 for cross-machine determinism)
+    and restores it on exit. The restore matters: the solver's
+    random-mesh path goes through ``torch.rand`` which inherits the
+    default dtype, so leaving the default at float64 contaminates any
+    float32 solver constructed in a *later* test (their initial mesh
+    silently becomes float64 and trips dtype-mismatch assertions deep
+    in the adaptive loop).
     """
-    _force_cpu_float64()
-    torch.manual_seed(SEED)
-    f, _solution_fxn, _cutoff = ODE_dict[integrand]
-    solver = make_uniform_solver(method, atol=atol, rtol=rtol)
-    output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
-    return {
-        "integral": output.integral.tolist(),
-        "integral_error": output.integral_error.tolist(),
-        "n_optimal_mesh": int(output.mesh_optimal.shape[0]),
-    }
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    previous_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    try:
+        torch.manual_seed(SEED)
+        f, _solution_fxn, _cutoff = ODE_dict[integrand]
+        solver = make_uniform_solver(method, atol=atol, rtol=rtol)
+        output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
+        return {
+            "integral": output.integral.tolist(),
+            "integral_error": output.integral_error.tolist(),
+            "n_optimal_mesh": int(output.mesh_optimal.shape[0]),
+        }
+    finally:
+        torch.set_default_dtype(previous_default_dtype)
 
 
 def _generate_all() -> dict[str, dict]:
