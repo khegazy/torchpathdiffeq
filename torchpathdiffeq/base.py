@@ -90,7 +90,7 @@ class SolverBase(ABC, DistributedEnvironment):
     - Device management: inherited from DistributedEnvironment.
     - Default parameter storage: f, y0, mesh_init, mesh_final can be set at
       construction and reused across multiple integrate() calls.
-    - Warm-start caching: stores t_step_barriers_previous and previous_ode_fxn_id
+    - Warm-start caching: stores mesh_previous and previous_ode_fxn_id
       so that repeated integration of the same function can reuse the optimized
       time mesh from the prior run.
 
@@ -185,7 +185,7 @@ class SolverBase(ABC, DistributedEnvironment):
         # Used only when integrate(..., reuse_mesh=True) is passed; otherwise
         # ignored. The cached barriers are the *optimal* mesh from the
         # previous successful run (post-prune-and-refine).
-        self.t_step_barriers_previous = None
+        self.mesh_previous = None
         # id() of the last integrated function. Stored as a sanity-check
         # signal so that reuse_mesh=True can warn if the cached mesh was
         # tuned for a different integrand. Replaces the prior __name__
@@ -252,8 +252,8 @@ class SolverBase(ABC, DistributedEnvironment):
         self.y0 = self.y0.to(self.dtype)
         self.mesh_init = self.mesh_init.to(self.dtype)
         self.mesh_final = self.mesh_final.to(self.dtype)
-        if self.t_step_barriers_previous is not None:
-            self.t_step_barriers_previous = self.t_step_barriers_previous.to(self.dtype)
+        if self.mesh_previous is not None:
+            self.mesh_previous = self.mesh_previous.to(self.dtype)
 
         # Set assertion tolerances appropriate for this precision level.
         # These are used in internal sanity checks (e.g., time ordering),

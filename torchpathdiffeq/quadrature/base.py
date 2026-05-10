@@ -15,7 +15,7 @@ smaller steps; consecutive steps with very little error are merged.
 
 Key concepts:
 
-- **t_step_barriers**: Boundary points dividing [mesh_init, mesh_final] into steps.
+- **mesh**: Boundary points dividing [mesh_init, mesh_final] into steps.
   Shape: [M, T] where M is the number of barriers. Step i spans from
   barrier[i] to barrier[i+1].
 
@@ -334,9 +334,9 @@ class AdaptiveQuadrature(SolverBase):
         method_output: MethodOutput | None,
         error_ratios: torch.Tensor,
         y_step_eval: torch.Tensor | None,
-        t_step_eval: torch.Tensor | None,
-        t_step_barriers: torch.Tensor,
-        t_step_barrier_idxs: torch.Tensor,
+        nodes: torch.Tensor | None,
+        mesh: torch.Tensor,
+        mesh_idxs: torch.Tensor,
         t_step_trackers: torch.Tensor,
     ) -> tuple[
         MethodOutput | None,
@@ -365,67 +365,59 @@ class AdaptiveQuadrature(SolverBase):
                 steps are removed from it.
             error_ratios: Per-step error ratios. Shape: [N_batch].
             y_step_eval: Integrand evaluations for current batch. Shape: [N_batch, C, D].
-            t_step_eval: Time points for current batch. Shape: [N_batch, C, T].
-            t_step_barriers: All barrier positions. Shape: [M, T].
-            t_step_barrier_idxs: Indices into t_step_barriers for the steps
+            nodes: Time points for current batch. Shape: [N_batch, C, T].
+            mesh: All barrier positions. Shape: [M, T].
+            mesh_idxs: Indices into mesh for the steps
                 in the current batch. Shape: [N_batch].
             t_step_trackers: Boolean array tracking which steps need evaluation.
                 Shape: [M].
 
         Returns:
-            Tuple of (method_output, y_step_eval, t_step_eval,
-            t_step_barriers_new, t_step_trackers_new, error_ratios_kept):
+            Tuple of (method_output, y_step_eval, nodes,
+            mesh_new, t_step_trackers_new, error_ratios_kept):
                 - method_output: Updated with rejected steps removed.
                 - y_step_eval: Kept evaluations only.
-                - t_step_eval: Kept time points only.
-                - t_step_barriers_new: Barriers with new midpoints inserted.
+                - nodes: Kept time points only.
+                - mesh_new: Barriers with new midpoints inserted.
                 - t_step_trackers_new: Updated tracker with new steps marked True.
                 - error_ratios_kept: Error ratios for accepted steps only.
         """
         # Steps that pass the error tolerance are accepted (done)
         keep_mask = error_ratios < 1.0
-        t_step_trackers[t_step_barrier_idxs[keep_mask]] = False
+        t_step_trackers[mesh_idxs[keep_mask]] = False
 
         # Steps that fail the error tolerance need to be split
         remove_mask = error_ratios >= 1.0
         N_t_add = torch.sum(remove_mask)
         # Allocate new barriers array with room for inserted midpoints
-        t_step_barriers_new = torch.nan * torch.ones(
-            (N_t_add + len(t_step_barriers), t_step_barriers.shape[-1]),
+        mesh_new = torch.nan * torch.ones(
+            (N_t_add + len(mesh), mesh.shape[-1]),
             dtype=self.dtype,
             device=self.device,
         )
         t_step_trackers_new = torch.ones(
-            N_t_add + len(t_step_barriers), dtype=bool, device=self.device
+            N_t_add + len(mesh), dtype=bool, device=self.device
         )
 
         # Transfer existing barriers to their new positions in the expanded array.
         # Each rejected step causes a +1 offset for all subsequent barriers
         # (because a midpoint is being inserted). idx_offset tracks this shift.
-        idx_offset = torch.zeros(
-            len(t_step_barriers), dtype=torch.long, device=self.device
-        )
-        idx_offset[t_step_barrier_idxs[remove_mask] + 1] = 1
+        idx_offset = torch.zeros(len(mesh), dtype=torch.long, device=self.device)
+        idx_offset[mesh_idxs[remove_mask] + 1] = 1
         idx_offset = torch.cumsum(idx_offset, dim=0)
-        idxs_transfer = idx_offset + torch.arange(
-            len(t_step_barriers), device=self.device
-        )
-        t_step_barriers_new[idxs_transfer] = t_step_barriers.clone()
+        idxs_transfer = idx_offset + torch.arange(len(mesh), device=self.device)
+        mesh_new[idxs_transfer] = mesh.clone()
         t_step_trackers_new[idxs_transfer] = t_step_trackers.clone()
 
         # Insert new midpoint barriers between the start and end of rejected steps.
         # The midpoint is placed at (left_barrier + right_barrier) / 2.
         idxs_new = (
-            t_step_barrier_idxs[remove_mask]
-            + torch.arange(N_t_add, device=self.device)
-            + 1
+            mesh_idxs[remove_mask] + torch.arange(N_t_add, device=self.device) + 1
         )
-        t_add_barriers = 0.5 * (
-            t_step_barriers_new[idxs_new - 1] + t_step_barriers_new[idxs_new + 1]
-        )
-        t_step_barriers_new[idxs_new] = t_add_barriers
-        assert torch.sum(torch.isnan(t_step_barriers_new)) == 0
-        assert len(idxs_new) + len(idxs_transfer) == len(t_step_barriers_new)
+        t_add_barriers = 0.5 * (mesh_new[idxs_new - 1] + mesh_new[idxs_new + 1])
+        mesh_new[idxs_new] = t_add_barriers
+        assert torch.sum(torch.isnan(mesh_new)) == 0
+        assert len(idxs_new) + len(idxs_transfer) == len(mesh_new)
 
         if method_output is not None:
             method_output.sum_steps = method_output.sum_steps[keep_mask]
@@ -435,13 +427,13 @@ class AdaptiveQuadrature(SolverBase):
             method_output.integral_error = torch.sum(method_output.sum_step_errors, 0)
         if y_step_eval is not None:
             y_step_eval = y_step_eval[keep_mask]
-        if t_step_eval is not None:
-            t_step_eval = t_step_eval[keep_mask]
+        if nodes is not None:
+            nodes = nodes[keep_mask]
         return (
             method_output,
             y_step_eval,
-            t_step_eval,
-            t_step_barriers_new,
+            nodes,
+            mesh_new,
             t_step_trackers_new,
             error_ratios[keep_mask],
         )
@@ -479,8 +471,8 @@ class AdaptiveQuadrature(SolverBase):
 
         return self._merge_excess_t(t, sum_steps, sum_step_errors, ratio_idxs_cut)
 
-    def _get_optimal_t_step_barriers(
-        self, record: dict[str, torch.Tensor], t_step_barriers: torch.Tensor
+    def _get_optimal_mesh(
+        self, record: dict[str, torch.Tensor], mesh: torch.Tensor
     ) -> torch.Tensor:
         """
         Compute an optimized time mesh from the converged integration results.
@@ -499,7 +491,7 @@ class AdaptiveQuadrature(SolverBase):
         Args:
             record: Dictionary of converged results including 't', 'sum_steps',
                 'sum_step_errors', and 'integral'.
-            t_step_barriers: Current barrier positions. Shape: [M, T].
+            mesh: Current barrier positions. Shape: [M, T].
 
         Returns:
             Optimized barrier positions. Shape: [M_opt, T].
@@ -516,8 +508,8 @@ class AdaptiveQuadrature(SolverBase):
             record["sum_step_errors"],
             error_ratios_2steps,
         )
-        t_step_barriers_pruned = torch.concatenate(
-            [t_pruned[:, 0, :], t_step_barriers[-1].unsqueeze(0)], dim=0
+        mesh_pruned = torch.concatenate(
+            [t_pruned[:, 0, :], mesh[-1].unsqueeze(0)], dim=0
         )
 
         # Add new t steps using converged integral value
@@ -530,18 +522,16 @@ class AdaptiveQuadrature(SolverBase):
             method_output=None,
             error_ratios=error_ratios,
             y_step_eval=None,
-            t_step_eval=None,
-            t_step_barriers=t_step_barriers_pruned,
-            t_step_barrier_idxs=torch.arange(
-                len(t_step_barriers_pruned) - 1, device=self.device
-            ),
+            nodes=None,
+            mesh=mesh_pruned,
+            mesh_idxs=torch.arange(len(mesh_pruned) - 1, device=self.device),
             t_step_trackers=torch.zeros(
-                len(t_step_barriers_pruned), dtype=bool, device=self.device
+                len(mesh_pruned), dtype=bool, device=self.device
             ),
         )
-        _, _, _, t_step_barriers_optimal, _, _ = adaptive_step
+        _, _, _, mesh_optimal, _, _ = adaptive_step
 
-        return t_step_barriers_optimal
+        return mesh_optimal
 
     def _rec_remove(self, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -1073,11 +1063,11 @@ class AdaptiveQuadrature(SolverBase):
             f: The integrand f(t). Takes shape [N, T], returns [N, D].
                 If None, uses the function from construction.
             y0: Initial integral accumulator value. Shape: [D].
-            t: Optional initial step barriers. If provided, these are the
+            mesh: Optional initial step barriers. If provided, these are the
                 starting mesh. If None, a random mesh is generated. Shape: [N, T].
             mesh_init: Lower integration bound. Shape: [T].
             mesh_final: Upper integration bound. Shape: [T].
-            N_init_steps: Approximate number of initial steps when t is None.
+            N_init_steps: Approximate number of initial steps when mesh is None.
                 The actual count is ~sqrt(N_init_steps) segments with
                 ~sqrt(N_init_steps)+1 random sub-barriers each.
             ode_args: Extra arguments passed to f after the time tensor.
@@ -1115,44 +1105,38 @@ class AdaptiveQuadrature(SolverBase):
                 cost. If reuse_mesh=True but no cache exists, falls back to
                 a fresh initial mesh and emits a warning. If the cached mesh
                 was produced for a different integrand (id mismatch), emits
-                a warning but proceeds. Ignored when ``t`` is provided
-                explicitly (the explicit ``t`` always takes precedence).
+                a warning but proceeds. Ignored when ``mesh`` is provided
+                explicitly (the explicit ``mesh`` always takes precedence).
 
         Returns:
-            IntegrationResult with the computed integral, error estimates, time
-            mesh (t), optimized mesh (t_optimal), and diagnostics.
+            IntegrationResult with the computed integral, error estimates, the
+            optimized mesh (mesh_optimal), per-step nodes, and diagnostics.
 
         Note:
-            If t is provided, the solver uses these as initial barriers. Steps
-            may be split or merged, but the bounds [t[0], t[-1]] are preserved.
-            If t is None and reuse_mesh is False (default), a random initial
-            mesh is generated in [mesh_init, mesh_final].
+            If mesh is provided, the solver uses these as initial barriers.
+            Steps may be split or merged, but the bounds [mesh[0], mesh[-1]]
+            are preserved. If mesh is None and reuse_mesh is False (default),
+            a random initial mesh is generated in [mesh_init, mesh_final].
         """
-        # Bind public-API parameter ``mesh`` to the legacy internal name ``t``
-        # so the rest of this method body can stay unchanged. The user passes
-        # in ``mesh=`` (the mesh of barriers); inside, ``t`` is reused both for
-        # the initial mesh and later for per-step quadrature node tensors.
-        t = mesh
-
         # Set dtype based on input
-        self.set_dtype_by_input(mesh=t, mesh_init=mesh_init, mesh_final=mesh_init)
+        self.set_dtype_by_input(mesh=mesh, mesh_init=mesh_init, mesh_final=mesh_init)
 
-        # If t is given set mesh_init and mesh_final, else use input, else use save values
-        if t is not None:
-            assert len(t.shape) == 2
-            t = t.to(self.dtype).to(self.device)
+        # If mesh is given set mesh_init and mesh_final, else use input, else use saved values
+        if mesh is not None:
+            assert len(mesh.shape) == 2
+            mesh = mesh.to(self.dtype).to(self.device)
             if mesh_init is not None:
                 mesh_init = mesh_init.to(self.dtype).to(self.device)
                 assert torch.allclose(
-                    t[0], mesh_init, atol=self.atol_assert, rtol=self.rtol_assert
+                    mesh[0], mesh_init, atol=self.atol_assert, rtol=self.rtol_assert
                 )
             if mesh_final is not None:
                 mesh_final = mesh_final.to(self.dtype).to(self.device)
                 assert torch.allclose(
-                    t[-1], mesh_final, atol=self.atol_assert, rtol=self.rtol_assert
+                    mesh[-1], mesh_final, atol=self.atol_assert, rtol=self.rtol_assert
                 )
-            mesh_init = t[0]
-            mesh_final = t[-1]
+            mesh_init = mesh[0]
+            mesh_final = mesh[-1]
             assert mesh_init < mesh_final, (
                 "Integrator requires mesh_init < mesh_final, consider switching them and multiplying the integral by -1. Please also consider effects to your f."
             )
@@ -1203,15 +1187,14 @@ class AdaptiveQuadrature(SolverBase):
         del test_output
 
         # Decide initial mesh:
-        #   - explicit t passed in: use it (always takes precedence);
+        #   - explicit mesh passed in: use it (always takes precedence);
         #   - reuse_mesh=True with a populated cache: warm-start from the
         #     cached optimal mesh, snapping its endpoints to [mesh_init, mesh_final];
         #   - otherwise: generate a fresh random initial mesh.
-        if t is not None:
-            t_is_given = True
-            t_step_barriers = t
-        elif reuse_mesh and self.t_step_barriers_previous is not None:
-            t_is_given = False
+        if mesh is not None:
+            mesh_is_given = True
+        elif reuse_mesh and self.mesh_previous is not None:
+            mesh_is_given = False
             # Warn if the cached mesh was produced for a different integrand;
             # the user has opted into reuse but we should flag the mismatch.
             if not same_ode_fxn:
@@ -1223,27 +1206,21 @@ class AdaptiveQuadrature(SolverBase):
                 )
             # Filter cached barriers to within the new [mesh_init, mesh_final].
             # TODO: CHECK THIS PART WITH MULTI DIM T
-            mask = (self.t_step_barriers_previous[:, 0] <= mesh_final[0]) & (
-                self.t_step_barriers_previous[:, 0] >= mesh_init[0]
+            mask = (self.mesh_previous[:, 0] <= mesh_final[0]) & (
+                self.mesh_previous[:, 0] >= mesh_init[0]
             )
-            t_step_barriers = self.t_step_barriers_previous[mask]
+            mesh = self.mesh_previous[mask]
             # Ensure the warm-started mesh starts at mesh_init.
-            if len(t_step_barriers) == 0 or not torch.all(
-                t_step_barriers[0] == mesh_init
-            ):
-                t_step_barriers = torch.concatenate(
-                    [mesh_init.unsqueeze(0), t_step_barriers], dim=0
-                )
+            if len(mesh) == 0 or not torch.all(mesh[0] == mesh_init):
+                mesh = torch.concatenate([mesh_init.unsqueeze(0), mesh], dim=0)
             # Ensure the warm-started mesh ends at mesh_final.
             # (Bug B1 fix: previously concatenated mesh_init here, producing a
             # non-monotone mesh whenever the cached endpoint did not match
             # the new mesh_final.)
-            if not torch.all(t_step_barriers[-1] == mesh_final):
-                t_step_barriers = torch.concatenate(
-                    [t_step_barriers, mesh_final.unsqueeze(0)], dim=0
-                )
+            if not torch.all(mesh[-1] == mesh_final):
+                mesh = torch.concatenate([mesh, mesh_final.unsqueeze(0)], dim=0)
         else:
-            t_is_given = False
+            mesh_is_given = False
             if reuse_mesh:
                 warnings.warn(
                     "reuse_mesh=True but no cached mesh is available "
@@ -1260,7 +1237,7 @@ class AdaptiveQuadrature(SolverBase):
                 torch.int
             )
             dt = (mesh_final - mesh_init) / N_even_t
-            t_step_barriers = (
+            mesh = (
                 mesh_init
                 + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
             )  # TODO: this assumes time is 1d
@@ -1277,7 +1254,7 @@ class AdaptiveQuadrature(SolverBase):
                 # call ``torch.manual_seed`` before integrate().
                 random_ts = dt * torch.rand((N_even_t, n_sub, 1), device=self.device)
                 random_ts = torch.sort(random_ts, dim=1)[0]
-                t_step_barriers = t_step_barriers + random_ts
+                mesh = mesh + random_ts
             else:
                 # Deterministic uniformly-spaced sub-barriers within
                 # each segment. Available for debugging and for
@@ -1296,23 +1273,23 @@ class AdaptiveQuadrature(SolverBase):
                     * torch.arange(n_sub, dtype=self.dtype, device=self.device)
                     / n_sub
                 )
-                t_step_barriers = t_step_barriers + offsets[None, :, None]
+                mesh = mesh + offsets[None, :, None]
             # Enforce exact start and end points
-            t_step_barriers[0] += mesh_init - t_step_barriers[0, 0]
-            t_step_barriers[-1] += mesh_final - t_step_barriers[-1, -1]
+            mesh[0] += mesh_init - mesh[0, 0]
+            mesh[-1] += mesh_final - mesh[-1, -1]
             # Flatten segments into a single sorted barrier array
-            t_step_barriers = torch.flatten(t_step_barriers, start_dim=0, end_dim=1)
-            t_step_barriers[0] = mesh_init
-            t_step_barriers[-1] = mesh_final
-            assert torch.all(t_step_barriers[1:] - t_step_barriers[:-1] > 0)
-        t_step_trackers = torch.ones(len(t_step_barriers), device=self.device).to(bool)
+            mesh = torch.flatten(mesh, start_dim=0, end_dim=1)
+            mesh[0] = mesh_init
+            mesh[-1] = mesh_final
+            assert torch.all(mesh[1:] - mesh[:-1] > 0)
+        t_step_trackers = torch.ones(len(mesh), device=self.device).to(bool)
         t_step_trackers[-1] = False  # mesh_final cannot be a step starting point
         """
         t_steps_init = self._get_initial_t_steps(
-            t, mesh_init, mesh_final, enforce_endpoints=True
+            mesh, mesh_init, mesh_final, enforce_endpoints=True
         )
         """
-        t, y = None, None
+        nodes, y = None, None
 
         record = {}
         # === Main integration loop ===
@@ -1330,29 +1307,25 @@ class AdaptiveQuadrature(SolverBase):
 
             # --- Step 1: Select a batch of unevaluated steps ---
             # Find barrier indices where t_step_trackers is True, take up to max_steps
-            step_idxs = torch.arange(len(t_step_barriers), device=self.device)
+            step_idxs = torch.arange(len(mesh), device=self.device)
             step_idxs = step_idxs[t_step_trackers]
             step_idxs = step_idxs[:max_steps]
             # Place C quadrature points within each selected step
-            t_step_eval = self._t_step_interpolate(
-                t_step_barriers[step_idxs], t_step_barriers[step_idxs + 1]
-            )
-            t_flat = torch.flatten(t_step_eval, start_dim=0, end_dim=1)
+            nodes = self._t_step_interpolate(mesh[step_idxs], mesh[step_idxs + 1])
+            t_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
             assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
             error_ratios = None
 
             # --- Step 2: Evaluate the integrand at all quadrature points ---
             # Flatten [N, C, T] -> [N*C, T] for batch evaluation, then reshape back
-            N, C, _T = t_step_eval.shape
-            y_step_eval = f(
-                torch.flatten(t_step_eval, start_dim=0, end_dim=-2), *ode_args
-            )
+            N, C, _T = nodes.shape
+            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *ode_args)
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
 
             # --- Step 3: Compute integral contributions via RK formula ---
             t0 = time.time()
             method_output = self._calculate_integral(
-                t_step_eval,
+                nodes,
                 y_step_eval,
                 y0=torch.zeros(1, device=self.device, dtype=self.dtype),
             )
@@ -1366,7 +1339,7 @@ class AdaptiveQuadrature(SolverBase):
                 current_integral = record["integral"] + method_output.integral.detach()
                 # Merge new steps into the sorted record to compute cumulative sums
                 idxs_keep, idxs_input = self._get_sorted_indices(
-                    record["nodes"][:, 0, 0], t_step_eval[:, 0, 0]
+                    record["nodes"][:, 0, 0], nodes[:, 0, 0]
                 )
                 all_sum_steps = self._insert_sorted_results(
                     record["sum_steps"], idxs_keep, method_output.sum_steps, idxs_input
@@ -1386,7 +1359,7 @@ class AdaptiveQuadrature(SolverBase):
                 self.speed_logger.debug("calculate errors: %s", time.time() - t0)
             assert len(y_step_eval) == len(error_ratios)
             assert len(y_step_eval) - 1 == len(error_ratios_2steps), (
-                f" y: {y_step_eval.shape} | ratios: {error_ratios_2steps.shape} | t: {t.shape}"
+                f" y: {y_step_eval.shape} | ratios: {error_ratios_2steps.shape} | nodes: {nodes.shape}"
             )
             logger.debug("error_ratios: %s", error_ratios)
             logger.debug("error_ratios_2steps: %s", error_ratios_2steps)
@@ -1398,7 +1371,7 @@ class AdaptiveQuadrature(SolverBase):
             # most-recent batch's intermediate result so callers can
             # inspect partial state instead of having to special-case
             # None.
-            if t_is_given and self.max_path_change is not None:
+            if mesh_is_given and self.max_path_change is not None:
                 fail_ratio = torch.sum(error_ratios > 1.0).to(float) / len(error_ratios)
                 if fail_ratio >= self.max_path_change:
                     logger.warning(
@@ -1410,10 +1383,10 @@ class AdaptiveQuadrature(SolverBase):
                     return IntegrationResult(
                         integral=method_output.integral,
                         integral_error=method_output.integral_error,
-                        mesh_optimal=t_step_barriers,
+                        mesh_optimal=mesh,
                         mesh_init=mesh_init,
                         mesh_final=mesh_final,
-                        nodes=t_step_eval,
+                        nodes=nodes,
                         h=method_output.h,
                         y=y_step_eval,
                         sum_steps=method_output.sum_steps,
@@ -1431,34 +1404,34 @@ class AdaptiveQuadrature(SolverBase):
             (
                 method_output,
                 y_step_eval,
-                t_step_eval,
-                t_step_barriers,
+                nodes,
+                mesh,
                 t_step_trackers,
                 error_ratios,
             ) = self._adaptively_add_steps(
                 method_output=method_output,
                 error_ratios=error_ratios,
                 y_step_eval=y_step_eval,
-                t_step_eval=t_step_eval,
-                t_step_barriers=t_step_barriers,
-                t_step_barrier_idxs=step_idxs,
+                nodes=nodes,
+                mesh=mesh,
+                mesh_idxs=step_idxs,
                 t_step_trackers=t_step_trackers,
             )
             # Verify barrier ordering after adaptive refinement
-            t_step_barriers_diff = t_step_barriers[1:, 0] - t_step_barriers[:-1, 0]
-            assert torch.all(t_step_barriers_diff + self.atol_assert > 0) or torch.all(
-                t_step_barriers_diff - self.atol_assert < 0
+            mesh_diff = mesh[1:, 0] - mesh[:-1, 0]
+            assert torch.all(mesh_diff + self.atol_assert > 0) or torch.all(
+                mesh_diff - self.atol_assert < 0
             )
 
             # --- Step 6: Record accepted results and handle gradients ---
-            if t_step_eval.shape[0] > 0:
+            if nodes.shape[0] > 0:
                 take_gradient = take_gradient or (
                     self.training and (torch.any(t_step_trackers) or take_gradient)
                 )
                 intermediate_results = IntegrationResult(
                     integral=method_output.integral,
                     integral_error=method_output.integral_error,
-                    nodes=t_step_eval,
+                    nodes=nodes,
                     h=method_output.h,
                     y=y_step_eval,
                     sum_steps=method_output.sum_steps,
@@ -1489,17 +1462,15 @@ class AdaptiveQuadrature(SolverBase):
         # === Post-convergence: sort results and optimize the mesh ===
         record = self._sort_record(record)
         # Prune over-resolved steps and refine under-resolved ones
-        t_step_barriers_optimal = self._get_optimal_t_step_barriers(
-            record, t_step_barriers
-        )
+        mesh_optimal = self._get_optimal_mesh(record, mesh)
         # Cache results for warm-starting subsequent calls with the same integrand
-        self.t_step_barriers_previous = t_step_barriers_optimal
+        self.mesh_previous = mesh_optimal
         self.previous_ode_fxn_id = id(f)
 
         return IntegrationResult(
             integral=record["integral"],
             integral_error=record["integral_error"],
-            mesh_optimal=t_step_barriers_optimal,
+            mesh_optimal=mesh_optimal,
             mesh_init=mesh_init,
             mesh_final=mesh_final,
             nodes=record["nodes"],
