@@ -79,22 +79,15 @@ def test_no_warm_start_path_correctness():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Bug B2: parallel_solver.py:1099 keys warm-start cache on "
-    "ode_fxn.__name__ which is '<lambda>' for every lambda. Phase 1 will "
-    "switch to id()-based keying with explicit reuse_mesh opt-in, at which "
-    "point this xfail unmarks itself.",
-    strict=True,
-)
 def test_lambda_cache_key_distinguishes_different_lambdas():
     """After integrating lambda1 then lambda2, the solver's cached
-    'previous integrand' identifier should distinguish the two —
+    'previous integrand' identifier must distinguish the two —
     otherwise the warm-start mechanism cannot be made correct.
 
-    Currently the identifier is ``ode_fxn.__name__`` which is
-    ``'<lambda>'`` for both. After the Phase 1 fix the identifier
-    will be a stable per-function id (or be cleared entirely on
-    integrand change), and this test will pass.
+    Phase 1 fix (Bug B2): the identifier was ``ode_fxn.__name__`` which
+    is ``'<lambda>'`` for every lambda. It now stores ``id(ode_fxn)``,
+    a stable per-function value that distinguishes any two function
+    objects.
     """
     solver = make_uniform_solver("dopri5", atol=1e-6, rtol=1e-6)
 
@@ -105,15 +98,14 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
     t_final = torch.tensor([math.pi], dtype=torch.float64)
 
     solver.integrate(ode_fxn=f1, t_init=t_init, t_final=t_final)
-    key_after_f1 = solver.previous_ode_fxn
+    key_after_f1 = solver.previous_ode_fxn_id
 
     solver.integrate(ode_fxn=f2, t_init=t_init, t_final=t_final)
-    key_after_f2 = solver.previous_ode_fxn
+    key_after_f2 = solver.previous_ode_fxn_id
 
     assert key_after_f1 != key_after_f2, (
         f"Solver cannot distinguish lambda1 from lambda2: "
-        f"key_after_f1={key_after_f1!r}, key_after_f2={key_after_f2!r}. "
-        f"This is bug B2 — both lambdas have __name__ == '<lambda>'."
+        f"key_after_f1={key_after_f1!r}, key_after_f2={key_after_f2!r}."
     )
 
 
@@ -124,19 +116,12 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
 # -----------------------------------------------------------------------------
 
 
-def test_warm_start_cache_load_is_currently_dead_code():
-    """The conditional barrier reload at parallel_solver.py:1119-1133
-    is followed by an unconditional ``if t is None`` block at line 1135
-    that overwrites ``t_step_barriers`` with a fresh random mesh.
-    The cache-load branch therefore has no observable effect on the
-    final integral, masking bug B1 (the t_init/t_final swap on line
-    1132) end-to-end.
-
-    Phase 1 must make warm-start actually work via an explicit
-    ``reuse_mesh=True`` opt-in. Until then, this test pins the
-    current behavior: a second call with the same lambda and a
-    *different* t_final returns a correct integral despite the
-    buggy cache-load path.
+def test_warm_start_with_new_t_final_yields_correct_mesh():
+    """After Phase 1's reuse_mesh opt-in, calling the solver a second
+    time with ``reuse_mesh=True`` and a *different* ``t_final`` than
+    the first call must still produce a monotone mesh that ends at
+    the new ``t_final``. This exercises the warm-start path which
+    Phase 1's Bug B1 fix activated.
     """
     solver = make_uniform_solver("dopri5", atol=1e-6, rtol=1e-6)
 
@@ -151,16 +136,25 @@ def test_warm_start_cache_load_is_currently_dead_code():
     assert abs(out_first.integral.item() - expected_first) < 1e-5
 
     out_second = solver.integrate(
-        ode_fxn=f, t_init=t_init, t_final=torch.tensor([1.5], dtype=torch.float64)
+        ode_fxn=f,
+        t_init=t_init,
+        t_final=torch.tensor([1.5], dtype=torch.float64),
+        reuse_mesh=True,
     )
-    assert out_second is not None  # see B6 / Phase 1
+    assert out_second is not None
     expected_second = 1.0 - math.cos(1.5)
     assert abs(out_second.integral.item() - expected_second) < 1e-5
 
-    # The optimal mesh ends at the new t_final. (This passes today
-    # because the random-mesh path enforces it; the cache-load
-    # bug never gets a chance to corrupt the final mesh.)
+    # Bug B1 fix: the warm-started mesh ends at the new t_final
+    # (previously the buggy concatenation appended t_init here,
+    # producing non-monotone barriers).
     assert abs(out_second.t_optimal[-1].item() - 1.5) < 1e-12
+
+    # Mesh is monotone non-decreasing.
+    diffs = out_second.t_optimal[1:, 0] - out_second.t_optimal[:-1, 0]
+    assert torch.all(diffs >= 0), (
+        f"warm-started mesh is not monotone: diffs.min()={diffs.min().item()}"
+    )
 
 
 # -----------------------------------------------------------------------------

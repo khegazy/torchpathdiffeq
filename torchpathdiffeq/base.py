@@ -164,7 +164,7 @@ class SolverBase(ABC, DistributedEnvironment):
     - Device management: inherited from DistributedEnvironment.
     - Default parameter storage: ode_fxn, y0, t_init, t_final can be set at
       construction and reused across multiple integrate() calls.
-    - Warm-start caching: stores t_step_barriers_previous and previous_ode_fxn
+    - Warm-start caching: stores t_step_barriers_previous and previous_ode_fxn_id
       so that repeated integration of the same function can reuse the optimized
       time mesh from the prior run.
 
@@ -252,10 +252,16 @@ class SolverBase(ABC, DistributedEnvironment):
         )
         # Determine if in training or eval mode
         self._infer_training(is_training, ode_fxn)
-        # Cached time barriers from last integration for warm-starting
+        # Cached time barriers from last integration for warm-starting.
+        # Used only when integrate(..., reuse_mesh=True) is passed; otherwise
+        # ignored. The cached barriers are the *optimal* mesh from the
+        # previous successful run (post-prune-and-refine).
         self.t_step_barriers_previous = None
-        # Name of the last integrated function (for warm-start matching)
-        self.previous_ode_fxn = None
+        # id() of the last integrated function. Stored as a sanity-check
+        # signal so that reuse_mesh=True can warn if the cached mesh was
+        # tuned for a different integrand. Replaces the prior __name__
+        # comparison which collided across all lambdas.
+        self.previous_ode_fxn_id = None
 
         self._set_dtype(dtype)
 

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import time
+import warnings
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
@@ -996,6 +997,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         total_mem_usage: float | None = None,
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
+        reuse_mesh: bool = False,
     ) -> IntegralOutput:
         """
         Perform parallel adaptive numerical integration of ode_fxn.
@@ -1040,6 +1042,17 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 scalar tensor. If None, uses the integral value itself.
             max_batch: Maximum evaluations per batch. Overrides dynamic memory
                 calculation if provided.
+            reuse_mesh: When True, seed the integration from the optimal mesh
+                cached by the previous successful call (warm start). Default
+                False. The cached mesh is the *optimal* mesh produced after
+                prune-and-refine on the previous call; reusing it across
+                training-loop iterations where the integrand changes only
+                slightly between calls saves substantial adaptive-refinement
+                cost. If reuse_mesh=True but no cache exists, falls back to
+                a fresh initial mesh and emits a warning. If the cached mesh
+                was produced for a different integrand (id mismatch), emits
+                a warning but proceeds. Ignored when ``t`` is provided
+                explicitly (the explicit ``t`` always takes precedence).
 
         Returns:
             IntegralOutput with the computed integral, error estimates, time
@@ -1048,7 +1061,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Note:
             If t is provided, the solver uses these as initial barriers. Steps
             may be split or merged, but the bounds [t[0], t[-1]] are preserved.
-            If t is None, a random initial mesh is generated in [t_init, t_final].
+            If t is None and reuse_mesh is False (default), a random initial
+            mesh is generated in [t_init, t_final].
         """
 
         # Set dtype based on input
@@ -1095,8 +1109,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         MEM_ERROR = "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
         assert total_mem_usage <= 1.0, MEM_ERROR
         assert total_mem_usage > 0, MEM_ERROR
-        # Check if this is the same integrand as the previous call (for warm-starting)
-        same_ode_fxn = ode_fxn.__name__ == self.previous_ode_fxn
+        # Has memory been benchmarked for this integrand yet? Skip the
+        # benchmark if id(ode_fxn) matches what we've already measured.
+        # Using id() avoids the lambda-collision bug present in earlier
+        # versions which compared ode_fxn.__name__ (every lambda has
+        # __name__ == "<lambda>").
+        same_ode_fxn = (
+            self.previous_ode_fxn_id is not None
+            and id(ode_fxn) == self.previous_ode_fxn_id
+        )
         # Benchmark memory footprint on first call with a new integrand
         if not same_ode_fxn and max_batch is None:
             self._setup_memory_checks(ode_fxn, t_init, ode_args=ode_args)
@@ -1115,29 +1136,57 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         assert len(test_output.shape) >= 2
         del test_output
 
-        # Load latest evaluation if it exists and values are unspecified
-        if t is None and same_ode_fxn:
+        # Decide initial mesh:
+        #   - explicit t passed in: use it (always takes precedence);
+        #   - reuse_mesh=True with a populated cache: warm-start from the
+        #     cached optimal mesh, snapping its endpoints to [t_init, t_final];
+        #   - otherwise: generate a fresh random initial mesh.
+        if t is not None:
+            t_is_given = True
+            t_step_barriers = t
+        elif reuse_mesh and self.t_step_barriers_previous is not None:
+            t_is_given = False
+            # Warn if the cached mesh was produced for a different integrand;
+            # the user has opted into reuse but we should flag the mismatch.
+            if not same_ode_fxn:
+                warnings.warn(
+                    "reuse_mesh=True but ode_fxn id differs from the cached "
+                    "integrand; warm-started mesh may be poorly tuned for "
+                    "this f.",
+                    stacklevel=2,
+                )
+            # Filter cached barriers to within the new [t_init, t_final].
             # TODO: CHECK THIS PART WITH MULTI DIM T
-            assert self.t_step_barriers_previous is not None
-            mask = (self.t_step_barriers_previous[:, 0] <= t_final[0]) + (
+            mask = (self.t_step_barriers_previous[:, 0] <= t_final[0]) & (
                 self.t_step_barriers_previous[:, 0] >= t_init[0]
             )
             t_step_barriers = self.t_step_barriers_previous[mask]
-            if not torch.all(t_step_barriers[0] == t_init):
+            # Ensure the warm-started mesh starts at t_init.
+            if len(t_step_barriers) == 0 or not torch.all(t_step_barriers[0] == t_init):
                 t_step_barriers = torch.concatenate(
                     [t_init.unsqueeze(0), t_step_barriers], dim=0
                 )
+            # Ensure the warm-started mesh ends at t_final.
+            # (Bug B1 fix: previously concatenated t_init here, producing a
+            # non-monotone mesh whenever the cached endpoint did not match
+            # the new t_final.)
             if not torch.all(t_step_barriers[-1] == t_final):
                 t_step_barriers = torch.concatenate(
-                    [t_step_barriers, t_init.unsqueeze(0)], dim=0
+                    [t_step_barriers, t_final.unsqueeze(0)], dim=0
                 )
-
-        if t is None:
+        else:
+            t_is_given = False
+            if reuse_mesh:
+                warnings.warn(
+                    "reuse_mesh=True but no cached mesh is available "
+                    "(first call, or after solver state was reset). "
+                    "Falling back to a fresh initial mesh.",
+                    stacklevel=2,
+                )
             # Generate a random initial mesh of barriers across [t_init, t_final].
             # Uses sqrt(N_init_steps) evenly-spaced segments, each subdivided by
-            # random sub-barriers. Randomization avoids edge issues that occur when
-            # barriers align with features of the integrand.
-            t_is_given = False
+            # random sub-barriers. Randomization avoids edge issues that occur
+            # when barriers align with features of the integrand.
             N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(
                 torch.int
             )
@@ -1158,9 +1207,6 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             t_step_barriers[0] = t_init
             t_step_barriers[-1] = t_final
             assert torch.all(t_step_barriers[1:] - t_step_barriers[:-1] > 0)
-        else:
-            t_is_given = True
-            t_step_barriers = t
         t_step_trackers = torch.ones(len(t_step_barriers), device=self.device).to(bool)
         t_step_trackers[-1] = False  # t_final cannot be a step starting point
         """
@@ -1328,7 +1374,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         )
         # Cache results for warm-starting subsequent calls with the same integrand
         self.t_step_barriers_previous = t_step_barriers_optimal
-        self.previous_ode_fxn = ode_fxn.__name__
+        self.previous_ode_fxn_id = id(ode_fxn)
 
         return IntegralOutput(
             integral=record["integral"],
