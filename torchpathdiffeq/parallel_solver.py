@@ -1038,7 +1038,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
         reuse_mesh: bool = False,
-        random_initial_mesh: bool = False,
+        random_initial_mesh: bool = True,
     ) -> IntegralOutput:
         """
         Perform parallel adaptive numerical integration of ode_fxn.
@@ -1083,15 +1083,19 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 scalar tensor. If None, uses the integral value itself.
             max_batch: Maximum evaluations per batch. Overrides dynamic memory
                 calculation if provided.
-            random_initial_mesh: When True, the fresh initial mesh is built
-                with random sub-barrier offsets (legacy behavior). When False
-                (default), barriers are evenly spaced across [t_init, t_final].
-                The default change makes the integration reproducible without
-                requiring an explicit ``torch.manual_seed`` for academic and
-                debugging workflows. Random sub-barriers may still be useful
-                when an evenly-spaced mesh accidentally aligns with features
-                of the integrand; users who relied on the previous behavior
-                should opt in via ``random_initial_mesh=True``.
+            random_initial_mesh: When True (default), the fresh initial
+                mesh is built with random sub-barrier offsets within each
+                top-level segment. Randomness is essential here, not
+                cosmetic: when the integrand has features at uniformly-
+                spaced positions (e.g. zeros of ``sin(2*pi*k*t)``,
+                polynomial extrema), an evenly-spaced mesh can align
+                with those features in a way the adaptive controller
+                cannot recover from. Random offsets break this
+                alignment. Set to False only for debugging or for
+                integrands you have separately verified to be safe
+                against uniform-mesh aliasing; reproducibility is
+                better achieved via ``torch.manual_seed`` before the
+                call.
             reuse_mesh: When True, seed the integration from the optimal mesh
                 cached by the previous successful call (warm start). Default
                 False. The cached mesh is the *optimal* mesh produced after
@@ -1236,8 +1240,8 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             # Generate a fresh initial mesh of barriers across [t_init, t_final].
             # Layout: sqrt(N_init_steps) evenly-spaced top-level segments, each
             # subdivided into sqrt(N_init_steps)+1 sub-barriers. The total
-            # barrier count is ~N_init_steps. Sub-barriers are placed either
-            # uniformly (default) or randomly within each segment.
+            # barrier count is ~N_init_steps. Sub-barriers are placed
+            # randomly (default) or uniformly within each segment.
             N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(
                 torch.int
             )
@@ -1249,22 +1253,29 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             n_sub = N_even_t + 1  # sub-barriers per segment
             if random_initial_mesh:
                 # Random sub-barrier offsets within each segment, sorted.
-                # Useful when uniform spacing happens to align with features
-                # of the integrand.
+                # Default. Random offsets break alignment between the
+                # mesh and any uniformly-spaced features of the
+                # integrand (e.g. zeros of a sinusoid, polynomial
+                # extrema): on such integrands, a uniform mesh can
+                # produce step errors the adaptive controller cannot
+                # recover from. For deterministic reproducibility,
+                # call ``torch.manual_seed`` before integrate().
                 random_ts = dt * torch.rand((N_even_t, n_sub, 1), device=self.device)
                 random_ts = torch.sort(random_ts, dim=1)[0]
                 t_step_barriers = t_step_barriers + random_ts
             else:
-                # Deterministic uniformly-spaced sub-barriers within each
-                # segment. Reproducible across runs without requiring a
-                # manual_seed; this is the default for academic / debugging
-                # workflows. Bug B5 fix.
+                # Deterministic uniformly-spaced sub-barriers within
+                # each segment. Available for debugging and for
+                # integrands separately verified safe against uniform-
+                # mesh aliasing; not the default because uniform meshes
+                # fail to integrate certain test cases due to feature
+                # alignment.
                 #
-                # Sub-barrier offsets are in [0, dt) — excluding dt to avoid
-                # duplicating the top-level segment boundary (segment k's
-                # last sub-barrier would otherwise coincide with segment
-                # k+1's first sub-barrier and the strict monotonicity
-                # assertion below would fail).
+                # Sub-barrier offsets are in [0, dt) — excluding dt to
+                # avoid duplicating the top-level segment boundary
+                # (segment k's last sub-barrier would otherwise
+                # coincide with segment k+1's first sub-barrier and
+                # the strict monotonicity assertion below would fail).
                 offsets = (
                     dt
                     * torch.arange(n_sub, dtype=self.dtype, device=self.device)
