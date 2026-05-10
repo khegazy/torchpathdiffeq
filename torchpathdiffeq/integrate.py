@@ -11,13 +11,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .base import IntegrationResult, steps
+from .base import steps
 from .runge_kutta import adaptive_quadrature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import torch
+
+    from .results import IntegrationResult
 
 
 def integrate(

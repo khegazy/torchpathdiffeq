@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from _helpers import make_solver_for_unit_test
 
-from torchpathdiffeq.base import MethodOutput
+from torchpathdiffeq.results import MethodOutput
 
 
 def _make_method_output(N, D=1):

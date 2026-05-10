@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from .base import IntegrationResult, steps
+from .base import steps
 from .examples import ODE_dict, wolf_schlegel
 from .integrate import integrate
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
+from .results import IntegrationResult
 from .runge_kutta import (
     UniformAdaptiveQuadrature,
     VariableAdaptiveQuadrature,

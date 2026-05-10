@@ -51,8 +51,9 @@ import psutil
 import torch
 from einops import rearrange
 
-from .base import IntegrationResult, MethodOutput, SolverBase, steps
+from .base import SolverBase, steps
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS, _get_method
+from .results import IntegrationResult, MethodOutput
 
 logger = logging.getLogger(__name__)
 

@@ -24,11 +24,12 @@ import logging
 
 import torch
 
-from .base import MethodOutput, get_sampling_type, steps
+from .base import get_sampling_type, steps
 from .parallel_solver import (
     _UniformAdaptiveQuadratureBase,
     _VariableAdaptiveQuadratureBase,
 )
+from .results import MethodOutput
 
 logger = logging.getLogger(__name__)
 
