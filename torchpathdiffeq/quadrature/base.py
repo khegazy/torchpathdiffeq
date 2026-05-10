@@ -142,25 +142,6 @@ class AdaptiveQuadrature(SolverBase):
         self.error_calc_idx = error_calc_idx
         self.total_mem_usage = total_mem_usage
 
-    def _initial_t_steps(self, t, mesh_init=None, mesh_final=None):
-        """
-        Creates an initial time sampling tensor either from scratch or from a
-        tensor of time points with dimension d.
-
-        Args:
-            t (Tensor): Input time, either None or tensor starting and
-                ending at the integration bounds
-            mesh_init (Tensor, optional): Minimum of integral range
-            mesh_final (Tensor, optional): Maximum of integral range
-
-        Shapes:
-            t : [N, T] will populate intermediate evaluations according to
-                integration method, [N, C, T] will return t
-            mesh_init: [T]
-            mesh_final: [T]
-        """
-        raise NotImplementedError
-
     @abstractmethod
     def _evaluate_adaptive_y(
         self,

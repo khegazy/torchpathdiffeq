@@ -1,13 +1,5 @@
 """Integration accuracy tests for variable-sampling methods.
 
-CLAUDE.md notes (line 69) that "Variable sampling integration tests
-are not currently enabled (only uniform methods are tested)".
-Investigation in Phase 0 revealed the deeper reason: the variable
-solver was missing its ``_compute_nodes`` method entirely (it
-had only a docstring-commented stub of ``_initial_t_steps`` from
-an old API, never connected). Calling ``integrate(...)`` on the
-variable solver ``AttributeError``ed inside the main loop.
-
 Phase 4 restored the variable solver by implementing
 ``_compute_nodes`` with uniformly-spaced initial node
 placement. The existing ``_evaluate_adaptive_y`` (which interleaves
