@@ -13,8 +13,8 @@ def _make_method_output(N, D=1):
     return MethodOutput(
         integral=torch.ones(D, dtype=torch.float64),
         integral_error=torch.ones(D, dtype=torch.float64) * 0.01,
-        sum_steps=torch.ones(N, D, dtype=torch.float64),
-        sum_step_errors=torch.ones(N, D, dtype=torch.float64) * 0.01,
+        mesh_quadratures=torch.ones(N, D, dtype=torch.float64),
+        mesh_quadrature_errors=torch.ones(N, D, dtype=torch.float64) * 0.01,
         h=torch.ones(N, 1, dtype=torch.float64) * 0.5,
     )
 
@@ -41,7 +41,7 @@ class TestAdaptivelyAddSteps:
         assert len(barriers_new) == len(barriers)
         assert not torch.any(trackers_new[:2])
         assert len(er_kept) == 2
-        assert mo_out.sum_steps.shape[0] == 2
+        assert mo_out.mesh_quadratures.shape[0] == 2
 
     def test_all_fail(self):
         """All error_ratios >= 1: midpoints inserted, error_ratios_kept empty."""
@@ -59,7 +59,7 @@ class TestAdaptivelyAddSteps:
         # 2 midpoints added: len goes from 3 to 5
         assert len(barriers_new) == 5
         assert len(er_kept) == 0
-        assert mo_out.sum_steps.shape[0] == 0
+        assert mo_out.mesh_quadratures.shape[0] == 0
 
     def test_mixed_pass_fail(self):
         """First passes, second fails: 1 midpoint added."""
@@ -77,7 +77,7 @@ class TestAdaptivelyAddSteps:
         # 1 midpoint added: len goes from 3 to 4
         assert len(barriers_new) == 4
         assert len(er_kept) == 1
-        assert mo_out.sum_steps.shape[0] == 1
+        assert mo_out.mesh_quadratures.shape[0] == 1
 
     def test_none_method_output(self):
         """method_output=None (post-convergence): returns None, barriers updated."""
@@ -145,7 +145,7 @@ class TestAdaptivelyAddSteps:
         mo_out, _, _, _, _, er_kept = self.solver._adaptively_add_steps(
             mo, error_ratios, None, None, barriers, idxs, trackers
         )
-        assert mo_out.sum_steps.shape[0] == 2
+        assert mo_out.mesh_quadratures.shape[0] == 2
         assert mo_out.h.shape[0] == 2
         assert len(er_kept) == 2
 

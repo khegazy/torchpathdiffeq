@@ -271,7 +271,7 @@ solver.integrate(
 - `nodes` — per-step quadrature points, shape `[N, C, T]`.
 - `h` — per-step widths, shape `[N, T]`.
 - `y` — integrand evaluations at `nodes`, shape `[N, C, D]`.
-- `sum_steps`, `sum_step_errors`, `error_ratios` — per-step diagnostics.
+- `mesh_quadratures`, `mesh_quadrature_errors`, `error_ratios` — per-step diagnostics.
 - `loss`, `gradient_taken`, `y0` — training-loop diagnostics.
 - `converged: bool` — `True` for normal completion; `False` only when
   `max_path_change` triggers an early exit on a user-provided mesh.

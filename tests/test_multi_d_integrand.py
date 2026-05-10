@@ -96,9 +96,9 @@ def test_integration_result_shapes_for_multi_d():
     assert result.integral_error.shape == (D,)
     # y is [N, C, D] — number of panels times nodes per panel times output dim.
     assert result.y.shape[-1] == D, f"y last dim is {result.y.shape[-1]}, expected {D}"
-    # sum_steps is [N, D].
-    assert result.sum_steps.shape[-1] == D
-    assert result.sum_step_errors.shape[-1] == D
+    # mesh_quadratures is [N, D].
+    assert result.mesh_quadratures.shape[-1] == D
+    assert result.mesh_quadrature_errors.shape[-1] == D
 
 
 @pytest.mark.parametrize("method", list(VARIABLE_METHODS.keys()))

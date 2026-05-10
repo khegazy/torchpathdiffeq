@@ -44,9 +44,9 @@ class IntegrationResult:
         h: Step sizes (right - left) for each integration step.
             Shape: [N, T].
         y: Integrand evaluations at each node. Shape: [N, C, D].
-        sum_steps: Weighted contribution of each step to the total
+        mesh_quadratures: Weighted contribution of each step to the total
             integral (h * sum(b_i * y_i) per step). Shape: [N, D].
-        sum_step_errors: Per-step error estimates from the difference
+        mesh_quadrature_errors: Per-step error estimates from the difference
             between the primary and embedded methods. Shape: [N, D].
         error_ratios: Per-step error ratios (error / tolerance). Values
             > 1 indicate the step did not meet accuracy requirements.
@@ -70,8 +70,8 @@ class IntegrationResult:
     nodes: torch.Tensor = None
     h: torch.Tensor = None
     y: torch.Tensor = None
-    sum_steps: torch.Tensor = None
-    sum_step_errors: torch.Tensor = None
+    mesh_quadratures: torch.Tensor = None
+    mesh_quadrature_errors: torch.Tensor = None
     error_ratios: torch.Tensor = None
     loss: torch.Tensor = None
     gradient_taken: bool = None
@@ -92,18 +92,18 @@ class MethodOutput:
 
     Attributes:
         integral: Total integral contribution from this batch of steps
-            (sum of sum_steps). Shape: [D].
+            (sum of mesh_quadratures). Shape: [D].
         integral_error: Total error estimate from this batch (sum of
-            sum_step_errors). Shape: [D].
-        sum_steps: Per-step integral contributions. Each entry is
+            mesh_quadrature_errors). Shape: [D].
+        mesh_quadratures: Per-step integral contributions. Each entry is
             h_i * sum(b_j * y_ij) for step i. Shape: [N, D].
-        sum_step_errors: Per-step error estimates from the difference between
+        mesh_quadrature_errors: Per-step error estimates from the difference between
             order-p and order-(p-1) methods. Shape: [N, D].
         h: Step sizes (mesh_right - mesh_left) for each step. Shape: [N, T].
     """
 
     integral: torch.Tensor
     integral_error: torch.Tensor
-    sum_steps: torch.Tensor
-    sum_step_errors: torch.Tensor
+    mesh_quadratures: torch.Tensor
+    mesh_quadrature_errors: torch.Tensor
     h: torch.Tensor

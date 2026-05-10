@@ -24,8 +24,8 @@ def _make_integral_output(t_start, t_end, N=2, C=4, D=1):
         nodes=t,
         h=h,
         y=torch.ones(N, C, D, dtype=torch.float64),
-        sum_steps=torch.ones(N, D, dtype=torch.float64) * 0.1,
-        sum_step_errors=torch.ones(N, D, dtype=torch.float64) * 0.001,
+        mesh_quadratures=torch.ones(N, D, dtype=torch.float64) * 0.1,
+        mesh_quadrature_errors=torch.ones(N, D, dtype=torch.float64) * 0.001,
         error_ratios=torch.ones(N, dtype=torch.float64) * 0.5,
         loss=torch.tensor([1.0], dtype=torch.float64),
     )
@@ -51,7 +51,7 @@ class TestRecordResults:
         assert "nodes" in record
         assert "h" in record
         assert "y" in record
-        assert "sum_steps" in record
+        assert "mesh_quadratures" in record
         assert torch.equal(record["integral"], results.integral)
 
     def test_first_batch_detaches(self):
@@ -145,8 +145,8 @@ class TestSortRecord:
             .unsqueeze(-1)
             .unsqueeze(-1)
             .expand(N, C, D),
-            "sum_steps": torch.arange(N, dtype=torch.float64).unsqueeze(-1),
-            "sum_step_errors": torch.ones(N, D, dtype=torch.float64) * 0.01,
+            "mesh_quadratures": torch.arange(N, dtype=torch.float64).unsqueeze(-1),
+            "mesh_quadrature_errors": torch.ones(N, D, dtype=torch.float64) * 0.01,
             "error_ratios": torch.ones(N, dtype=torch.float64) * 0.5,
             "integral_error": torch.tensor([0.01], dtype=torch.float64),
         }
@@ -181,10 +181,10 @@ class TestSortRecord:
         """All per-step keys are reordered identically."""
         record = self._make_record([0.5, 0.1, 0.3])
         record = self.solver._sort_record(record)
-        # After sorting by t, sum_steps should follow same order
+        # After sorting by t, mesh_quadratures should follow same order
         # Original: [0.5→idx0, 0.1→idx1, 0.3→idx2]
         # Sorted: [0.1→idx1, 0.3→idx2, 0.5→idx0]
         assert torch.allclose(
-            record["sum_steps"][:, 0],
+            record["mesh_quadratures"][:, 0],
             torch.tensor([1.0, 2.0, 0.0], dtype=torch.float64),
         )

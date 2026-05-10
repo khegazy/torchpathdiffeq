@@ -132,8 +132,8 @@ class UniformAdaptiveQuadrature(_UniformAdaptiveQuadratureBase):
         return MethodOutput(
             integral=integral,
             integral_error=integral_error.detach(),
-            sum_steps=RK_steps,
-            sum_step_errors=step_errors.detach(),
+            mesh_quadratures=RK_steps,
+            mesh_quadrature_errors=step_errors.detach(),
             h=h,
         )
 
@@ -215,8 +215,8 @@ class VariableAdaptiveQuadrature(_VariableAdaptiveQuadratureBase):
         return MethodOutput(
             integral=integral,
             integral_error=integral_error,
-            sum_steps=RK_steps,
-            sum_step_errors=step_errors,
+            mesh_quadratures=RK_steps,
+            mesh_quadrature_errors=step_errors,
             h=h,
         )
 

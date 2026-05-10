@@ -203,8 +203,8 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
     def _merge_excess_nodes(
         self,
         nodes: torch.Tensor,
-        sum_steps: torch.Tensor,
-        sum_step_errors: torch.Tensor,
+        mesh_quadratures: torch.Tensor,
+        mesh_quadrature_errors: torch.Tensor,
         remove_idxs: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -217,19 +217,19 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
 
         Args:
             nodes: Quadrature point positions for all steps. Shape: [N, C, T].
-            sum_steps: Integral contribution of each step. Shape: [N, D].
-            sum_step_errors: Error estimate of each step. Shape: [N, D].
+            mesh_quadratures: Integral contribution of each step. Shape: [N, D].
+            mesh_quadrature_errors: Error estimate of each step. Shape: [N, D].
             remove_idxs: Indices of the first step in each pair to merge.
                 The pair (remove_idxs[i], remove_idxs[i]+1) is merged.
                 Shape: [R].
 
         Returns:
-            Tuple of (nodes_pruned, sum_steps_pruned, sum_step_errors_pruned)
+            Tuple of (nodes_pruned, mesh_quadratures_pruned, mesh_quadrature_errors_pruned)
             with the merged steps replacing the original pairs. Each has
             N-R entries along the first dimension.
         """
         if len(remove_idxs) == 0 or len(nodes) == 1:
-            return nodes, sum_steps, sum_step_errors
+            return nodes, mesh_quadratures, mesh_quadrature_errors
 
         # Create merged steps spanning from the left edge of the first step
         # to the right edge of the second step, with new c-based quadrature points
@@ -238,17 +238,20 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         )
 
         # Sum integral contributions and errors of the merged pair
-        sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs + 1]
-        sum_step_errors_replace = (
-            sum_step_errors[remove_idxs] + sum_step_errors[remove_idxs + 1]
+        mesh_quadratures_replace = (
+            mesh_quadratures[remove_idxs] + mesh_quadratures[remove_idxs + 1]
+        )
+        mesh_quadrature_errors_replace = (
+            mesh_quadrature_errors[remove_idxs]
+            + mesh_quadrature_errors[remove_idxs + 1]
         )
 
         # Remove the first step of each pair from the arrays
         remove_mask = torch.ones(len(nodes), device=self.device, dtype=torch.bool)
         remove_mask[remove_idxs] = False
         nodes_pruned = nodes[remove_mask]
-        sum_steps_pruned = sum_steps[remove_mask]
-        sum_step_errors_pruned = sum_step_errors[remove_mask]
+        mesh_quadratures_pruned = mesh_quadratures[remove_mask]
+        mesh_quadrature_errors_pruned = mesh_quadrature_errors[remove_mask]
 
         # Place the merged step data at the position of the second (kept) step,
         # adjusting indices to account for earlier removals shifting positions
@@ -256,8 +259,10 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
             len(remove_idxs), device=self.device
         )
         nodes_pruned[remove_idxs_shifted] = nodes_replace
-        sum_steps_pruned[remove_idxs_shifted] = sum_steps_replace
-        sum_step_errors_pruned[remove_idxs_shifted] = sum_step_errors_replace
+        mesh_quadratures_pruned[remove_idxs_shifted] = mesh_quadratures_replace
+        mesh_quadrature_errors_pruned[remove_idxs_shifted] = (
+            mesh_quadrature_errors_replace
+        )
 
         # Verify time ordering is preserved after merging
         nodes_pruned_flat = torch.flatten(nodes_pruned, start_dim=0, end_dim=1)
@@ -267,4 +272,4 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         nodes_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
         assert torch.all(nodes_flat[1:] - nodes_flat[:-1] + self.atol_assert >= 0)
 
-        return nodes_pruned, sum_steps_pruned, sum_step_errors_pruned
+        return nodes_pruned, mesh_quadratures_pruned, mesh_quadrature_errors_pruned

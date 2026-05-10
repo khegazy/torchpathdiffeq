@@ -63,12 +63,12 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
     assert torch.allclose(wrapper_output.h, direct_output.h), (
         f"Step sizes mismatch for {method_name}"
     )
-    assert torch.allclose(wrapper_output.sum_steps, direct_output.sum_steps), (
-        f"sum_steps mismatch for {method_name}"
-    )
     assert torch.allclose(
-        wrapper_output.sum_step_errors, direct_output.sum_step_errors
-    ), f"sum_step_errors mismatch for {method_name}"
+        wrapper_output.mesh_quadratures, direct_output.mesh_quadratures
+    ), f"mesh_quadratures mismatch for {method_name}"
+    assert torch.allclose(
+        wrapper_output.mesh_quadrature_errors, direct_output.mesh_quadrature_errors
+    ), f"mesh_quadrature_errors mismatch for {method_name}"
     assert torch.allclose(wrapper_output.error_ratios, direct_output.error_ratios), (
         f"error_ratios mismatch for {method_name}"
     )

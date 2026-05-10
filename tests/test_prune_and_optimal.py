@@ -72,7 +72,7 @@ class TestPruneExcessT:
         # Pair 1 blocked by adjacency. Result: 5 - 2 = 3 steps
         assert t_p.shape[0] == 3
 
-    def test_sum_steps_accumulated(self):
+    def test_mesh_quadratures_accumulated(self):
         """After merge, sum of pair equals sum of originals."""
         solver = make_solver_for_unit_test()
         t = self._make_t(solver, 0.0, 1.0, 3)
@@ -103,8 +103,10 @@ class TestGetOptimalTStepBarriers:
         )
         return {
             "nodes": t,
-            "sum_steps": torch.ones(N, 1, dtype=torch.float64) * (integral_val / N),
-            "sum_step_errors": torch.ones(N, 1, dtype=torch.float64) * error_scale,
+            "mesh_quadratures": torch.ones(N, 1, dtype=torch.float64)
+            * (integral_val / N),
+            "mesh_quadrature_errors": torch.ones(N, 1, dtype=torch.float64)
+            * error_scale,
             "integral": torch.tensor([integral_val], dtype=torch.float64),
         }
 

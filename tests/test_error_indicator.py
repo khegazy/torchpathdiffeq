@@ -40,16 +40,16 @@ def _make_synthetic_inputs(n: int, step_error: float, step_value: float, dtype):
     """Hand-crafted inputs to ``_compute_error_ratios_*``.
 
     Returns:
-      ``sum_steps`` of shape [N, 1] with every step contributing
+      ``mesh_quadratures`` of shape [N, 1] with every step contributing
       ``step_value`` (so cumsum grows linearly), and
-      ``sum_step_errors`` of shape [N, 1] with every step contributing
+      ``mesh_quadrature_errors`` of shape [N, 1] with every step contributing
       ``step_error`` (so per-step error is constant).
       ``integral`` is the total ``n * step_value``.
     """
-    sum_steps = torch.full((n, 1), step_value, dtype=dtype)
-    sum_step_errors = torch.full((n, 1), step_error, dtype=dtype)
-    integral = sum_steps.sum(dim=0)
-    return sum_steps, sum_step_errors, integral
+    mesh_quadratures = torch.full((n, 1), step_value, dtype=dtype)
+    mesh_quadrature_errors = torch.full((n, 1), step_error, dtype=dtype)
+    integral = mesh_quadratures.sum(dim=0)
+    return mesh_quadratures, mesh_quadrature_errors, integral
 
 
 def test_absolute_mode_treats_steps_uniformly():
@@ -62,12 +62,12 @@ def test_absolute_mode_treats_steps_uniformly():
     n = 10
     step_error = 1e-9
     step_value = 0.1  # total integral = 1.0
-    _sum_steps, sum_step_errors, integral = _make_synthetic_inputs(
+    _mesh_quadratures, mesh_quadrature_errors, integral = _make_synthetic_inputs(
         n, step_error, step_value, dtype
     )
 
     error_ratios, _ = solver._compute_error_ratios_absolute(
-        sum_step_errors=sum_step_errors, integral=integral
+        mesh_quadrature_errors=mesh_quadrature_errors, integral=integral
     )
 
     # All ratios should be identical.
@@ -100,12 +100,12 @@ def test_cumulative_mode_tightens_at_small_cumsum():
     n = 10
     step_error = 1e-9
     step_value = 0.1
-    sum_steps, sum_step_errors, _integral = _make_synthetic_inputs(
+    mesh_quadratures, mesh_quadrature_errors, _integral = _make_synthetic_inputs(
         n, step_error, step_value, dtype
     )
 
     error_ratios, _ = solver._compute_error_ratios_cumulative(
-        sum_step_errors=sum_step_errors, sum_steps=sum_steps
+        mesh_quadrature_errors=mesh_quadrature_errors, mesh_quadratures=mesh_quadratures
     )
 
     # Cumsum grows: cumsum[0]=0.1, cumsum[1]=0.2, ..., cumsum[9]=1.0.
@@ -135,15 +135,15 @@ def test_modes_agree_when_cumsum_equals_total_at_last_step():
     n = 5
     step_error = 1e-9
     step_value = 0.1
-    sum_steps, sum_step_errors, integral = _make_synthetic_inputs(
+    mesh_quadratures, mesh_quadrature_errors, integral = _make_synthetic_inputs(
         n, step_error, step_value, dtype
     )
 
     abs_ratios, _ = solver._compute_error_ratios_absolute(
-        sum_step_errors=sum_step_errors, integral=integral
+        mesh_quadrature_errors=mesh_quadrature_errors, integral=integral
     )
     cum_ratios, _ = solver._compute_error_ratios_cumulative(
-        sum_step_errors=sum_step_errors, sum_steps=sum_steps
+        mesh_quadrature_errors=mesh_quadrature_errors, mesh_quadratures=mesh_quadratures
     )
 
     # Last step: cumsum[-1] == integral, so denominators match exactly.

@@ -192,7 +192,9 @@ class AdaptiveQuadrature(SolverBase):
         """
 
     @abstractmethod
-    def _merge_excess_nodes(self, nodes, sum_steps, sum_step_errors, remove_idxs):
+    def _merge_excess_nodes(
+        self, nodes, mesh_quadratures, mesh_quadrature_errors, remove_idxs
+    ):
         """
         Merges neighboring time steps or removes and one time steps and extends
         its neighbor to cover the same range.
@@ -421,11 +423,15 @@ class AdaptiveQuadrature(SolverBase):
         assert len(idxs_new) + len(idxs_transfer) == len(mesh_new)
 
         if method_output is not None:
-            method_output.sum_steps = method_output.sum_steps[keep_mask]
-            method_output.sum_step_errors = method_output.sum_step_errors[keep_mask]
+            method_output.mesh_quadratures = method_output.mesh_quadratures[keep_mask]
+            method_output.mesh_quadrature_errors = method_output.mesh_quadrature_errors[
+                keep_mask
+            ]
             method_output.h = method_output.h[keep_mask]
-            method_output.integral = torch.sum(method_output.sum_steps, 0)
-            method_output.integral_error = torch.sum(method_output.sum_step_errors, 0)
+            method_output.integral = torch.sum(method_output.mesh_quadratures, 0)
+            method_output.integral_error = torch.sum(
+                method_output.mesh_quadrature_errors, 0
+            )
         if y_step_eval is not None:
             y_step_eval = y_step_eval[keep_mask]
         if nodes is not None:
@@ -439,7 +445,9 @@ class AdaptiveQuadrature(SolverBase):
             error_ratios[keep_mask],
         )
 
-    def prune_excess_t(self, nodes, sum_steps, sum_step_errors, error_ratios_2steps):
+    def prune_excess_t(
+        self, nodes, mesh_quadratures, mesh_quadrature_errors, error_ratios_2steps
+    ):
         """
         Remove a single integration time step where
         error_ratios_2steps < remove_cut by merging two neighboring time steps,
@@ -458,7 +466,7 @@ class AdaptiveQuadrature(SolverBase):
         """
 
         if len(error_ratios_2steps) == 0:
-            return nodes, sum_steps, sum_step_errors
+            return nodes, mesh_quadratures, mesh_quadrature_errors
         # Since error ratios encompasses 2 RK steps each neighboring element shares
         # a step, we cannot remove that same step twice and therefore remove the
         # first in pair of steps that it appears in
@@ -468,10 +476,10 @@ class AdaptiveQuadrature(SolverBase):
         assert not torch.any(ratio_idxs_cut[:-1] + 1 == ratio_idxs_cut[1:])
 
         if len(ratio_idxs_cut) == 0:
-            return nodes, sum_steps, sum_step_errors
+            return nodes, mesh_quadratures, mesh_quadrature_errors
 
         return self._merge_excess_nodes(
-            nodes, sum_steps, sum_step_errors, ratio_idxs_cut
+            nodes, mesh_quadratures, mesh_quadrature_errors, ratio_idxs_cut
         )
 
     def _get_optimal_mesh(
@@ -492,8 +500,8 @@ class AdaptiveQuadrature(SolverBase):
         different positions along the integration domain.
 
         Args:
-            record: Dictionary of converged results including 't', 'sum_steps',
-                'sum_step_errors', and 'integral'.
+            record: Dictionary of converged results including 't', 'mesh_quadratures',
+                'mesh_quadrature_errors', and 'integral'.
             mesh: Current barrier positions. Shape: [M, T].
 
         Returns:
@@ -501,15 +509,17 @@ class AdaptiveQuadrature(SolverBase):
         """
         # Prune steps with excess accuracy (over-resolved regions)
         _, error_ratios_2steps = self._compute_error_ratios(
-            sum_step_errors=record["sum_step_errors"],
-            sum_steps=record["sum_steps"],
+            mesh_quadrature_errors=record["mesh_quadrature_errors"],
+            mesh_quadratures=record["mesh_quadratures"],
             integral=record["integral"].detach(),
         )
-        nodes_pruned, sum_steps_pruned, sum_step_errors_pruned = self.prune_excess_t(
-            record["nodes"],
-            record["sum_steps"],
-            record["sum_step_errors"],
-            error_ratios_2steps,
+        nodes_pruned, mesh_quadratures_pruned, mesh_quadrature_errors_pruned = (
+            self.prune_excess_t(
+                record["nodes"],
+                record["mesh_quadratures"],
+                record["mesh_quadrature_errors"],
+                error_ratios_2steps,
+            )
         )
         mesh_pruned = torch.concatenate(
             [nodes_pruned[:, 0, :], mesh[-1].unsqueeze(0)], dim=0
@@ -517,8 +527,8 @@ class AdaptiveQuadrature(SolverBase):
 
         # Add new t steps using converged integral value
         error_ratios, error_ratios_2steps = self._compute_error_ratios(
-            sum_step_errors=sum_step_errors_pruned,
-            sum_steps=sum_steps_pruned,
+            mesh_quadrature_errors=mesh_quadrature_errors_pruned,
+            mesh_quadratures=mesh_quadratures_pruned,
             integral=record["integral"].detach(),
         )
         adaptive_step = self._adaptively_add_steps(
@@ -586,7 +596,11 @@ class AdaptiveQuadrature(SolverBase):
         #     return mask
 
     def _compute_error_ratios(
-        self, sum_step_errors, sum_steps=None, cum_sum_steps=None, integral=None
+        self,
+        mesh_quadrature_errors,
+        mesh_quadratures=None,
+        cum_mesh_quadratures=None,
+        integral=None,
     ):
         """
         Computes the ratio of the difference between chosen method of order p
@@ -595,36 +609,42 @@ class AdaptiveQuadrature(SolverBase):
         use the same points.
 
         Args:
-            sum_step_errors (Tensor): Similar to sum_steps but evaluated with
+            mesh_quadrature_errors (Tensor): Similar to mesh_quadratures but evaluated with
                 and error tableau made of the differences between a method of
                 order p and one of order p-1
-            sum_steps (Tensor): Sum over all t and y evaluations in a single
+            mesh_quadratures (Tensor): Sum over all t and y evaluations in a single
                 RK step multiplied by the total delta t for that step (h)
             Integral (Tensor): The evaluated path integral
 
         Shapes:
-            sum_step_errors: [N, D]
-            sum_steps: [N, D]
+            mesh_quadrature_errors: [N, D]
+            mesh_quadratures: [N, D]
             integral: [D]
         """
         if self.error_calc_idx is not None:
-            sum_step_errors = sum_step_errors[:, self.error_calc_idx, None]
+            mesh_quadrature_errors = mesh_quadrature_errors[
+                :, self.error_calc_idx, None
+            ]
             integral = integral[self.error_calc_idx, None]
             # y = y[:,:,self.error_calc_idx, None]
-            if sum_steps is not None:
-                sum_steps = sum_steps[:, self.error_calc_idx, None]
-            if cum_sum_steps is not None:
-                cum_sum_steps = cum_sum_steps[:, self.error_calc_idx, None]
+            if mesh_quadratures is not None:
+                mesh_quadratures = mesh_quadratures[:, self.error_calc_idx, None]
+            if cum_mesh_quadratures is not None:
+                cum_mesh_quadratures = cum_mesh_quadratures[
+                    :, self.error_calc_idx, None
+                ]
                 # DEBUG: add y0 to cum_steps to get get integral values at different times?
 
         if self.use_absolute_error_ratio:
-            return self._compute_error_ratios_absolute(sum_step_errors, integral)
+            return self._compute_error_ratios_absolute(mesh_quadrature_errors, integral)
         else:
             return self._compute_error_ratios_cumulative(
-                sum_step_errors, sum_steps=sum_steps, cum_sum_steps=cum_sum_steps
+                mesh_quadrature_errors,
+                mesh_quadratures=mesh_quadratures,
+                cum_mesh_quadratures=cum_mesh_quadratures,
             )
 
-    def _compute_error_ratios_absolute(self, sum_step_errors, integral):
+    def _compute_error_ratios_absolute(self, mesh_quadrature_errors, integral):
         """
         Computes per-step error ratios against the *total* integral
         magnitude (uniform-across-steps tolerance). This is the default
@@ -643,17 +663,17 @@ class AdaptiveQuadrature(SolverBase):
         running integral.
 
         Args:
-            sum_step_errors (Tensor): Per-step error estimates (the
+            mesh_quadrature_errors (Tensor): Per-step error estimates (the
                 difference between the method of order p and embedded
                 order p-1).
             integral (Tensor): The current total integral estimate.
 
         Shapes:
-            sum_step_errors: [N, D]
+            mesh_quadrature_errors: [N, D]
             integral: [D]
         """
         error_tol = self.atol + self.rtol * torch.abs(integral)
-        error_estimate = torch.abs(sum_step_errors)
+        error_estimate = torch.abs(mesh_quadrature_errors)
         error_ratio = self._error_norm(error_estimate / error_tol)
 
         error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
@@ -662,7 +682,7 @@ class AdaptiveQuadrature(SolverBase):
         return error_ratio, error_ratio_2steps
 
     def _compute_error_ratios_cumulative(
-        self, sum_step_errors, sum_steps=None, cum_sum_steps=None
+        self, mesh_quadrature_errors, mesh_quadratures=None, cum_mesh_quadratures=None
     ):
         """
         Computes per-step error ratios using the *running* (cumulative)
@@ -698,27 +718,27 @@ class AdaptiveQuadrature(SolverBase):
         where the total is meaningful in its own right.
 
         Args:
-            sum_step_errors (Tensor): Per-step error estimates (the
+            mesh_quadrature_errors (Tensor): Per-step error estimates (the
                 difference between the method of order p and embedded
                 order p-1).
-            sum_steps (Tensor): Per-step contributions to the integral,
-                shape ``[N, D]``. If provided, ``cum_sum_steps`` is
-                computed as ``torch.cumsum(sum_steps, dim=0)``.
-            cum_sum_steps (Tensor): Pre-computed cumulative sum.
+            mesh_quadratures (Tensor): Per-step contributions to the integral,
+                shape ``[N, D]``. If provided, ``cum_mesh_quadratures`` is
+                computed as ``torch.cumsum(mesh_quadratures, dim=0)``.
+            cum_mesh_quadratures (Tensor): Pre-computed cumulative sum.
                 Provide directly when called inside the integration
                 loop where the running integral is already known.
 
         Shapes:
-            sum_steps: [N, D]
-            sum_step_errors: [N, D]
+            mesh_quadratures: [N, D]
+            mesh_quadrature_errors: [N, D]
         """
-        if cum_sum_steps is not None:
-            cum_steps = cum_sum_steps
-        elif sum_steps is not None:
-            cum_steps = torch.cumsum(sum_steps, dim=0)
+        if cum_mesh_quadratures is not None:
+            cum_steps = cum_mesh_quadratures
+        elif mesh_quadratures is not None:
+            cum_steps = torch.cumsum(mesh_quadratures, dim=0)
         else:
-            raise ValueError("Must give sum_steps or cum_sum_steps")
-        error_estimate = torch.abs(sum_step_errors)
+            raise ValueError("Must give mesh_quadratures or cum_mesh_quadratures")
+        error_estimate = torch.abs(mesh_quadrature_errors)
         error_tol = self.atol + self.rtol * torch.abs(cum_steps)
         error_ratio = self._error_norm(error_estimate / error_tol).abs()
 
@@ -829,8 +849,8 @@ class AdaptiveQuadrature(SolverBase):
             record["nodes"] = results.nodes
             record["h"] = results.h
             record["y"] = results.y
-            record["sum_steps"] = results.sum_steps
-            record["sum_step_errors"] = results.sum_step_errors
+            record["mesh_quadratures"] = results.mesh_quadratures
+            record["mesh_quadrature_errors"] = results.mesh_quadrature_errors
             record["integral_error"] = results.integral_error
             record["error_ratios"] = results.error_ratios
             record["loss"] = results.loss
@@ -840,8 +860,8 @@ class AdaptiveQuadrature(SolverBase):
             record["nodes"] = results.nodes.detach()
             record["h"] = results.h.detach()
             record["y"] = results.y.detach()
-            record["sum_steps"] = results.sum_steps.detach()
-            record["sum_step_errors"] = results.sum_step_errors.detach()
+            record["mesh_quadratures"] = results.mesh_quadratures.detach()
+            record["mesh_quadrature_errors"] = results.mesh_quadrature_errors.detach()
             record["integral_error"] = results.integral_error.detach()
             record["error_ratios"] = results.error_ratios.detach()
             record["loss"] = results.loss.detach()
@@ -1333,8 +1353,8 @@ class AdaptiveQuadrature(SolverBase):
             if len(record) == 0:
                 # First batch: integral is just this batch's contribution
                 current_integral = method_output.integral.detach()
-                all_sum_steps = method_output.sum_steps.detach()
-                cum_sum_steps = torch.cumsum(all_sum_steps, 0)
+                all_mesh_quadratures = method_output.mesh_quadratures.detach()
+                cum_mesh_quadratures = torch.cumsum(all_mesh_quadratures, 0)
             else:
                 # Subsequent batches: add to previously recorded integral
                 current_integral = record["integral"] + method_output.integral.detach()
@@ -1342,18 +1362,21 @@ class AdaptiveQuadrature(SolverBase):
                 idxs_keep, idxs_input = self._get_sorted_indices(
                     record["nodes"][:, 0, 0], nodes[:, 0, 0]
                 )
-                all_sum_steps = self._insert_sorted_results(
-                    record["sum_steps"], idxs_keep, method_output.sum_steps, idxs_input
+                all_mesh_quadratures = self._insert_sorted_results(
+                    record["mesh_quadratures"],
+                    idxs_keep,
+                    method_output.mesh_quadratures,
+                    idxs_input,
                 )
-                cum_sum_steps = torch.cumsum(all_sum_steps, 0)[idxs_input]
+                cum_mesh_quadratures = torch.cumsum(all_mesh_quadratures, 0)[idxs_input]
             if self.speed_logger:
                 self.speed_logger.debug("calc integrals: %s", time.time() - t0)
 
             # --- Step 4: Compute error ratios for each step ---
             t0 = time.time()
             error_ratios, error_ratios_2steps = self._compute_error_ratios(
-                sum_step_errors=method_output.sum_step_errors,
-                cum_sum_steps=cum_sum_steps,
+                mesh_quadrature_errors=method_output.mesh_quadrature_errors,
+                cum_mesh_quadratures=cum_mesh_quadratures,
                 integral=current_integral,
             )
             if self.speed_logger:
@@ -1390,8 +1413,10 @@ class AdaptiveQuadrature(SolverBase):
                         nodes=nodes,
                         h=method_output.h,
                         y=y_step_eval,
-                        sum_steps=method_output.sum_steps,
-                        sum_step_errors=torch.abs(method_output.sum_step_errors),
+                        mesh_quadratures=method_output.mesh_quadratures,
+                        mesh_quadrature_errors=torch.abs(
+                            method_output.mesh_quadrature_errors
+                        ),
                         error_ratios=error_ratios,
                         loss=None,
                         gradient_taken=take_gradient,
@@ -1435,8 +1460,10 @@ class AdaptiveQuadrature(SolverBase):
                     nodes=nodes,
                     h=method_output.h,
                     y=y_step_eval,
-                    sum_steps=method_output.sum_steps,
-                    sum_step_errors=torch.abs(method_output.sum_step_errors),
+                    mesh_quadratures=method_output.mesh_quadratures,
+                    mesh_quadrature_errors=torch.abs(
+                        method_output.mesh_quadrature_errors
+                    ),
                     error_ratios=error_ratios,
                     loss=None,
                     gradient_taken=take_gradient,
@@ -1477,8 +1504,8 @@ class AdaptiveQuadrature(SolverBase):
             nodes=record["nodes"],
             h=record["h"],
             y=record["y"],
-            sum_steps=record["sum_steps"],
-            sum_step_errors=torch.abs(record["sum_step_errors"]),
+            mesh_quadratures=record["mesh_quadratures"],
+            mesh_quadrature_errors=torch.abs(record["mesh_quadrature_errors"]),
             error_ratios=record["error_ratios"],
             loss=record["loss"],
             gradient_taken=take_gradient,

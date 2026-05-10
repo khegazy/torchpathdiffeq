@@ -244,7 +244,7 @@ class TestErrorDetaching:
     """Tests for error estimate detaching in uniform vs variable solvers."""
 
     def test_uniform_error_detached(self):
-        """Uniform solver: integral_error and sum_step_errors are detached."""
+        """Uniform solver: integral_error and mesh_quadrature_errors are detached."""
         solver = make_solver_for_unit_test("bosh3")
         C = len(solver.method.tableau.c)
         t = torch.linspace(0, 1, C, dtype=torch.float64).unsqueeze(0).unsqueeze(-1)
@@ -254,7 +254,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral_error.grad_fn is None
-        assert method_output.sum_step_errors.grad_fn is None
+        assert method_output.mesh_quadrature_errors.grad_fn is None
 
     def test_uniform_integral_keeps_grad(self):
         """Uniform solver: primary integral is part of the computation graph."""
@@ -267,7 +267,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral.grad_fn is not None
-        assert method_output.sum_steps.grad_fn is not None
+        assert method_output.mesh_quadratures.grad_fn is not None
 
     def test_variable_error_keeps_grad(self):
         """Variable solver: error estimates are NOT detached."""
@@ -280,7 +280,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral_error.grad_fn is not None
-        assert method_output.sum_step_errors.grad_fn is not None
+        assert method_output.mesh_quadrature_errors.grad_fn is not None
 
 
 # ---------------------------------------------------------------------------

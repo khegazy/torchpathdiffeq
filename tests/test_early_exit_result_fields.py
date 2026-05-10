@@ -20,7 +20,7 @@ Coverage:
 
   * Every diagnostic field on ``IntegrationResult`` (``integral``,
     ``integral_error``, ``mesh_optimal``, ``mesh_init``, ``mesh_final``,
-    ``nodes``, ``h``, ``y``, ``sum_steps``, ``sum_step_errors``,
+    ``nodes``, ``h``, ``y``, ``mesh_quadratures``, ``mesh_quadrature_errors``,
     ``error_ratios``, ``y0``) is non-None.
   * Trailing-dim coherence: every field whose last dimension is the
     integrand output dim D matches D=1 for our scalar integrand.
@@ -106,8 +106,8 @@ def test_early_exit_mesh_fields_populated():
 
 
 def test_early_exit_per_step_diagnostics_populated():
-    """The per-step diagnostic fields (nodes, h, y, sum_steps,
-    sum_step_errors, error_ratios) are needed to inspect WHY the
+    """The per-step diagnostic fields (nodes, h, y, mesh_quadratures,
+    mesh_quadrature_errors, error_ratios) are needed to inspect WHY the
     early-exit triggered. None on any of them blinds the caller.
     """
     out = _trigger_early_exit()
@@ -115,17 +115,19 @@ def test_early_exit_per_step_diagnostics_populated():
     assert out.nodes is not None, "nodes lost on early-exit"
     assert out.h is not None, "h lost on early-exit"
     assert out.y is not None, "y lost on early-exit"
-    assert out.sum_steps is not None, "sum_steps lost on early-exit"
-    assert out.sum_step_errors is not None, "sum_step_errors lost on early-exit"
+    assert out.mesh_quadratures is not None, "mesh_quadratures lost on early-exit"
+    assert out.mesh_quadrature_errors is not None, (
+        "mesh_quadrature_errors lost on early-exit"
+    )
     assert out.error_ratios is not None, "error_ratios lost on early-exit"
 
     # Shape coherence: nodes [N, C, T], y [N, C, D], h [N, T],
-    # sum_steps [N, D], sum_step_errors [N, D], error_ratios [N].
+    # mesh_quadratures [N, D], mesh_quadrature_errors [N, D], error_ratios [N].
     N, C, T = out.nodes.shape
     assert out.y.shape[:2] == (N, C)
     assert out.h.shape == (N, T)
-    assert out.sum_steps.shape[0] == N
-    assert out.sum_step_errors.shape[0] == N
+    assert out.mesh_quadratures.shape[0] == N
+    assert out.mesh_quadrature_errors.shape[0] == N
     assert out.error_ratios.shape[0] == N
 
     # All finite — corrupted-batch sanity check.

@@ -142,7 +142,7 @@ class TestUniformMergeExcessT:
 
         assert t_p.shape[0] == 2
 
-    def test_sum_steps_accumulated(self):
+    def test_mesh_quadratures_accumulated(self):
         """Merged step sum = sum of original pair."""
         solver = make_solver_for_unit_test("bosh3")
         t = self._make_t(solver, 0.0, 1.0, 3)
@@ -325,7 +325,7 @@ class TestVariableMergeExcessT:
         # After subsampling, back to C=2 points
         assert t_p.shape[1] == C
 
-    def test_sum_steps_accumulated(self):
+    def test_mesh_quadratures_accumulated(self):
         """After merge, sum is correct."""
         solver = make_variable_solver_for_unit_test("adaptive_heun")
         t = torch.tensor(
