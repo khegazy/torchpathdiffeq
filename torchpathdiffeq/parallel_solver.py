@@ -635,16 +635,27 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
 
     def _compute_error_ratios_absolute(self, sum_step_errors, integral):
         """
-        Computes the ratio of the difference between chosen method of order p
-        and a method of order p-1, and the error tolerance determined by atol,
-        rtol, and the value of the integral. Integration steps of order p-1
-        use the same points.
+        Computes per-step error ratios against the *total* integral
+        magnitude (uniform-across-steps tolerance). This is the default
+        for path integrals because the total integral is meaningful in
+        its own right, so a single reference for the relative tolerance
+        is appropriate.
+
+        For each step k::
+
+            error_ratio[k] = |step_error[k]| / (atol + rtol * |integral|)
+
+        Every step uses the same denominator, so for an integrand whose
+        per-step error is constant the ratios across steps are
+        identical. Compare ``_compute_error_ratios_cumulative`` for the
+        ODE-style alternative where the denominator grows with the
+        running integral.
 
         Args:
-            sum_step_errors (Tensor): Similar to sum_steps but evaluated with
-                and error tableau made of the differences between a method of
-                order p and one of order p-1
-            Integral (Tensor): The evaluated path integral
+            sum_step_errors (Tensor): Per-step error estimates (the
+                difference between the method of order p and embedded
+                order p-1).
+            integral (Tensor): The current total integral estimate.
 
         Shapes:
             sum_step_errors: [N, D]
@@ -663,19 +674,48 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self, sum_step_errors, sum_steps=None, cum_sum_steps=None
     ):
         """
-        Computes the ratio of the difference between chosen method of order p
-        and a method of order p-1, and the error tolerance determined by atol,
-        rtol, and the value of the integral up to the current step. This method
-        is more similar to ODE error calculation methods but is less suitable
-        for path integrals where the total integral is known. Integration
-        steps of order p-1 use the same points.
+        Computes per-step error ratios using the *running* (cumulative)
+        integral as the magnitude reference, mimicking traditional ODE
+        error control where the state magnitude grows with the
+        integration variable.
+
+        For each step k::
+
+            error_ratio[k] = |step_error[k]| / (atol + rtol * |cumsum[k]|)
+
+        where ``cumsum[k]`` is the integral accumulated up to and
+        including step k. As cumsum grows monotonically through the
+        integration, the *denominator* grows, so the per-step
+        tolerance loosens for later steps. Equivalently, the controller
+        applies a *tighter* tolerance to early steps when the running
+        sum is still small.
+
+        Empirical behavior (see tests/test_error_indicator.py):
+
+          - For an integrand whose per-step error is constant and
+            whose step values are positive, the per-step ratios
+            decrease monotonically.
+          - At the last step ``cumsum == integral``, so the ratio
+            agrees with what the absolute mode produces for that step.
+
+        Use this mode when you want the integrator to accept progressively
+        larger absolute step errors as the integration progresses (i.e.,
+        a fixed *relative* error against the running state). Use the
+        absolute mode (``use_absolute_error_ratio=True``, the default)
+        when you want a uniform-across-steps tolerance keyed to the
+        total integral value — the better default for path integrals
+        where the total is meaningful in its own right.
 
         Args:
-            sum_step_errors (Tensor): Similar to sum_steps but evaluated with
-                and error tableau made of the differences between a method of
-                order p and one of order p-1
-            sum_steps (Tensor): Sum over all t and y evaluations in a single
-                RK step multiplied by the total delta t for that step (h)
+            sum_step_errors (Tensor): Per-step error estimates (the
+                difference between the method of order p and embedded
+                order p-1).
+            sum_steps (Tensor): Per-step contributions to the integral,
+                shape ``[N, D]``. If provided, ``cum_sum_steps`` is
+                computed as ``torch.cumsum(sum_steps, dim=0)``.
+            cum_sum_steps (Tensor): Pre-computed cumulative sum.
+                Provide directly when called inside the integration
+                loop where the running integral is already known.
 
         Shapes:
             sum_steps: [N, D]
