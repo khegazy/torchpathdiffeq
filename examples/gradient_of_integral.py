@@ -117,4 +117,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Seed for reproducibility — see quadrature_basics.py for the why.
+    torch.manual_seed(0)
     main()

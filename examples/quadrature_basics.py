@@ -149,6 +149,11 @@ def example_warm_start_loop() -> None:
 
 
 if __name__ == "__main__":
+    # Seed for reproducibility. The default initial-mesh path uses
+    # torch.rand to break alignment with uniformly-spaced features in
+    # the integrand; a fixed seed makes the example print stable
+    # numbers run-to-run (and keeps test_examples_run.py deterministic).
+    torch.manual_seed(0)
     print("=" * 64)
     example_sin_over_pi()
     print()
