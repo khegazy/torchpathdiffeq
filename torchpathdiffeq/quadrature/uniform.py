@@ -195,7 +195,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, nodes_new
 
-    def _merge_excess_t(
+    def _merge_excess_nodes(
         self,
         nodes: torch.Tensor,
         sum_steps: torch.Tensor,

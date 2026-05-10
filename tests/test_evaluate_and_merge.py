@@ -1,4 +1,4 @@
-"""Unit tests for _evaluate_adaptive_y and _merge_excess_t (uniform + variable)."""
+"""Unit tests for _evaluate_adaptive_y and _merge_excess_nodes (uniform + variable)."""
 
 from __future__ import annotations
 
@@ -101,12 +101,12 @@ class TestUniformEvaluateAdaptiveY:
 
 
 # ---------------------------------------------------------------------------
-# Uniform _merge_excess_t
+# Uniform _merge_excess_nodes
 # ---------------------------------------------------------------------------
 
 
 class TestUniformMergeExcessT:
-    """Tests for _UniformAdaptiveQuadratureBase._merge_excess_t."""
+    """Tests for _UniformAdaptiveQuadratureBase._merge_excess_nodes."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
@@ -122,7 +122,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64) * 0.1
         se = torch.ones(3, 1, dtype=torch.float64) * 0.01
 
-        t_p, _ss_p, _se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _ss_p, _se_p = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         assert t_p.shape[0] == 2
         # First merged step spans from 0 to 2/3
@@ -138,7 +138,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64) * 0.1
         se = torch.ones(3, 1, dtype=torch.float64) * 0.01
 
-        t_p, _, _ = solver._merge_excess_t(t, ss, se, torch.tensor([1]))
+        t_p, _, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([1]))
 
         assert t_p.shape[0] == 2
 
@@ -149,7 +149,7 @@ class TestUniformMergeExcessT:
         ss = torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float64)
         se = torch.tensor([[0.01], [0.02], [0.03]], dtype=torch.float64)
 
-        _, ss_p, _ = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        _, ss_p, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         # Merged pair 0: 1+2=3, remaining step 2: 3
         assert torch.allclose(ss_p[0], torch.tensor([3.0], dtype=torch.float64))
@@ -162,7 +162,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64)
         se = torch.tensor([[0.01], [0.02], [0.03]], dtype=torch.float64)
 
-        _, _, se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        _, _, se_p = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         assert torch.allclose(se_p[0], torch.tensor([0.03], dtype=torch.float64))
 
@@ -173,7 +173,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64)
         se = torch.ones(3, 1, dtype=torch.float64)
 
-        t_p, _ss_p, _se_p = solver._merge_excess_t(
+        t_p, _ss_p, _se_p = solver._merge_excess_nodes(
             t, ss, se, torch.tensor([], dtype=torch.long)
         )
 
@@ -187,7 +187,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(4, 1, dtype=torch.float64)
         se = torch.ones(4, 1, dtype=torch.float64) * 0.01
 
-        t_p, _, _ = solver._merge_excess_t(t, ss, se, torch.tensor([1]))
+        t_p, _, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([1]))
 
         t_flat = torch.flatten(t_p, 0, 1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + 1e-15 >= 0)
@@ -200,7 +200,7 @@ class TestUniformMergeExcessT:
         ss = torch.ones(2, 1, dtype=torch.float64)
         se = torch.ones(2, 1, dtype=torch.float64)
 
-        t_p, _, _ = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         # Merged step spans [0, 1]: points = 0 + c * 1
         assert torch.allclose(t_p[0, :, 0], c)
@@ -279,12 +279,12 @@ class TestVariableEvaluateAdaptiveY:
 
 
 # ---------------------------------------------------------------------------
-# Variable _merge_excess_t
+# Variable _merge_excess_nodes
 # ---------------------------------------------------------------------------
 
 
 class TestVariableMergeExcessT:
-    """Tests for _VariableAdaptiveQuadratureBase._merge_excess_t."""
+    """Tests for _VariableAdaptiveQuadratureBase._merge_excess_nodes."""
 
     def test_concatenate_and_subsample(self):
         """C=2: two steps merged → 3 combined → subsample to 2."""
@@ -299,7 +299,7 @@ class TestVariableMergeExcessT:
         ss = torch.tensor([[1.0], [2.0]], dtype=torch.float64)
         se = torch.tensor([[0.01], [0.02]], dtype=torch.float64)
 
-        t_p, _ss_p, _se_p = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _ss_p, _se_p = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         assert t_p.shape == (1, 2, 1)
         # Subsampled from [0, 0.5, 1.0] at indices [0, 2] → [0, 1.0]
@@ -321,7 +321,7 @@ class TestVariableMergeExcessT:
         se = torch.ones(2, 1, dtype=torch.float64) * 0.01
 
         # The concatenation is t[0,:] + t[1,1:] = [0, 0.5] + [1.0] = 3 points = 2C-1
-        t_p, _, _ = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
         # After subsampling, back to C=2 points
         assert t_p.shape[1] == C
 
@@ -338,7 +338,7 @@ class TestVariableMergeExcessT:
         ss = torch.tensor([[1.0], [2.0]], dtype=torch.float64)
         se = torch.tensor([[0.01], [0.02]], dtype=torch.float64)
 
-        _, ss_p, _ = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        _, ss_p, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         assert torch.allclose(ss_p[0], torch.tensor([3.0], dtype=torch.float64))
 
@@ -356,7 +356,7 @@ class TestVariableMergeExcessT:
         ss = torch.ones(3, 1, dtype=torch.float64)
         se = torch.ones(3, 1, dtype=torch.float64) * 0.01
 
-        t_p, _, _ = solver._merge_excess_t(t, ss, se, torch.tensor([0]))
+        t_p, _, _ = solver._merge_excess_nodes(t, ss, se, torch.tensor([0]))
 
         t_flat = torch.flatten(t_p, 0, 1)
         assert torch.all(t_flat[1:] - t_flat[:-1] + 1e-15 >= 0)

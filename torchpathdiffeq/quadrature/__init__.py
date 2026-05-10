@@ -14,7 +14,7 @@ Submodules:
     the main integration loop, error computation, mesh refinement,
     and memory management. Subclasses implement
     ``_calculate_integral``, ``_t_step_interpolate``,
-    ``_evaluate_adaptive_y``, and ``_merge_excess_t``.
+    ``_evaluate_adaptive_y``, and ``_merge_excess_nodes``.
 
   - ``uniform``: ``_UniformAdaptiveQuadratureBase`` — overrides for
     methods with fixed tableau ``c`` (RK, Gauss-Kronrod,

@@ -11,7 +11,7 @@ variable solver ``AttributeError``ed inside the main loop.
 Phase 4 restored the variable solver by implementing
 ``_t_step_interpolate`` with uniformly-spaced initial node
 placement. The existing ``_evaluate_adaptive_y`` (which interleaves
-old and new nodes for split reuse) and ``_merge_excess_t`` (which
+old and new nodes for split reuse) and ``_merge_excess_nodes`` (which
 subsamples merged panels back to C nodes) now run end-to-end.
 """
 

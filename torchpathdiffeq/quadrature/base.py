@@ -73,7 +73,7 @@ class AdaptiveQuadrature(SolverBase):
     Subclasses must implement:
         - ``_t_step_interpolate(t_left, t_right)``: Place quadrature points within steps.
         - ``_evaluate_adaptive_y(...)``: Evaluate integrand at refined points.
-        - ``_merge_excess_t(...)``: Merge consecutive low-error steps.
+        - ``_merge_excess_nodes(...)``: Merge consecutive low-error steps.
         - ``_calculate_integral(t, y, y0)``: Compute RK integral + error for a batch.
 
     Attributes:
@@ -192,7 +192,7 @@ class AdaptiveQuadrature(SolverBase):
         """
 
     @abstractmethod
-    def _merge_excess_t(self, nodes, sum_steps, sum_step_errors, remove_idxs):
+    def _merge_excess_nodes(self, nodes, sum_steps, sum_step_errors, remove_idxs):
         """
         Merges neighboring time steps or removes and one time steps and extends
         its neighbor to cover the same range.
@@ -470,7 +470,9 @@ class AdaptiveQuadrature(SolverBase):
         if len(ratio_idxs_cut) == 0:
             return nodes, sum_steps, sum_step_errors
 
-        return self._merge_excess_t(nodes, sum_steps, sum_step_errors, ratio_idxs_cut)
+        return self._merge_excess_nodes(
+            nodes, sum_steps, sum_step_errors, ratio_idxs_cut
+        )
 
     def _get_optimal_mesh(
         self, record: dict[str, torch.Tensor], mesh: torch.Tensor
