@@ -998,6 +998,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
         reuse_mesh: bool = False,
+        random_initial_mesh: bool = False,
     ) -> IntegralOutput:
         """
         Perform parallel adaptive numerical integration of ode_fxn.
@@ -1042,6 +1043,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 scalar tensor. If None, uses the integral value itself.
             max_batch: Maximum evaluations per batch. Overrides dynamic memory
                 calculation if provided.
+            random_initial_mesh: When True, the fresh initial mesh is built
+                with random sub-barrier offsets (legacy behavior). When False
+                (default), barriers are evenly spaced across [t_init, t_final].
+                The default change makes the integration reproducible without
+                requiring an explicit ``torch.manual_seed`` for academic and
+                debugging workflows. Random sub-barriers may still be useful
+                when an evenly-spaced mesh accidentally aligns with features
+                of the integrand; users who relied on the previous behavior
+                should opt in via ``random_initial_mesh=True``.
             reuse_mesh: When True, seed the integration from the optimal mesh
                 cached by the previous successful call (warm start). Default
                 False. The cached mesh is the *optimal* mesh produced after
@@ -1183,10 +1193,11 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                     "Falling back to a fresh initial mesh.",
                     stacklevel=2,
                 )
-            # Generate a random initial mesh of barriers across [t_init, t_final].
-            # Uses sqrt(N_init_steps) evenly-spaced segments, each subdivided by
-            # random sub-barriers. Randomization avoids edge issues that occur
-            # when barriers align with features of the integrand.
+            # Generate a fresh initial mesh of barriers across [t_init, t_final].
+            # Layout: sqrt(N_init_steps) evenly-spaced top-level segments, each
+            # subdivided into sqrt(N_init_steps)+1 sub-barriers. The total
+            # barrier count is ~N_init_steps. Sub-barriers are placed either
+            # uniformly (default) or randomly within each segment.
             N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(
                 torch.int
             )
@@ -1195,10 +1206,31 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 t_init + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
             )  # TODO: this assumes time is 1d
 
-            # Create random sub-barriers within each segment and sort them
-            random_ts = dt * torch.rand((N_even_t, N_even_t + 1, 1), device=self.device)
-            random_ts = torch.sort(random_ts, dim=1)[0]
-            t_step_barriers = t_step_barriers + random_ts
+            n_sub = N_even_t + 1  # sub-barriers per segment
+            if random_initial_mesh:
+                # Random sub-barrier offsets within each segment, sorted.
+                # Useful when uniform spacing happens to align with features
+                # of the integrand.
+                random_ts = dt * torch.rand((N_even_t, n_sub, 1), device=self.device)
+                random_ts = torch.sort(random_ts, dim=1)[0]
+                t_step_barriers = t_step_barriers + random_ts
+            else:
+                # Deterministic uniformly-spaced sub-barriers within each
+                # segment. Reproducible across runs without requiring a
+                # manual_seed; this is the default for academic / debugging
+                # workflows. Bug B5 fix.
+                #
+                # Sub-barrier offsets are in [0, dt) — excluding dt to avoid
+                # duplicating the top-level segment boundary (segment k's
+                # last sub-barrier would otherwise coincide with segment
+                # k+1's first sub-barrier and the strict monotonicity
+                # assertion below would fail).
+                offsets = (
+                    dt
+                    * torch.arange(n_sub, dtype=self.dtype, device=self.device)
+                    / n_sub
+                )
+                t_step_barriers = t_step_barriers + offsets[None, :, None]
             # Enforce exact start and end points
             t_step_barriers[0] += t_init - t_step_barriers[0, 0]
             t_step_barriers[-1] += t_final - t_step_barriers[-1, -1]
