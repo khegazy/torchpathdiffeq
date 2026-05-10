@@ -11,7 +11,6 @@ from .runge_kutta import (
     RKParallelVariableAdaptiveStepsizeSolver,
     get_parallel_RK_solver,
 )
-from .serial_solver import SerialAdaptiveStepsizeSolver
 
 
 def setup_logging(level=logging.WARNING, filename=None):

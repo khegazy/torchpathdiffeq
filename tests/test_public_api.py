@@ -25,7 +25,6 @@ from torchpathdiffeq import (
     ODE_dict,
     RKParallelUniformAdaptiveStepsizeSolver,
     RKParallelVariableAdaptiveStepsizeSolver,
-    SerialAdaptiveStepsizeSolver,
     get_parallel_RK_solver,
     ode_path_integral,
     setup_logging,
@@ -40,7 +39,6 @@ class TestPublicExports:
     def test_classes_exist(self):
         assert RKParallelUniformAdaptiveStepsizeSolver is not None
         assert RKParallelVariableAdaptiveStepsizeSolver is not None
-        assert SerialAdaptiveStepsizeSolver is not None
         assert IntegralOutput is not None
 
     def test_functions_exist(self):

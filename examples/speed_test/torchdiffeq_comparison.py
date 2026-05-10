@@ -4,6 +4,7 @@ import logging
 import time
 
 import torch
+from torchdiffeq import odeint
 
 import torchpathdiffeq as tpdiffeq
 from torchpathdiffeq.examples import (
@@ -46,23 +47,25 @@ integrands = [wolf_schlegel, damped_sine, sine_squared, exp, t_squared]
 ###################################
 #####  torchdiffeq Speed Test #####
 ###################################
+# Compare against torchdiffeq.odeint directly. The serial wrapper that
+# previously lived in this library was removed in Phase 3 of the
+# quadrature alignment plan; calling torchdiffeq directly is a more
+# honest comparison anyway.
 logger.info("torchdiffeq")
+t_eval = torch.stack([t_init, t_final]).reshape(-1)
 tdiffeq_results = []
 for ode_fxn in integrands:
     total_time = 0
-    integrator = tpdiffeq.SerialAdaptiveStepsizeSolver(
-        ode_fxn=ode_fxn,
-        method=method,
-        atol=atol,
-        rtol=rtol,
-        t_init=t_init,
-        t_final=t_final,
-        y0=y0,
-        device=device,
-    )
     for _ in range(n_runs):
         t0 = time.time()
-        _ = integrator.integrate()
+        _ = odeint(
+            ode_fxn,
+            y0=y0,
+            t=t_eval,
+            method=method,
+            atol=atol,
+            rtol=rtol,
+        )
         total_time = total_time + (time.time() - t0)
     tdiffeq_results.append(total_time / n_runs)
 
@@ -80,7 +83,6 @@ for ode_fxn in integrands:
         _ = tpdiffeq.ode_path_integral(
             ode_fxn=ode_fxn,
             method=method,
-            computation="parallel",
             sampling="uniform",
             atol=atol,
             rtol=rtol,
