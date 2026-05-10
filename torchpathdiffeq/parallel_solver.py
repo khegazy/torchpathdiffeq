@@ -1787,58 +1787,38 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         if hasattr(self, "method"):
             self.method.to_dtype(dtype)
 
-    """
-    def _initial_t_steps(
-            self,
-            t,
-            mesh_init=None,
-            mesh_final=None
-        ):
-        Creates an initial time sampling tensor either from scratch or from a
-        tensor of time points with dimension d.
+    def _t_step_interpolate(
+        self, t_left: torch.Tensor, t_right: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Place initial quadrature points uniformly within each step.
+
+        Variable-sampling methods compute their tableau b weights
+        dynamically from the actual node positions, so any internally
+        consistent placement works as the *initial* layout. We use
+        evenly-spaced fractions ``[0, 1/(C-1), ..., 1]`` so that the
+        first call lays out C points spanning each panel from end to
+        end. Subsequent splits and merges (handled by
+        ``_evaluate_adaptive_y`` and ``_merge_excess_t``) reuse and
+        rearrange these points.
+
+        At ``a = 1/2`` for the 3-point ``interpolatory3_variable``
+        method this layout matches Simpson's rule exactly — see
+        tests/test_exactness.py for the reduction check.
 
         Args:
-            t (Tensor): Input time, either None or tensor starting and
-                ending at the integration bounds
-            mesh_init (Tensor, optional): Minimum of integral range
-            mesh_final (Tensor, optional): Maximum of integral range
+            t_left: Left boundary of each step. Shape: [N, T].
+            t_right: Right boundary of each step. Shape: [N, T].
 
-        Shapes:
-            t : [N, T] will populate intermediate evaluations according to
-                integration method; [N, C, T] will return t if C is the same
-                as the number of evaluations per step, otherwise it will create
-                C steps between the first and last values in the second dim
-            mesh_init: [T]
-            mesh_final: [T]
-
-        # Get variables or populate with default values, send to correct device
-        _, mesh_init, mesh_final, _ = self._check_variables(
-            mesh_init=mesh_init, mesh_final=mesh_final
-        )
-        if t is None:
-            t = torch.linspace(0, 1., 7, device=self.device).unsqueeze(-1)
-            t = mesh_init + t*(mesh_final - mesh_init)
-            t_left = t[:-1]
-            t_right = t[1:]
-        elif len(t.shape) == 2:
-            t_left = t[:-1]
-            t_right = t[1:]
-        elif t.shape[1] == self.C:
-            return t
-        else:
-            if len(t) > 1:
-                assert torch.allclose(t[:-1,-1], t[1:,0], atol=self.atol_assert, rtol=self.rtol_assert)
-            t_left = t[:,0]
-            t_right = t[:,-1]
-            #steps = torch.tile(
-            #    torch.arange(self.C)[None,:,None], (len(t), 1, t.shape[-1])
-            #)
-            #return t[:,0,:] + steps*(t[:,-1,:] - t[:,0,:])/self.Cm1
-        steps = torch.arange(self.C, device=self.device)[None,:,None]/self.Cm1
-        t_left = t_left.unsqueeze(1)
-        t_right = t_right.unsqueeze(1)
-        return t_left + steps*(t_right - t_left)
-    """
+        Returns:
+            Quadrature point positions. Shape: [N, C, T].
+        """
+        dt = (t_right - t_left).unsqueeze(1)
+        # Uniformly-spaced fractions of [0, 1] across C points.
+        fractions = torch.linspace(
+            0.0, 1.0, self.C, dtype=self.dtype, device=self.device
+        ).view(self.C, 1)
+        return t_left.unsqueeze(1) + fractions * dt
 
     def _evaluate_adaptive_y(
         self,

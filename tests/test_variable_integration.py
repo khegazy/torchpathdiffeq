@@ -2,22 +2,17 @@
 
 CLAUDE.md notes (line 69) that "Variable sampling integration tests
 are not currently enabled (only uniform methods are tested)".
-Investigation while writing this file revealed the deeper reason:
-``_VariableAdaptiveQuadratureBase`` is missing the
-``_t_step_interpolate`` method (uniform has it at parallel_solver.py
-line 1443; variable has only a docstring-stubbed ``_initial_t_steps``
-in lines 1620-1671). Calling ``integrate(...)`` on the variable
-solver immediately ``AttributeError``s at parallel_solver.py:1193.
+Investigation in Phase 0 revealed the deeper reason: the variable
+solver was missing its ``_t_step_interpolate`` method entirely (it
+had only a docstring-commented stub of ``_initial_t_steps`` from
+an old API, never connected). Calling ``integrate(...)`` on the
+variable solver ``AttributeError``ed inside the main loop.
 
-This means the variable code path is non-functional in current code.
-The user's research in ``examples/pode/`` does NOT use variable
-sampling (only imports ``VARIABLE_METHODS`` for reference), so the
-breakage hasn't surfaced. The Phase 4 ``QuadratureMethod`` ABC
-redesign should re-implement the variable solver path; when it
-does, the strict-xfails in this file will become xpasses and
-require unmarking (pytest enforces this).
-
-Phase 0 of the quadrature alignment plan.
+Phase 4 restored the variable solver by implementing
+``_t_step_interpolate`` with uniformly-spaced initial node
+placement. The existing ``_evaluate_adaptive_y`` (which interleaves
+old and new nodes for split reuse) and ``_merge_excess_t`` (which
+subsamples merged panels back to C nodes) now run end-to-end.
 """
 
 from __future__ import annotations
@@ -51,15 +46,6 @@ def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
     )
 
 
-VARIABLE_BROKEN_REASON = (
-    "Variable solver is currently non-functional: "
-    "_VariableAdaptiveQuadratureBase is missing _t_step_interpolate. "
-    "Phase 4 of the quadrature alignment plan restores the variable code "
-    "path as part of the QuadratureMethod ABC redesign."
-)
-
-
-@pytest.mark.xfail(reason=VARIABLE_BROKEN_REASON, strict=True)
 @pytest.mark.parametrize("method_name", VARIABLE_METHOD_NAMES)
 @pytest.mark.parametrize("integrand_name", INTEGRAND_NAMES)
 class TestVariableIntegralAccuracy:
