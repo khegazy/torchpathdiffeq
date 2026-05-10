@@ -1,166 +1,300 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working
+with code in this repository.
 
-## Project Overview
+## Project overview
 
-**torchpathdiffeq** is a PyTorch library for **parallelized adaptive numerical quadrature** (path integration). It computes definite integrals ∫f(t)dt by evaluating multiple Runge-Kutta integration steps simultaneously on GPU, unlike traditional sequential integrators. Currently in Alpha (v0.1.0), Python 3.10+.
+**torchpathdiffeq** is a PyTorch library for **adaptive numerical
+quadrature**: it computes definite integrals
+$\int_a^b f(t)\,dt$ for a known integrand $f$ by evaluating many
+quadrature panels in parallel batches on GPU, with full autograd through
+the integration loop. v0.2.0 (Alpha), Python 3.10+.
 
-**Critical distinction**: The integrand `ode_fxn` depends only on `t` (and optional extra args), NOT on accumulated state `y`. This independence between steps is what enables parallelization. The `y` parameter in example functions exists only for interface compatibility and is unused. This is numerical quadrature, not traditional ODE solving where y_{n+1} depends on y_n.
+**Critical distinction.** The integrand `f` depends only on `t` (and
+optional extra args), NOT on accumulated state `y`. This independence
+between panels is what enables parallel evaluation. This is numerical
+quadrature, not ODE solving — for state-coupled $\dot y = f(t, y)$ users
+should use `torchdiffeq` / `torchode` / `diffrax` directly.
 
-## Build & Test Commands
+## Build & test commands
 
 ```bash
-# Install in development mode
-pip install -e ".[dev]"
+# Install in development mode (with venv recommended)
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/pre-commit install
 
-# Run all tests (354 cases: 142 integration + 212 unit)
-pytest tests/ -v
+# Run all tests (969 currently)
+.venv/bin/pytest tests/ -v
 
 # Run all tests with coverage
-pytest --cov=torchpathdiffeq --cov-report=xml
+.venv/bin/pytest --cov=torchpathdiffeq --cov-report=xml
 
 # Run a single test file
-pytest tests/test_integrals.py -v
+.venv/bin/pytest tests/test_integrals.py -v
 
 # Run a specific parametrized case
-pytest tests/test_integrals.py -k "dopri5 and damped_sine" -v
+.venv/bin/pytest tests/test_integrals.py -k "dopri5 and damped_sine" -v
+
+# Run with snapshot regeneration (after intentional behavior changes)
+TPD_REGENERATE_SNAPSHOTS=1 .venv/bin/pytest tests/test_snapshots.py
 
 # Lint with ruff
-ruff check torchpathdiffeq/
+.venv/bin/ruff check torchpathdiffeq/
 
 # Type check
-mypy torchpathdiffeq/
+.venv/bin/mypy torchpathdiffeq/
 ```
 
-## Test Structure
+## Test structure
 
-Tests are in a flat `tests/` directory using `@pytest.mark.parametrize` for method × integrand combinations. Shared constants and helpers live in `tests/_helpers.py` (not `conftest.py`, because `--import-mode=importlib` in pyproject.toml prevents importing conftest directly). The `conftest.py` adds `tests/` to `sys.path` so `_helpers` is importable.
+Tests are in a flat `tests/` directory using `@pytest.mark.parametrize`
+for method × integrand combinations. Shared constants and helpers live
+in `tests/_helpers.py` (not `conftest.py`, because
+`--import-mode=importlib` in pyproject.toml prevents importing conftest
+directly). The `conftest.py` adds `tests/` to `sys.path` so `_helpers`
+is importable.
 
-**Integration tests** (142 cases):
+The test suite is split between **integration** (end-to-end runs of the
+solver) and **unit** (one function at a time with hand-crafted inputs):
 
 | File | What it tests |
 |---|---|
-| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand from `ODE_dict`, plus time ordering, mesh ordering, step continuity |
-| `test_data_types.py` | float32 and float64 handling (damped_sine integrand, relaxed cutoffs) |
+| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand in `ODE_dict`, plus time ordering, mesh ordering, step continuity |
+| `test_variable_integration.py` | Same but for variable methods (`adaptive_heun`, `interpolatory3_variable`) |
+| `test_data_types.py` | float32 and float64 handling |
 | `test_adaptivity.py` | Step adding (coarse mesh grows) and removal (dense mesh shrinks), mesh convergence |
-| `test_tableau.py` | Butcher tableau b weights sum to 1 (uniform and variable methods) |
-| `test_ode_path_integral.py` | `ode_path_integral()` wrapper matches direct solver construction (parallel + serial) |
-| `test_chemistry.py` | Wolf-Schlegel 2D potential: parallel vs serial agreement |
+| `test_tableau.py` | Tableau b weights sum to 1 (uniform and variable methods) |
+| `test_ode_path_integral.py` | `integrate()` wrapper matches direct solver construction |
+| `test_chemistry.py` | Wolf-Schlegel 2D potential: parallel vs scipy.integrate.quad |
+| `test_exactness.py` | **Polynomial-exactness** for every method (each method is exact through its claimed degree, e.g. gk21 through degree 31) |
+| `test_scipy_agreement.py` | Cross-validation against `scipy.integrate.quad` on canonical smooth integrands |
+| `test_convergence_rate.py` | Empirical convergence-rate slope matches each method's theoretical rate |
+| `test_autodiff_consistency.py` | $\nabla_\theta\int f_\theta dt$ via backprop equals $\int \nabla_\theta f_\theta dt$ |
+| `test_error_indicator.py` | Behavior of absolute vs cumulative error indicators (Bug B8 investigation) |
+| `test_bug_regressions.py` | Regression tests for bugs B1, B2, B4, B6 fixed in Phase 1 |
+| `test_snapshots.py` | Golden-value regression net for the file-split refactor; CPU-only float64 |
+| `test_public_api.py` | Smoke test of every public symbol and `IntegrationResult` fields |
+| `test_rk_integral.py` | `_RK_integral`: constant / linear / multi-step / multi-dim / zero-width / variable-b inputs |
+| `test_base_and_methods.py` | `get_sampling_type`, `_Tableau` dtype conversion, `_get_method` factory, weight formulas |
+| `test_error_computation.py` | `_error_norm`, `_rec_remove`, `_compute_error_ratios_absolute`/`_cumulative` |
+| `test_interpolation.py` | `_t_step_interpolate`: endpoints, shapes, monotonicity, tableau-c matching |
+| `test_sorted_insert.py` | `_get_sorted_indices` and `_insert_sorted_results` |
+| `test_base_solver.py` | `SolverBase._set_dtype`, `set_dtype_by_input`, `_check_variables`, `_integral_loss` |
+| `test_methods_extra.py` | Variable subclass `tableau_b`, `to_device`, dtype conversion |
+| `test_rk_solver_methods.py` | `adaptive_quadrature` factory, `_get_tableau_b`, `_get_num_tableau_c` |
+| `test_adaptive_steps.py` | `_adaptively_add_steps`: pass/fail/mixed error ratios, midpoint placement |
+| `test_record_and_sort.py` | `_record_results` and `_sort_record` |
+| `test_evaluate_and_merge.py` | `_evaluate_adaptive_y` + `_merge_excess_t` for both uniform and variable solvers |
+| `test_prune_and_optimal.py` | `prune_excess_t`, `_get_optimal_t_step_barriers` |
+| `test_gradient.py` / `test_gradient_integration.py` | Per-batch backward, learnable integrand training loops |
 
-**Unit tests** (212 cases) — test individual functions in isolation with hand-crafted inputs:
-
-| File | What it tests |
-|---|---|
-| `test_rk_integral.py` | `_RK_integral()`: constant/linear/multi-step/multi-dim/zero-width/variable-b inputs, output shapes |
-| `test_base_and_methods.py` | `get_sampling_type()`, `_Tableau` dtype conversion, `_get_method()` factory, `_VARIABLE_THIRD_ORDER` weight formulas, example integrand functions and analytical solutions |
-| `test_error_computation.py` | `_error_norm()`, `_rec_remove()` (adjacent mask resolution), `_compute_error_ratios_absolute()`, `_compute_error_ratios_cumulative()` |
-| `test_interpolation.py` | `_t_step_interpolate()`: endpoints, shapes, monotonicity, tableau c matching, scaling, independence across steps, tiny steps (×4 methods) |
-| `test_sorted_insert.py` | `_get_sorted_indices()` and `_insert_sorted_results()`: start/end/middle insertion, 1D/2D/3D tensors |
-| `test_base_solver.py` | `SolverBase._set_dtype()`, `set_dtype_by_input()`, `_check_variables()`, `_integral_loss()` |
-| `test_methods_extra.py` | `_VARIABLE_SECOND_ORDER.tableau_b()`, `to_device()`, variable subclass dtype conversion |
-| `test_rk_solver_methods.py` | `get_parallel_RK_solver()` factory, `_get_tableau_b()` (uniform+variable), `_get_num_tableau_c()` |
-| `test_serial_solver.py` | `SerialAdaptiveStepsizeSolver.integrate()` with constant/linear/custom bounds |
-| `test_adaptive_steps.py` | `_adaptively_add_steps()`: pass/fail/mixed error ratios, midpoint placement, barrier ordering |
-| `test_record_and_sort.py` | `_record_results()` init/merge/accumulate, `_sort_record()` ordering |
-| `test_evaluate_and_merge.py` | `_evaluate_adaptive_y()` + `_merge_excess_t()` for both uniform and variable solvers |
-| `test_prune_and_optimal.py` | `prune_excess_t()`, `_get_optimal_t_step_barriers()` |
-
-**Note**: Variable sampling integration tests are not currently enabled (only uniform methods are tested). The serial solver (torchdiffeq) may evaluate the integrand slightly outside `[t_init, t_final]` during adaptive stepping — serial-facing callables must not assert strict domain bounds. UNIFORM_METHODS are global singletons — tests that mutate dtype must save/restore original tableau tensors (float16 truncation is irreversible).
+**Snapshot tests** are the regression net for internal refactors: the
+file `tests/test_snapshots_data.json` pins `integral`, `integral_error`,
+and `n_optimal_mesh` for every (method × integrand × tolerance) cell.
+Regenerate with `TPD_REGENERATE_SNAPSHOTS=1 pytest tests/test_snapshots.py`.
 
 ## Architecture
 
-### Class Hierarchy
+### Package layout
+
+```
+torchpathdiffeq/
+├── __init__.py            # public API exports
+├── base.py                # SolverBase, steps enum, get_sampling_type
+├── results.py             # IntegrationResult, MethodOutput dataclasses
+├── methods/               # quadrature method registries
+│   ├── _base.py             # _Tableau, MethodClass
+│   ├── runge_kutta.py       # adaptive_heun, fehlberg2, bosh3, dopri5
+│   ├── gauss_kronrod.py     # gk15, gk21, gk31  (with builder)
+│   ├── clenshaw_curtis.py   # cc17, cc33, cc65  (with FFT-based weights)
+│   └── interpolatory.py     # variable adaptive_heun, interpolatory3_variable
+├── quadrature/            # adaptive integration engine
+│   ├── base.py              # AdaptiveQuadrature ABC + main integrate loop
+│   ├── uniform.py           # _UniformAdaptiveQuadratureBase
+│   └── variable.py          # _VariableAdaptiveQuadratureBase
+├── runge_kutta.py         # _RK_integral, UniformAdaptiveQuadrature,
+│                          # VariableAdaptiveQuadrature, adaptive_quadrature factory
+├── integrate.py           # integrate() free function (one-shot wrapper)
+├── examples.py            # ODE_dict (test integrands) + wolf_schlegel
+└── distributed.py         # multi-GPU / SLURM support (internal)
+```
+
+### Class hierarchy
 
 ```
 DistributedEnvironment (distributed.py)
   └── SolverBase (base.py)
-        ├── SerialAdaptiveStepsizeSolver (serial_solver.py)
-        └── ParallelAdaptiveStepsizeSolver (parallel_solver.py)
-              ├── ParallelUniformAdaptiveStepsizeSolver
-              │     └── RKParallelUniformAdaptiveStepsizeSolver (runge_kutta.py)
-              └── ParallelVariableAdaptiveStepsizeSolver
-                    └── RKParallelVariableAdaptiveStepsizeSolver (runge_kutta.py)
+        └── AdaptiveQuadrature (quadrature/base.py)
+              ├── _UniformAdaptiveQuadratureBase (quadrature/uniform.py)
+              │     └── UniformAdaptiveQuadrature (runge_kutta.py)
+              └── _VariableAdaptiveQuadratureBase (quadrature/variable.py)
+                    └── VariableAdaptiveQuadrature (runge_kutta.py)
 ```
 
-### Key Modules
+The two concrete classes (`UniformAdaptiveQuadrature` and
+`VariableAdaptiveQuadrature`) are what user code instantiates, either
+via `adaptive_quadrature(...)` factory or directly. They add the RK-
+specific `_calculate_integral` to whichever sampling-mode base they
+inherit from.
 
-- **path_integral.py** — Public entry point `ode_path_integral()`. Routes to parallel or serial solver, and to uniform or variable sampling for parallel.
-- **parallel_solver.py** (~1145 lines) — Core parallel integration engine. Contains the main adaptive integration loop with memory-aware batching, error-driven step refinement (add/remove/merge), and result recording.
-- **runge_kutta.py** — RK-specific solver subclasses implementing `_calculate_integral()` using tableau weights. `_RK_integral()` computes: `integral = y0 + Σ(h * Σ(b_i * f(t_i)))`.
-- **methods.py** — Defines RK tableaux (`_Tableau` with c, b, b_error). Uniform methods: adaptive_heun, fehlberg2, bosh3, dopri5. Variable methods: adaptive_heun, generic3 (Sanderse-Veldman).
-- **base.py** — `SolverBase` abstract class, `IntegralOutput`/`MethodOutput` dataclasses, `steps` enum.
-- **serial_solver.py** — Thin wrapper around `torchdiffeq.odeint` for sequential solving (different interface — this one IS state-dependent).
-- **distributed.py** — Multi-GPU/SLURM distributed training support.
-- **examples.py** — Test integrands with known analytical solutions: t, t², sin², exp, damped_sine. Each entry in `ODE_dict` is (function, analytical_solution, error_cutoff).
+### Public API
 
-### Tensor Shape Conventions
+```python
+from torchpathdiffeq import (
+    integrate,  # one-shot quadrature
+    adaptive_quadrature,  # factory for repeated calls
+    UniformAdaptiveQuadrature,  # concrete uniform-sampling solver
+    VariableAdaptiveQuadrature,  # concrete variable-sampling solver
+    IntegrationResult,  # return-type dataclass
+    UNIFORM_METHODS,  # registry of uniform method names
+    VARIABLE_METHODS,  # registry of variable method names
+    ODE_dict,
+    wolf_schlegel,  # test integrands with analytical solutions
+    steps,  # sampling-mode enum
+)
+```
+
+### Method portfolio
+
+```
+methods/runge_kutta.py:    adaptive_heun, fehlberg2, bosh3, dopri5
+methods/gauss_kronrod.py:  gk15, gk21 (default), gk31
+methods/clenshaw_curtis.py: cc17, cc33, cc65
+methods/interpolatory.py:  adaptive_heun (variable), interpolatory3_variable
+```
+
+For smooth integrands at academic-grade precision, prefer `gk21`
+(default) or `cc33`. RK methods are kept for backwards-compatibility and
+as low-order baselines.
+
+### Tensor shape conventions
 
 - **N**: number of integration steps in a batch
-- **C**: number of quadrature points per step (from RK tableau, e.g. 4 for bosh3, 7 for dopri5)
-- **T**: dimensionality of time (usually 1, but supports multi-dimensional)
-- **D**: dimensionality of ode_fxn output
+- **C**: number of quadrature points per step (from the rule's tableau,
+  e.g. 4 for bosh3, 7 for dopri5, 23 for gk21 with endpoint padding)
+- **T**: dimensionality of time (usually 1, but supports multi-D)
+- **D**: dimensionality of `f`'s output
 
-Key tensors: `t: [N, C, T]`, `y: [N, C, D]`, `tableau_b: [1, C, 1] or [N, C, 1]`, `y0: [D]`
+Key tensors: `t: [N, C, T]`, `y: [N, C, D]`, `tableau_b: [1, C, 1]` or
+`[N, C, 1]`, `y0: [D]`, mesh barriers: `[M, T]`.
 
-### Core Algorithm (parallel_solver.py `integrate()`)
+### Core algorithm (`AdaptiveQuadrature.integrate()` in `quadrature/base.py`)
 
-**t_step_barriers** are boundary points dividing [t_init, t_final] into integration steps. Between consecutive barriers, C quadrature points are placed per the RK tableau. **t_step_trackers** is a boolean array where True = step needs evaluation.
+`t_step_barriers` are boundary points dividing `[mesh_init, mesh_final]`
+into integration steps (panels). Between consecutive barriers, C
+quadrature points are placed per the tableau. `t_step_trackers` is a
+boolean array where `True` means the panel still needs evaluation.
 
-1. **Initialize barriers**: When `t=None`, creates ~√N_init_steps evenly-spaced segments with randomized sub-barriers to avoid alignment issues.
-2. **Main loop** (while any t_step_trackers are True):
-   a. Determine `max_steps` from GPU memory budget or explicit `max_batch`
-   b. Select up to max_steps unevaluated steps from t_step_trackers
-   c. Interpolate C quadrature points within each step via `_t_step_interpolate`
-   d. Evaluate `ode_fxn` on all flattened quadrature points, reshape to [N, C, D]
-   e. Compute integral + error via `_calculate_integral` (RK weighted sum using b and b_error tableaux)
-   f. Compute error ratios (absolute or cumulative mode)
-   g. **`_adaptively_add_steps`**: Steps with error_ratio < 1 are accepted (marked done). Steps with error_ratio ≥ 1 are rejected — a new midpoint barrier is inserted, splitting into two smaller steps for re-evaluation.
-   h. Record accepted results into `record` dict (sorted insertion by time)
-   i. If `take_gradient`: call `loss.backward()` on this batch
-3. **Post-convergence**: Sort record, compute optimal barriers via `_get_optimal_t_step_barriers` (prune low-error pairs with `prune_excess_t`, add where error still high), save for reuse.
+1. **Initialize barriers.** When `mesh=None`, generate
+   ~$\sqrt{N_\text{init}}$ evenly-spaced top-level segments with random
+   sub-barriers (random by default — uniform aliases on
+   uniform-feature integrands). When `reuse_mesh=True`, seed from the
+   cached `mesh_optimal` of the previous successful run.
+2. **Main loop.** While any `t_step_trackers` are `True`:
+   - Determine `max_steps` from GPU memory budget or explicit `max_batch`.
+   - Select up to `max_steps` unevaluated panels.
+   - Place C nodes per panel via `_t_step_interpolate`.
+   - Evaluate `f` on all flattened nodes; reshape to `[N, C, D]`.
+   - Compute integral + error via `_calculate_integral` (RK weighted
+     sum using `b` and `b_error` tableaux).
+   - Compute error ratios (absolute or cumulative mode).
+   - `_adaptively_add_steps`: panels with ratio `< 1` are accepted;
+     panels with ratio `>= 1` are split at midpoint into two
+     sub-panels for re-evaluation.
+   - Record accepted results into the running record.
+   - If `take_gradient`: per-batch `loss.backward()`.
+3. **Post-convergence.** Sort the record, compute `mesh_optimal` via
+   `_get_optimal_t_step_barriers` (prune low-error pairs, refine
+   high-error gaps), cache for reuse on the next call.
 
-### Error Computation
+### Error computation modes
 
-Two modes controlled by `use_absolute_error_ratio`:
-- **Absolute** (default): `error_ratio = |step_error| / (atol + rtol * |total_integral|)` — uses the converging total integral value
-- **Cumulative**: `error_ratio = |step_error| / (atol + rtol * |cumulative_sum_to_step|)` — uses running sum, more like traditional ODE error
+Two modes selected by `use_absolute_error_ratio`:
+- **Absolute** (default): `error_ratio = |step_error| / (atol + rtol * |total_integral|)`. Every panel uses the same denominator. Best for path integrals where the total is the meaningful quantity.
+- **Cumulative**: `error_ratio = |step_error| / (atol + rtol * |cumsum_to_step|)`. The denominator grows with the running integral, mimicking traditional ODE error control. Per-panel ratios *decrease* as integration progresses.
 
-Error for multivariate outputs: `_error_norm = sqrt(mean(error²))` (RMS over D dimension).
+`error_ratios_2steps`: combined error of consecutive step pairs, used for
+merging. When `error_ratio_2steps < remove_cut` (default 0.1), pairs are
+merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
 
-**error_ratios_2steps**: Combined error of consecutive step pairs, used for merging. When `error_ratio_2steps < remove_cut` (default 0.1), pairs are merged. `_rec_remove` ensures no adjacent pairs are both flagged.
+### Uniform vs variable sampling
 
-### Uniform vs Variable Sampling
+- **Uniform** (`quadrature/uniform.py`): nodes at fixed fractional
+  positions within each panel (tableau `c` values). Tableau `b` values
+  are constants.
+  - *Splitting*: discards old evaluations, places fresh quadrature
+    points at standard `c` positions in the new sub-panels.
+  - *Merging*: re-interpolates C nodes at standard `c` positions
+    spanning `[A.start, B.end]`.
+- **Variable** (`quadrature/variable.py`): nodes at arbitrary positions.
+  Tableau `b` values computed dynamically via
+  `method.tableau_b(c)` (Sanderse-Veldman formulas).
+  - *Splitting*: reuses existing evaluations by inserting new midpoints
+    between each pair of consecutive points and interleaving old + new
+    into a 2C-length array, reshaped into two C-point sub-panels.
+    Avoids redundant `f` calls.
+  - *Merging*: concatenates points from both panels (C + C-1 = 2C-1,
+    shared boundary not duplicated), then subsamples every other point
+    to get C. The `tableau_b(c)` call recomputes the right weights for
+    the new layout.
 
-- **Uniform**: Quadrature points at fixed fractional positions within each step (tableau.c values like [0, 0.5, 0.75, 1.0] for bosh3). Tableau b values are constants.
-  - *Splitting*: Discards old evaluations entirely. Splits step at midpoint into two sub-steps, places fresh quadrature points at standard c positions in each.
-  - *Merging*: Creates a new step spanning [A.start, B.end] and re-interpolates C quadrature points at the standard c positions.
-- **Variable**: Quadrature points at arbitrary positions. Tableau b values computed dynamically from actual point positions using Sanderse-Veldman formulas (`_VARIABLE_THIRD_ORDER.tableau_b(c)`).
-  - *Splitting*: Reuses existing evaluations. Inserts new midpoints between each pair of consecutive points, interleaves old+new into a 2C-length array, reshapes into two C-point sub-steps. This avoids redundant ode_fxn evaluations.
-  - *Merging*: Concatenates points from both steps (C + C-1 = 2C-1, shared boundary not duplicated), then subsamples every other point to get C points. The `tableau_b(c)` call will recompute correct weights for the new positions.
+### Memory management
 
-### Memory Management
+- `_setup_memory_checks` benchmarks `f` with increasing `N`, measures
+  per-evaluation memory cost (with a 2.1× safety factor).
+- `_get_max_ode_evals = usable_memory / per_eval_size`.
+- `_get_usable_memory = free - buffer`, where
+  `buffer = (1 - total_mem_usage) * total_memory`.
+- Supports both CUDA (`torch.cuda.mem_get_info`) and CPU
+  (`psutil.virtual_memory`).
 
-- `_setup_memory_checks`: Benchmarks ode_fxn with increasing N, measures memory per evaluation (×2.1 safety factor)
-- `_get_max_ode_evals`: usable_memory / ode_unit_mem_size
-- `_get_usable_memory`: free_memory - buffer, where buffer = (1 - total_mem_usage) × total_memory
-- Supports both CUDA (`torch.cuda.mem_get_info`) and CPU (`psutil.virtual_memory`)
+### Gradient / loss support
 
-### Gradient/Loss Support
+- `take_gradient=True` triggers `loss.backward()` after each accepted
+  batch. This is essential when the autograd graph for the entire
+  integration would not fit in GPU memory; per-batch backward
+  accumulates gradients into `theta.grad` without holding the full
+  graph.
+- `loss_fxn` defaults to returning the integral itself
+  (`_integral_loss` in `base.py`). Linear in the integral, so the
+  default path is correctness-safe under per-batch backward.
+- Results from each batch after backward are `.detach()`-ed before
+  being added to the running record (so the graph for that batch can
+  be released).
 
-- `take_gradient` flag triggers `loss.backward()` after each batch
-- `loss_fxn` defaults to returning the integral value itself
-- Results are `.detach()`ed when gradients are taken to avoid graph accumulation across batches
+### Warm-starting (`reuse_mesh=True`)
 
-### Warm-Starting & Early Exit
+- Solver caches `mesh_optimal` from the previous successful call.
+- On the next call with `reuse_mesh=True`, the cached mesh is filtered
+  to `[mesh_init, mesh_final]`, padded if needed, and used as the
+  initial mesh.
+- Integrand identity is sanity-checked via `id(f)` (Phase 1 fix; the
+  prior `__name__` check collided across all lambdas). On id mismatch
+  the solver warns but proceeds.
+- Default is `reuse_mesh=False` so that calling the same solver on a
+  new integrand never silently reuses a stale mesh.
 
-- Solver caches `t_step_barriers_previous` and `previous_ode_fxn`. On subsequent calls with the same integrand and `t=None`, the cached optimal barriers are reused as the initial mesh instead of generating a random one.
-- `max_path_change`: When a user-provided mesh (`t` is given) has too many failing steps (fail_ratio ≥ max_path_change), the solver exits early and returns None instead of refining indefinitely.
+### Dtype management
 
-### Dtype Management
-
-- `SolverBase._set_dtype` maintains two tolerance levels: `atol`/`rtol` (for integration error control, can be float32) and `atol_assert`/`rtol_assert` (for geometric assertions like time ordering, always looser at 1e-6 minimum). This prevents false assertion failures when using lower-precision dtypes.
+- `SolverBase._set_dtype` maintains two tolerance levels: `atol` /
+  `rtol` (integration error control, can be float32) and
+  `atol_assert` / `rtol_assert` (geometric assertions like time
+  ordering, always looser).
+- `float64` and `float32` are the supported runtime dtypes. `float16`
+  is refused at construction (Bug B4 fix): its ~1e-3 precision floor
+  exceeds typical adaptive tolerances, so the previous loose-tolerance
+  path silently produced wrong answers.
+- Methods are **cloned per solver instance** (`_get_method` calls
+  `MethodClass.clone()`); dtype/device mutations stay isolated to one
+  solver and never propagate via shared singletons. The previous
+  global-singleton hazard (where a float32 round-trip could
+  irreversibly degrade `UNIFORM_METHODS["dopri5"].tableau.b` for the
+  rest of the test session) is gone.
 
 ## Dependencies
 
-Core: torch, torchdiffeq, einops, psutil, numpy
+- **Runtime**: torch, numpy, scipy, einops, psutil.
+- **Dev**: pytest, pytest-cov, mypy, pre-commit, ruff, typos,
+  torchdiffeq (for the speed-test benchmark only).

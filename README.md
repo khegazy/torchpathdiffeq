@@ -1,10 +1,57 @@
 # torchpathdiffeq
 
-**Parallelized adaptive numerical path integration with backpropagation support.**
+**A PyTorch library for adaptive numerical quadrature — computing
+$\int_{a}^{b} f(t)\, dt$ for a known integrand $f$, in parallel batches,
+with full autograd support.**
 
-Many problems across science and engineering reduce to computing and optimizing a path integral. In physics, the principle of least action integrates a Lagrangian along a trajectory to derive equations of motion. In chemistry, reaction rates depend on integrating over potential energy surfaces. In machine learning, mode connectivity requires integrating loss along curves in parameter space, and reinforcement learning accumulates rewards along paths of decisions. Despite their ubiquity, path integrals remain expensive to compute and difficult to backpropagate through, limiting their practical use.
+Adaptive quadrature is the workhorse behind every problem that reduces to
+"integrate this function and we already know how to evaluate it":
+computing the action along a known trajectory, the loss along a learned
+path, an expectation under a base measure, an ODE residual along a
+candidate solution, or simply $\int_{0}^{\pi}\sin(t)\,dt$. Classical
+adaptive-quadrature libraries (QUADPACK, `scipy.integrate.quad`) handle
+this well, but they are sequential and not differentiable. PyTorch's
+`torchdiffeq` is differentiable but solves a different problem (true ODE
+integration where the next state depends on the previous), so it must
+evaluate steps sequentially even when the integrand has no
+state-coupling.
 
-torchpathdiffeq (TPD) is a PyTorch library that makes path integral computation fast and differentiable. Unlike traditional numerical integrators that evaluate integration steps **sequentially** (each step depends on the previous), TPD exploits a key property of path integrals: when the path is known, all integration steps can be evaluated **simultaneously**. TPD leverages this independence to evaluate the maximum number of integration steps, then adaptively refines only the steps that need it. The result is often **two orders of magnitude faster** than sequential integrators like torchdiffeq, while producing identical accuracy and supporting full backpropagation for gradient-based optimization.
+torchpathdiffeq fills the gap: it is **adaptive quadrature**, not ODE
+solving, and it exploits the lack of state coupling to **evaluate many
+panels in parallel** on GPU. With full autograd through the integration
+loop, it is suitable for:
+
+- training a learnable function $\phi_\theta(t)$ whose loss is a path
+  integral, and back-propagating through that integral;
+- computing $\nabla_\theta \int f_\theta(t)\,dt$ either by autograd
+  through the integral (option A) or by integrating $\nabla_\theta f$
+  directly (option B);
+- one-shot definite integrals where you want batched parallel evaluation
+  of a smooth integrand — often two orders of magnitude faster than
+  sequential ODE-style integrators on the same problem.
+
+## What this is for
+
+- ✅ Compute $\int_{a}^{b} f(t)\,dt$ where $f$ is given as a callable.
+- ✅ Compute $\int f(t, \phi_\theta(t))\,dt$ for a learnable
+  $\phi_\theta$, and back-propagate through it.
+- ✅ Compute integrals of gradients, expectations, residuals — anything
+  the user constructs as a $t\mapsto \mathbb{R}^D$ callable.
+- ✅ Run on GPU or CPU; the parallel evaluation pays off most when
+  evaluating $f$ is itself non-trivial (a neural net, a PDE solver,
+  etc.).
+
+## What this is **not** for
+
+- ❌ True ODE integration $\dot y = f(t, y)$ with state coupling — the
+  parallel trick relies on independence between panels. For state-
+  coupled problems use [torchdiffeq](https://github.com/rtqichen/torchdiffeq),
+  [torchode](https://github.com/martenlienen/torchode), or
+  [diffrax](https://github.com/patrick-kidger/diffrax).
+- ❌ Multi-dimensional adaptive integration (cubature). Use a sparse-grid
+  or Monte-Carlo library.
+- ❌ Long-time symplectic / Hamiltonian integration. Use a dedicated
+  geometric integrator.
 
 ## Installation
 
@@ -12,7 +59,7 @@ torchpathdiffeq (TPD) is a PyTorch library that makes path integral computation 
 pip install torchpathdiffeq
 ```
 
-Or install from source:
+Or from source:
 
 ```bash
 git clone https://github.com/khegazy/torchpathdiffeq.git
@@ -20,425 +67,275 @@ cd torchpathdiffeq
 pip install -e .
 ```
 
-**Requirements**: Python 3.10+, PyTorch, torchdiffeq, einops, psutil
+Runtime dependencies: Python 3.10+, PyTorch, NumPy, SciPy, einops, psutil.
 
-### For Developers
-
-Install with dev dependencies and enable pre-commit hooks:
+### For developers
 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 pre-commit install
 ```
 
-This sets up linting (ruff) and spell checking (typos) to run automatically on every `git commit`.
+The dev extras add pytest, ruff, mypy, pre-commit, typos, and torchdiffeq
+(used by the speed-test benchmark only).
 
-## Quick Start
-
-### The Integrand (`ode_fxn`)
-
-TPD computes definite integrals of the form $\int_{t_i}^{t_f} f(t, \phi(t))\, dt$, where the path $\phi(t)$ is known. The integrand `ode_fxn` takes batched time points of shape `[N, T]` and returns values of shape `[N, D]`, where `N` is the batch size, `T` is the time dimensionality (usually 1), and `D` is the output dimensionality. Because the path is known, the function depends only on `t` — not on accumulated state — which is what allows TPD to evaluate all integration steps in parallel.
+## Quick start
 
 ```python
-# Scalar integrand: f(t) = sin(t), returns shape [N, 1]
-def my_integrand(t):
-    return torch.sin(t)
-
-
-# Multi-dimensional integrand: returns shape [N, 2]
-def vector_integrand(t):
-    return torch.cat([torch.sin(t), torch.cos(t)], dim=-1)
-
-
-# Integrand that evaluates a neural network path phi_theta(t)
-def path_loss(t):
-    return (path_net(t) - target(t)) ** 2
-```
-
-### Computing a Definite Integral
-
-The simplest way to use TPD is the `ode_path_integral` function, which builds the integrator and performs the integration in one call:
-
-```python
+import math
 import torch
-from torchpathdiffeq import ode_path_integral
+from torchpathdiffeq import integrate
 
-# Compute integral of sin(t) from 0 to pi (exact answer: 2.0)
-result = ode_path_integral(
-    ode_fxn=lambda t: torch.sin(t),
-    method="dopri5",
-    t_init=torch.tensor([0.0]),
-    t_final=torch.tensor([3.14159265]),
+result = integrate(
+    f=lambda t: torch.sin(t),
+    method="gk21",  # default; Gauss-Kronrod 21-point pair (G10-K21)
+    mesh_init=torch.tensor([0.0]),
+    mesh_final=torch.tensor([math.pi]),
 )
 print(result.integral)  # tensor([2.0000])
+print(result.integral_error)  # estimated absolute error
+print(result.converged)  # True
 ```
 
-### Path Optimization
+The integrand `f` takes a tensor `t` of shape `[N, T]` (batched time
+points) and returns a tensor of shape `[N, D]` (batched output values).
+Because `f` depends only on `t`, the solver can evaluate many panels'
+quadrature points simultaneously on GPU.
 
-For repeated integration (e.g., inside a training loop), construct the solver once and call `integrate()` repeatedly. The solver caches the optimal time mesh from the previous call and reuses it as the starting mesh for the next. The new mesh is often similar to the previous, therefore by reusing the mesh TPD eliminates the vast majority of adaptive mesh refinement.
+## Differentiable integration
+
+Every step of the integration is differentiable, so you can take
+gradients of the result with respect to anything the integrand depends
+on. There are two equivalent ways to compute
+$\nabla_\theta \int f_\theta(t)\,dt$:
 
 ```python
 import torch
-from torchpathdiffeq import get_parallel_RK_solver, steps
+from torchpathdiffeq import adaptive_quadrature, steps
 
-# Create the solver once
-solver = get_parallel_RK_solver(
+theta = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
+mesh_init = torch.tensor([0.0])
+mesh_final = torch.tensor([torch.pi.item()])
+
+
+# (A) Backprop through the integral.
+solver = adaptive_quadrature(
     sampling_type=steps.ADAPTIVE_UNIFORM,
-    method="dopri5",
-    atol=1e-6,
-    rtol=1e-4,
-    remove_cut=0.1,
-    t_init=torch.tensor([0.0]),
-    t_final=torch.tensor([1.0]),
+    method="gk21",
+    atol=1e-8,
+    rtol=1e-8,
 )
-
-# First call:
-# - Builds mesh from scratch
-# - Calculates Integral
-# - Ready to backpropagate through
-result = solver.integrate(
-    ode_fxn=my_integrand,
-    y0=torch.tensor([0.0]),
+solver.integrate(
+    f=lambda t: theta * torch.sin(t),
+    mesh_init=mesh_init,
+    mesh_final=mesh_final,
+    take_gradient=True,  # per-batch backward; accumulates into theta.grad
+    is_training=True,
 )
+print(theta.grad)  # 2.0
 
-# Subsequent calls:
-# - Reuses cached optimal mesh (warm start)
-# - Calculates Integral
-# - Ready to backpropagate through
-result = solver.integrate(ode_fxn=my_integrand)
+
+# (B) Integrate the gradient of the integrand directly.
+df_dtheta = lambda t: torch.sin(t)  # closed-form derivative
+out_b = solver.integrate(f=df_dtheta, mesh_init=mesh_init, mesh_final=mesh_final)
+print(out_b.integral)  # also 2.0
 ```
 
-TPD's core use case is optimizing a path by backpropagating through the integral. Pass `take_gradient=True` to have the solver call `.backward()` on the loss after each batch of steps:
+The two paths agree to machine precision on smooth integrands; this
+consistency is verified in `tests/test_autodiff_consistency.py`.
+
+**Memory-bounded gradients.** Setting `take_gradient=True` makes the
+solver call `loss.backward()` after each accepted batch instead of
+holding the full autograd graph until the end. This is essential when
+the number of panel evaluations is large enough that the graph would
+otherwise exceed GPU memory.
+
+## Adaptive mesh and warm-starting
+
+Each call returns a `result.mesh_optimal` — the post-refinement,
+post-pruning mesh that the integration converged to. This mesh is the
+ideal starting point for a *similar* integrand on the next call: when
+training a model, the integrand changes only slightly between iterations,
+so re-running adaptive refinement from a coarse random mesh wastes
+work.
 
 ```python
-import torch
-import torch.nn as nn
-from torchpathdiffeq import get_parallel_RK_solver, steps
+solver = adaptive_quadrature(method="gk21", atol=1e-8, rtol=1e-8)
 
-
-# A neural network representing a path phi_theta(t)
-class PathNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(1, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1),
-        )
-
-    def forward(self, t):
-        return self.net(t)
-
-
-path_net = PathNet()
-optimizer = torch.optim.Adam(path_net.parameters(), lr=1e-3)
-
-
-# Define a loss integrand that evaluates the path
-def loss_integrand(t):
-    return (path_net(t) - target_function(t)) ** 2
-
-
-solver = get_parallel_RK_solver(
-    sampling_type=steps.ADAPTIVE_UNIFORM,
-    method="bosh3",
-    atol=1e-5,
-    rtol=1e-3,
-)
-
-# Training loop
-for epoch in range(1000):
-    optimizer.zero_grad()
+for epoch in range(N_epochs):
+    # On the second and later iterations, reuse the previous run's
+    # optimal mesh as the warm-start. Default is reuse_mesh=False so
+    # that integrating a *different* integrand never silently shares
+    # a stale mesh.
     result = solver.integrate(
-        ode_fxn=loss_integrand,
-        t_init=torch.tensor([0.0]),
-        t_final=torch.tensor([1.0]),
+        f=f_theta,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
+        reuse_mesh=(epoch > 0),
+        take_gradient=True,
+        is_training=True,
     )
-    if not result.gradient_taken:
-        result.integral.backward()
     optimizer.step()
 ```
 
-For finer control over the loss computation, you can provide a custom `loss_fxn` to `integrate()`:
+## Available methods
 
-```python
-result = solver.integrate(
-    ode_fxn=loss_integrand,
-    take_gradient=True,
-    loss_fxn=lambda output: output.integral.sum(),
-)
-```
+The library ships ten quadrature rules across three families:
 
-### Accessing Results
-
-`integrate()` returns an `IntegralOutput` with detailed diagnostics:
-
-```python
-result = solver.integrate(ode_fxn=my_integrand)
-
-result.integral  # Computed integral value, shape [D]
-result.integral_error  # Estimated total error, shape [D]
-result.t  # Evaluation time points, shape [N, C, T]
-result.y  # Integrand values at each point, shape [N, C, D]
-result.sum_steps  # Per-step contributions to the integral, shape [N, D]
-result.error_ratios  # Per-step error ratios (< 1 means accepted), shape [N]
-result.t_optimal  # Optimized mesh for reuse, shape [M, T]
-result.gradient_taken  # Whether .backward() was already called (always True if take_gradient=True)
-```
-
-### Choosing a Method and Tolerances
-
-TPD provides four uniform-sampling Runge-Kutta methods and two variable-sampling methods:
-
-| Method | Type | Order | Quadrature Points (C) |
+| Family | Methods | Polynomial exactness | Notes |
 |---|---|---|---|
-| `adaptive_heun` | uniform or variable | 2 | 2 |
-| `fehlberg2` | uniform | 2 | 3 |
-| `bosh3` | uniform | 3 | 4 |
-| `dopri5` | uniform | 5 | 7 |
-| `generic3` | variable | 3 | 3 |
+| Gauss-Kronrod | `gk15`, `gk21`, `gk31` | 22 / 31 / 46 | Embedded G_n / K_(2n+1) pair, the canonical adaptive-quadrature workhorse since 1965 (Laurie 1997). `gk21` is the default. |
+| Clenshaw-Curtis | `cc17`, `cc33`, `cc65` | 16 / 32 / 64 | Chebyshev nodes, **nested** by doubling. Excellent on analytic integrands (Trefethen 2008). |
+| Runge-Kutta | `adaptive_heun`, `fehlberg2`, `bosh3`, `dopri5` | 1 / 1 / 2 / 4 | Embedded RK pairs from the ODE-solver literature. |
 
-Higher-order methods need fewer steps for the same accuracy but cost more per step. `dopri5` is a good default for smooth integrands; `bosh3` balances cost and accuracy; `adaptive_heun` is cheapest per step and well-suited to rough integrands.
+Plus two variable-node methods (`adaptive_heun` and
+`interpolatory3_variable`) that re-weight existing evaluations on mesh
+splits — useful when integrand evaluations are expensive.
 
-Error is controlled by `atol` (absolute) and `rtol` (relative). A step is accepted when its estimated error satisfies `error < atol + rtol * |integral_value|`:
+For smooth integrands at moderate-to-high accuracy, prefer `gk21` or
+`cc33`. The RK methods are kept for backwards-compatibility and as
+baselines.
 
-```python
-# Tight tolerances for high accuracy
-result = ode_path_integral(
-    ode_fxn=my_function,
-    method="dopri5",
-    atol=1e-10,
-    rtol=1e-8,
-    t_init=torch.tensor([0.0]),
-    t_final=torch.tensor([1.0]),
-)
+## Use cases
+
+### Path integrals over learned functions
+
+Compute $\int f(t, \phi_\theta(t))\,dt$ where $\phi_\theta$ is a neural
+network parameterizing a path. Backprop through the integral updates
+$\theta$ to optimize the integrand against any objective.
+
+### PINN-style residual minimization
+
+Solve a differential equation by parameterizing the solution as
+$y_\theta(t)$, then minimizing
+$\int |\mathcal{L}\,y_\theta(t)|^2\,dt$ where $\mathcal{L}$ is the
+differential operator. The collocation residual at every $t$ is just a
+function of $t$, so it fits the quadrature framework exactly.
+
+### Expectation under a base measure
+
+Compute $\int f(t)\,p(t)\,dt$ where $p$ is a known density and $f$ is a
+quantity of interest. The integrand is the product `f(t) * p(t)`.
+
+The library does not bundle these as application APIs — they are simply
+uses of `integrate(f, ...)` with the right `f`.
+
+## API reference
+
+### Free function
+
+```text
+torchpathdiffeq.integrate(
+    f, method="gk21", sampling="uniform",
+    atol=1e-5, rtol=1e-5,
+    mesh=None, mesh_init=None, mesh_final=None,
+    y0=None, remove_cut=0.1, total_mem_usage=0.9,
+    use_absolute_error_ratio=True, device=None,
+    **kwargs,
+) -> IntegrationResult
 ```
 
-## Solving ODEs via Path Optimization
+One-shot integration. Constructs an `AdaptiveQuadrature` and calls
+`integrate()` on it. For repeated calls (e.g. training loops),
+instantiate the class directly via `adaptive_quadrature(...)` so
+warm-start cache state persists across iterations.
 
-Traditional ODE solvers are inherently sequential: each step depends on the previous. TPD reframes ODE solving as path optimization, where a neural network learns the solution by minimizing the ODE residual integrated over the domain:
+### Class API
 
-```python
-# The ODE: dx/dt = f(t, x), x(0) = x0
-# Train phi_theta(t) such that d/dt phi_theta(t) ≈ f(t, phi_theta(t))
+```text
+torchpathdiffeq.adaptive_quadrature(
+    sampling_type, method="gk21", atol=1e-5, rtol=1e-5,
+    mesh_init=None, mesh_final=None, f=None,
+    remove_cut=0.1, max_batch=None, total_mem_usage=0.9,
+    max_path_change=None, use_absolute_error_ratio=True,
+    device=None, **kwargs,
+) -> UniformAdaptiveQuadrature | VariableAdaptiveQuadrature
 
-
-def ode_residual_loss(t):
-    t = t.requires_grad_(True)
-    phi = path_net(t)
-    dphi_dt = torch.autograd.grad(
-        phi, t, grad_outputs=torch.ones_like(phi), create_graph=True
-    )[0]
-    return (dphi_dt - f(t, phi)) ** 2
-
-
-# Integrate the residual over [t0, T] — the integral is the loss
-result = solver.integrate(ode_fxn=ode_residual_loss, t_init=t0, t_final=T)
-if not result.gradient_taken:
-    result.integral.backward()
+solver.integrate(
+    f=None, y0=None,
+    mesh=None, mesh_init=None, mesh_final=None,
+    take_gradient=False, is_training=None,
+    reuse_mesh=False, random_initial_mesh=True,
+    loss_fxn=None, total_mem_usage=None, max_batch=None,
+    N_init_steps=13, ode_args=(),
+) -> IntegrationResult
 ```
 
-This approach provides three advantages over traditional sequential integration:
-1. **Parallel evaluation**: all time points are evaluated simultaneously on GPU.
-2. **No error accumulation**: the entire path is optimized at every training step, unlike sequential solvers where errors compound from step to step.
-3. **Controllable loss landscape**: by gradually increasing the integration range T (curriculum learning), you can maintain a near-quadratic loss landscape, avoiding the optimization difficulties common with physics-informed losses.
+### `IntegrationResult` fields
 
-## Uniform vs. Variable Sampling
+- `integral` — the computed integral, shape `[D]`.
+- `integral_error` — estimated total error, shape `[D]`.
+- `mesh_optimal` — refined-and-pruned barriers from this run, shape
+  `[M, T]`. Pass back via `mesh=...` for explicit warm-start.
+- `mesh_init`, `mesh_final` — bounds used.
+- `nodes` — per-step quadrature points, shape `[N, C, T]`.
+- `h` — per-step widths, shape `[N, T]`.
+- `y` — integrand evaluations at `nodes`, shape `[N, C, D]`.
+- `sum_steps`, `sum_step_errors`, `error_ratios` — per-step diagnostics.
+- `loss`, `gradient_taken`, `y0` — training-loop diagnostics.
+- `converged: bool` — `True` for normal completion; `False` only when
+  `max_path_change` triggers an early exit on a user-provided mesh.
 
-TPD offers two sampling strategies for placing quadrature points within each integration step:
+## How it works
 
-**Uniform sampling** (`sampling='uniform'`): Quadrature points are placed at fixed fractional positions within each step (e.g., [0, 1/3, 2/3, 1] for bosh3). Weights (tableau b values) are constants. When a step is split, old evaluations are discarded and fresh points are placed in each sub-step.
+1. **Initial mesh.** When `mesh` is not given, the integration domain
+   $[a, b]$ is divided into ~$\sqrt{N_\text{init}}$ top-level segments
+   each subdivided into ~$\sqrt{N_\text{init}}+1$ sub-barriers; the
+   total mesh has ~$N_\text{init}$ barriers (default 13). Sub-barrier
+   placement is randomized by default — uniform spacing accidentally
+   aliases with periodic / polynomial-extremum integrands and the
+   adaptive controller cannot recover from that. (For deterministic
+   reproducibility, call `torch.manual_seed` before `integrate()`.)
 
-**Variable sampling** (`sampling='variable'`): Quadrature points can sit at arbitrary positions. Weights are computed dynamically from the actual positions using Sanderse-Veldman formulas. When a step is split, existing evaluations are **reused** and new midpoints are interleaved, avoiding redundant integrand evaluations.
+2. **Parallel batched evaluation.** All quadrature points across a
+   batch of panels are flattened into one tensor and evaluated in a
+   single forward pass of the integrand. Batch size is chosen to fit
+   a fraction `total_mem_usage` of GPU memory after a small
+   benchmarking run that measures the integrand's memory footprint.
 
-```python
-# Variable sampling — reuses evaluations on split, good for expensive integrands
-result = ode_path_integral(
-    ode_fxn=expensive_function,
-    method="generic3",
-    sampling="variable",
-    atol=1e-6,
-    rtol=1e-4,
-)
-```
+3. **Per-step error estimate.** Each method computes both a primary
+   integral and an embedded lower-order estimate; their difference is
+   the per-step error. The error ratio
+   $\text{step\\_error} / (\text{atol} + \text{rtol} \cdot |I|)$
+   controls acceptance: ratios $< 1$ accept; ratios $\geq 1$ reject and
+   split the step at its midpoint.
 
-## Memory Management
+4. **Adaptive refinement.** The solver alternates batched evaluation
+   with split (high-error steps subdivide) and merge (consecutive
+   low-error pairs combine) until every step's ratio is below 1.
 
-TPD automatically manages GPU memory. It benchmarks the integrand to measure memory per evaluation, then dynamically sizes batches to stay within the available budget:
+5. **Optimal mesh.** After convergence, a final pruning + refinement
+   pass produces `mesh_optimal` — the smallest mesh that still meets
+   tolerance. This is what `reuse_mesh=True` consumes on the next call.
 
-```python
-# Use up to 90% of GPU memory (default)
-result = solver.integrate(ode_fxn=my_integrand, total_mem_usage=0.9)
+## Comparisons
 
-# Or set a fixed batch size
-result = solver.integrate(ode_fxn=my_integrand, max_batch=500)
-```
+| Library | Adaptive | Differentiable | Parallel | Best for |
+|---|---|---|---|---|
+| `scipy.integrate.quad` | ✓ | ✗ | ✗ | classical one-shot smooth quadrature |
+| `torchquad` | ✗ | ✓ | ✓ | uniform-grid Monte-Carlo / Trapezoidal |
+| `torchdiffeq` | ✓ | ✓ | ✗ | true state-coupled ODEs $\dot y = f(t, y)$ |
+| **torchpathdiffeq** | ✓ | ✓ | ✓ | path integrals, learned-integrand integration, PINN-style residuals |
 
-## Serial Mode
+For one-shot scalar quadrature with no autograd, `scipy.integrate.quad`
+is fine. The library's value is when the integrand is a learnable
+PyTorch function and many evaluations are needed.
 
-For comparison or when the integrand depends on accumulated state (traditional ODE), TPD provides a serial backend powered by torchdiffeq:
+## References
 
-```python
-result = ode_path_integral(
-    ode_fxn=lambda t, y: -y,  # dy/dt = -y (serial mode uses f(t, y) signature)
-    method="dopri5",
-    computation="serial",
-    y0=torch.tensor([1.0]),
-    t_init=torch.tensor([0.0]),
-    t_final=torch.tensor([1.0]),
-)
-```
-
-## API Reference
-
-### `ode_path_integral()`
-
-High-level function that creates a solver and runs integration in one call.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `ode_fxn` | Callable | required | Integrand function. Parallel: `f(t) -> [N, D]`. Serial: `f(t, y)`. |
-| `method` | str | required | RK method name (e.g., `'dopri5'`, `'bosh3'`, `'generic3'`). |
-| `computation` | str | `'parallel'` | `'parallel'` for GPU-batched, `'serial'` for sequential. |
-| `sampling` | str | `'uniform'` | `'uniform'` or `'variable'` (parallel mode only). |
-| `atol` | float | `1e-5` | Absolute error tolerance. |
-| `rtol` | float | `1e-5` | Relative error tolerance. |
-| `t` | Tensor | `None` | Initial time mesh. If None, auto-generated. |
-| `t_init` | Tensor | `[0]` | Lower integration bound. |
-| `t_final` | Tensor | `[1]` | Upper integration bound. |
-| `y0` | Tensor | `[0]` | Initial integral accumulator value. |
-| `remove_cut` | float | `0.1` | Threshold for merging low-error step pairs. |
-| `device` | str | `None` | Device (`'cuda'`, `'cpu'`). Auto-detected if None. |
-
-### `get_parallel_RK_solver()`
-
-Factory function for creating reusable solver instances.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `sampling_type` | str or steps | required | `'uniform'`, `'variable'`, or a `steps` enum value. |
-| `method` | str | required | RK method name. |
-| `atol` | float | `1e-5` | Absolute error tolerance. |
-| `rtol` | float | `1e-5` | Relative error tolerance. |
-| `remove_cut` | float | `0.1` | Merge threshold for low-error step pairs. |
-| `ode_fxn` | Callable | `None` | Default integrand (can be overridden in `integrate()`). |
-| `t_init` | Tensor | `[0]` | Default lower bound. |
-| `t_final` | Tensor | `[1]` | Default upper bound. |
-| `device` | str | `None` | Target device. |
-
-### `solver.integrate()`
-
-Run integration on a constructed solver.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `ode_fxn` | Callable | `None` | Integrand (uses solver default if None). |
-| `y0` | Tensor | `None` | Initial accumulator value. |
-| `t` | Tensor | `None` | Initial mesh (None = auto or cached). |
-| `t_init` | Tensor | `None` | Lower bound (uses solver default if None). |
-| `t_final` | Tensor | `None` | Upper bound (uses solver default if None). |
-| `N_init_steps` | int | `13` | Number of initial steps when generating mesh. |
-| `take_gradient` | bool | `False` | Call `.backward()` on each batch's loss. |
-| `total_mem_usage` | float | `None` | Fraction of memory to use (0-1). |
-| `max_batch` | int | `None` | Fixed batch size (overrides memory auto-sizing). |
-| `loss_fxn` | Callable | `None` | Custom loss (default: returns integral). |
-
-## How It Works
-
-Traditional adaptive integrators evaluate steps sequentially because each step's initial condition depends on the previous step's result. For a definite path integral $\int_{t_i}^{t_f} f(t, \phi(t)) dt$ where the path $\phi(t)$ is known, this dependency vanishes: every step can be evaluated independently.
-
-TPD exploits this by:
-
-1. **Dividing** [t_init, t_final] into N integration steps using barrier points.
-2. **Placing** C quadrature points in each step according to the Runge-Kutta tableau (for uniform sampling).
-3. **Evaluating** f(t) at all N*C points in a single batched GPU call.
-4. **Computing** integral contributions and error estimates via embedded RK pairs (e.g., RK4/RK3 for bosh3).
-5. **Accepting** steps with error below tolerance, **splitting** steps that fail by inserting midpoint barriers.
-6. **Repeating** only for the new (failed) steps until all converge.
-
-## Speed and Complexity
-
-For a single integration, TPD is generally **two orders of magnitude faster** than sequential integrators. Let us consider an integral that requires O(N) integration steps, and the smallest integration step requires R mesh refinements. A sequential integrator scales superlinearly as O(RN). TPD instead requires O(RN/G) evaluations, since TPD batches G integration steps to simultaneously evaluate. Typically G is of O(100) and often N/G < 1, making TPD's complexity O(1). After convergence, the solver **prunes** the mesh by merging step pairs with very low error, producing an optimized mesh that is cached for subsequent calls.
-
-On repeated integrations, where the path has changed due to optimization, using the pruned mesh as a warm-starting often eliminates refinement entirely — the cached mesh generally satisfies the error tolerance, so integration completes in a single parallel pass in the typical case where G > N. In practice, when the pruned mesh needs to be updated this requires 1 or 2 extra calls to the GPU.
-
-### Benchmarking Your Integrand
-
-You can compare TPD's parallel solver against the sequential torchdiffeq backend on your own integrand:
-
-```python
-import time
-import torch
-from torchpathdiffeq import (
-    ode_path_integral,
-    get_parallel_RK_solver,
-    SerialAdaptiveStepsizeSolver,
-    steps,
-)
-
-device = "cuda"  # or 'cpu'
-method = "dopri5"
-atol, rtol = 1e-9, 1e-7
-t_init = torch.tensor([0.0], dtype=torch.float64, device=device)
-t_final = torch.tensor([1.0], dtype=torch.float64, device=device)
-y0 = torch.tensor([0.0], dtype=torch.float64, device=device)
-
-
-def my_integrand(t, y=None):
-    return torch.sin(t * 10) ** 2
-
-
-# --- Sequential (torchdiffeq) ---
-serial = SerialAdaptiveStepsizeSolver(
-    ode_fxn=my_integrand,
-    method=method,
-    atol=atol,
-    rtol=rtol,
-    t_init=t_init,
-    t_final=t_final,
-    device=device,
-)
-t0 = time.time()
-for _ in range(100):
-    serial.integrate(y0=y0)
-serial_time = (time.time() - t0) / 100
-
-# --- Parallel (torchpathdiffeq) ---
-parallel = get_parallel_RK_solver(
-    sampling_type=steps.ADAPTIVE_UNIFORM,
-    ode_fxn=my_integrand,
-    method=method,
-    atol=atol,
-    rtol=rtol,
-    t_init=t_init,
-    t_final=t_final,
-    device=device,
-)
-t0 = time.time()
-for _ in range(100):
-    parallel.integrate(y0=y0)
-parallel_time = (time.time() - t0) / 100
-
-print(
-    f"Sequential: {serial_time:.4f}s | Parallel: {parallel_time:.4f}s | Speedup: {serial_time/parallel_time:.1f}x"
-)
-```
+- Piessens, de Doncker-Kapenga, Überhuber, Kahaner. **QUADPACK: A
+  subroutine package for automatic integration**. Springer, 1983.
+- Laurie. **Calculation of Gauss-Kronrod quadrature rules**. *Math.
+  Comp.* 66 (1997), 1133-1145.
+- Trefethen. **Is Gauss quadrature better than Clenshaw-Curtis?**
+  *SIAM Review* 50:1 (2008), 67-87.
+- Sanderse and Veldman. **Constraint-consistent Runge-Kutta methods
+  for one-dimensional incompressible multiphase flow**. *J. Comput.
+  Phys.* 384 (2019).
+- Chen, Rubanova, Bettencourt, Duvenaud. **Neural Ordinary Differential
+  Equations**. *NeurIPS* 2018. (For comparison; this library is not an
+  ODE solver but is related.)
 
 ## License
 
-CC-BY 4.0
-
-## Citation
-
-If you use torchpathdiffeq in your research, please cite:
-
-```bibtex
-@software{torchpathdiffeq,
-  author = {Hegazy, Kareem and Blau, Sam and Mahoney, Michael},
-  title = {torchpathdiffeq: Parallelized Adaptive Numerical Path Integration},
-  url = {https://github.com/khegazy/torchpathdiffeq},
-  version = {0.1.0},
-}
-```
+CC-BY-4.0. See `LICENSE` for details.

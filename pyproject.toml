@@ -152,7 +152,7 @@ required-imports = ["from __future__ import annotations"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**" = ["ANN", "ARG", "D", "E402", "PTH", "S101"]
-"examples/pode/**" = ["T201"]
+"examples/**" = ["T201"]
 
 [tool.ruff.format]
 indent-style = "space"
