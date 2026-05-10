@@ -225,113 +225,6 @@ class AdaptiveQuadrature(SolverBase):
         """
         return torch.sqrt(torch.mean(error**2, -1))
 
-    def _get_new_eval_times(
-        self,
-        t: torch.Tensor | None,
-        error_ratios: torch.Tensor | None = None,
-        mesh_init: torch.Tensor | None = None,
-        mesh_final: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Determine which time points need new integrand evaluations.
-
-        On the first call (t=None or error_ratios=None), creates an initial mesh
-        and returns all evaluation points. On subsequent calls, identifies steps
-        where error_ratio > 1 and returns their midpoints as new evaluation times.
-
-        Args:
-            t: Current time evaluations. Shape: [N, C, T], or None for initial call.
-            error_ratios: Per-step error ratios from the last batch. Shape: [N].
-                None on the first call.
-            mesh_init: Lower integration bound. Shape: [T].
-            mesh_final: Upper integration bound. Shape: [T].
-
-        Returns:
-            Tuple of (idxs_add, t_add):
-                - idxs_add: Indices of steps to add/replace. Shape: [n_add].
-                - t_add: Time points for new evaluations. Shape varies.
-        """
-        if t is None or error_ratios is None:
-            if t is not None and len(t.shape) == 1:
-                t = t.unsqueeze(-1)
-            t_steps = self._initial_t_steps(
-                t, mesh_init=mesh_init, mesh_final=mesh_final
-            ).to(self.dtype)
-            N, _C, _ = t_steps.shape
-
-            # Time points to evaluate, remove repetitive time points at the end
-            # of each step to minimize evaluations
-            t_add = torch.concatenate(
-                [t_steps[0], t_steps[1:, 1:].reshape((-1, *(t_steps.shape[2:])))], dim=0
-            )
-            idxs_add = torch.arange(N, device=self.device)
-        else:
-            idxs_add = torch.where(error_ratios > 1.0)[0]
-            t_add = (t[idxs_add, 1:] + t[idxs_add, :-1]) / 2  # [n_add, C-1, 1]
-
-        return idxs_add, t_add
-
-    def _get_initial_t_steps(
-        self,
-        t: torch.Tensor | None,
-        mesh_init: torch.Tensor,
-        mesh_final: torch.Tensor,
-        enforce_endpoints: bool = False,
-    ) -> torch.Tensor:
-        """
-        Initialize the time mesh with C quadrature points per step.
-
-        Takes raw time points and produces the full [N, C, T] tensor with
-        quadrature points interpolated within each step. Optionally enforces
-        that the mesh starts at mesh_init and ends at mesh_final.
-
-        Args:
-            t: Input time points. Shape: [N, T] (barriers only) or
-                [N, C, T] (already has quadrature points). None to auto-generate.
-            mesh_init: Lower integration bound. Shape: [T].
-            mesh_final: Upper integration bound. Shape: [T].
-            enforce_endpoints: If True, clips the mesh to [mesh_init, mesh_final]
-                by removing/adjusting boundary steps.
-
-        Returns:
-            Time mesh with quadrature points. Shape: [N, C, T].
-        """
-        if t is not None and len(t.shape) == 1:
-            t = t.unsqueeze(-1)
-        if t is None or len(t.shape) != 3 or t.shape[1] != self.C:
-            if t is not None:
-                logger.debug("Reshaping t, current shape: %s", t.shape)
-            t = self._initial_t_steps(t, mesh_init=mesh_init, mesh_final=mesh_final).to(
-                self.dtype
-            )
-
-        if enforce_endpoints:
-            if mesh_init != t[0, 0]:
-                # Remove time steps where first point is less than mesh_init
-                t = t[t[:, -1, 0] > mesh_init[0]]
-                # First step should start at mesh_init
-                inp = torch.tensor(
-                    [mesh_init.unsqueeze(0), t[0, -1].unsqueeze(0)], device=self.device
-                )
-                if t.shape[-1] == 1:
-                    inp = inp.unsqueeze(-1)
-                t[0] = self._initial_t_steps(
-                    inp, mesh_init=mesh_init, mesh_final=mesh_final
-                ).to(self.dtype)
-            if mesh_final != t[-1, -1]:
-                # Remove time steps where last point is greater than mesh_final
-                t = t[t[:, 0, 0] < mesh_final[0]]
-                # Last step should end at mesh_final
-                inp = torch.tensor(
-                    [t[-1, 0].unsqueeze(0), mesh_final.unsqueeze(0)], device=self.device
-                )
-                if t.shape[-1] == 1:
-                    inp = inp.unsqueeze(-1)
-                t[-1] = self._initial_t_steps(
-                    inp, mesh_init=mesh_init, mesh_final=mesh_final
-                ).to(self.dtype)
-        return t
-
     def _adaptively_add_steps(
         self,
         method_output: MethodOutput | None,
@@ -1261,7 +1154,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh = (
                 mesh_init
                 + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
-            )  # TODO: this assumes time is 1d
+            )  # TODO: this assumes the mesh is 1d
 
             n_sub = N_even_t + 1  # sub-barriers per segment
             if random_initial_mesh:
@@ -1305,11 +1198,6 @@ class AdaptiveQuadrature(SolverBase):
             assert torch.all(mesh[1:] - mesh[:-1] > 0)
         mesh_trackers = torch.ones(len(mesh), device=self.device).to(bool)
         mesh_trackers[-1] = False  # mesh_final cannot be a step starting point
-        """
-        t_steps_init = self._get_initial_t_steps(
-            mesh, mesh_init, mesh_final, enforce_endpoints=True
-        )
-        """
         nodes, y = None, None
 
         record = {}
