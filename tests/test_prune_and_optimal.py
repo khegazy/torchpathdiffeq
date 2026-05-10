@@ -11,7 +11,7 @@ from _helpers import make_solver_for_unit_test
 
 
 class TestPruneExcessT:
-    """Tests for ParallelAdaptiveStepsizeSolver.prune_excess_t."""
+    """Tests for AdaptiveQuadrature.prune_excess_t."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""

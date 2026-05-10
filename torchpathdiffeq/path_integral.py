@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .base import IntegrationResult, steps
-from .runge_kutta import get_parallel_RK_solver
+from .runge_kutta import adaptive_quadrature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,7 +117,7 @@ def ode_path_integral(
         )
 
     # Create the parallel RK solver and run integration
-    integrator = get_parallel_RK_solver(
+    integrator = adaptive_quadrature(
         sampling_type=sampling_type,
         method=method,
         ode_fxn=ode_fxn,

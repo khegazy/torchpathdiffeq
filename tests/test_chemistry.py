@@ -27,7 +27,7 @@ from _helpers import (
 from scipy import integrate as scipy_integrate
 
 from torchpathdiffeq import (
-    get_parallel_RK_solver,
+    adaptive_quadrature,
     steps,
     wolf_schlegel,
 )
@@ -43,7 +43,7 @@ def _wolf_schlegel_scalar(t_value: float) -> float:
 def test_wolf_schlegel_parallel_vs_scipy(method_name):
     """Parallel integration of Wolf-Schlegel matches scipy.integrate.quad."""
     torch.manual_seed(SEED)
-    parallel_solver = get_parallel_RK_solver(
+    parallel_solver = adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,
         atol=ATOL_LOOSE,

@@ -20,7 +20,7 @@ def _make_method_output(N, D=1):
 
 
 class TestAdaptivelyAddSteps:
-    """Tests for ParallelAdaptiveStepsizeSolver._adaptively_add_steps."""
+    """Tests for AdaptiveQuadrature._adaptively_add_steps."""
 
     def setup_method(self):
         self.solver = make_solver_for_unit_test()

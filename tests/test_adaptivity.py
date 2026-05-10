@@ -15,7 +15,7 @@ from _helpers import (
     assert_time_ordering,
 )
 
-from torchpathdiffeq import RKParallelUniformAdaptiveStepsizeSolver
+from torchpathdiffeq import UniformAdaptiveQuadrature
 
 
 def _integrand(t):
@@ -35,7 +35,7 @@ class TestStepAdding:
     """Starting from a coarse mesh, verify the solver adds steps to meet tolerance."""
 
     def _make_solver(self, method_name):
-        return RKParallelUniformAdaptiveStepsizeSolver(
+        return UniformAdaptiveQuadrature(
             method=method_name,
             ode_fxn=_integrand,
             atol=ATOL_MED,
@@ -95,7 +95,7 @@ class TestStepRemoval:
     """Starting from an over-resolved mesh, verify the solver prunes excess steps."""
 
     def _make_solver(self):
-        return RKParallelUniformAdaptiveStepsizeSolver(
+        return UniformAdaptiveQuadrature(
             method="dopri5",
             ode_fxn=_integrand,
             atol=ATOL_LOOSE,

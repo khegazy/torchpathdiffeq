@@ -23,9 +23,9 @@ from torchpathdiffeq import (
     VARIABLE_METHODS,
     IntegrationResult,
     ODE_dict,
-    RKParallelUniformAdaptiveStepsizeSolver,
-    RKParallelVariableAdaptiveStepsizeSolver,
-    get_parallel_RK_solver,
+    UniformAdaptiveQuadrature,
+    VariableAdaptiveQuadrature,
+    adaptive_quadrature,
     ode_path_integral,
     setup_logging,
     steps,
@@ -37,13 +37,13 @@ class TestPublicExports:
     """Every documented public symbol exists at the package level."""
 
     def test_classes_exist(self):
-        assert RKParallelUniformAdaptiveStepsizeSolver is not None
-        assert RKParallelVariableAdaptiveStepsizeSolver is not None
+        assert UniformAdaptiveQuadrature is not None
+        assert VariableAdaptiveQuadrature is not None
         assert IntegrationResult is not None
 
     def test_functions_exist(self):
         assert callable(ode_path_integral)
-        assert callable(get_parallel_RK_solver)
+        assert callable(adaptive_quadrature)
         assert callable(setup_logging)
 
     def test_data_exports_exist(self):
@@ -136,22 +136,22 @@ class TestSolverFactory:
     """The factory function dispatches correctly to uniform/variable solvers."""
 
     def test_uniform_dispatch(self):
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type=steps.ADAPTIVE_UNIFORM,
             method="dopri5",
             atol=1e-6,
             rtol=1e-6,
         )
-        assert isinstance(solver, RKParallelUniformAdaptiveStepsizeSolver)
+        assert isinstance(solver, UniformAdaptiveQuadrature)
 
     def test_variable_dispatch(self):
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type=steps.ADAPTIVE_VARIABLE,
             method="generic3",
             atol=1e-6,
             rtol=1e-6,
         )
-        assert isinstance(solver, RKParallelVariableAdaptiveStepsizeSolver)
+        assert isinstance(solver, VariableAdaptiveQuadrature)
 
 
 class TestMethodRegistries:

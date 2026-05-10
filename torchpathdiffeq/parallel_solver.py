@@ -28,13 +28,13 @@ Key concepts:
 
 Class hierarchy (defined here):
 
-- ``ParallelAdaptiveStepsizeSolver``: Abstract base with the main integrate()
+- ``AdaptiveQuadrature``: Abstract base with the main integrate()
   loop, adaptive step management, error computation, and memory management.
 
-- ``ParallelUniformAdaptiveStepsizeSolver``: Concrete subclass for methods with
+- ``_UniformAdaptiveQuadratureBase``: Concrete subclass for methods with
   fixed tableau c values (quadrature points at constant fractional positions).
 
-- ``ParallelVariableAdaptiveStepsizeSolver``: Concrete subclass for methods
+- ``_VariableAdaptiveQuadratureBase``: Concrete subclass for methods
   where quadrature points can be at arbitrary positions within each step.
 """
 
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ParallelAdaptiveStepsizeSolver(SolverBase):
+class AdaptiveQuadrature(SolverBase):
     """
     Base class for parallel adaptive-stepsize numerical integration.
 
@@ -1508,7 +1508,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         )
 
 
-class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
     """
     Parallel solver using uniform-sampling Runge-Kutta methods.
 
@@ -1735,7 +1735,7 @@ class ParallelUniformAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
         return t_pruned, sum_steps_pruned, sum_step_errors_pruned
 
 
-class ParallelVariableAdaptiveStepsizeSolver(ParallelAdaptiveStepsizeSolver):
+class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
     """
     Parallel solver using variable-sampling Runge-Kutta methods.
 

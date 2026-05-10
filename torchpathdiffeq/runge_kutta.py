@@ -7,9 +7,9 @@ RK weighted sum: integral = y0 + sum_over_steps(h * sum(b_i * f(t_i))).
 
 Two solver variants:
 
-- ``RKParallelUniformAdaptiveStepsizeSolver``: Uses fixed tableau b weights
+- ``UniformAdaptiveQuadrature``: Uses fixed tableau b weights
   (same weights for every step). Faster since weights are precomputed.
-- ``RKParallelVariableAdaptiveStepsizeSolver``: Computes tableau b weights
+- ``VariableAdaptiveQuadrature``: Computes tableau b weights
   dynamically from the actual quadrature point positions within each step.
   Necessary when mesh refinement places points at non-standard positions.
 
@@ -26,8 +26,8 @@ import torch
 
 from .base import MethodOutput, get_sampling_type, steps
 from .parallel_solver import (
-    ParallelUniformAdaptiveStepsizeSolver,
-    ParallelVariableAdaptiveStepsizeSolver,
+    _UniformAdaptiveQuadratureBase,
+    _VariableAdaptiveQuadratureBase,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def _RK_integral(
     return integral, RK_steps, h
 
 
-class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSolver):
+class UniformAdaptiveQuadrature(_UniformAdaptiveQuadratureBase):
     """
     Parallel adaptive solver using Runge-Kutta with fixed (uniform) tableau weights.
 
@@ -169,7 +169,7 @@ class RKParallelUniformAdaptiveStepsizeSolver(ParallelUniformAdaptiveStepsizeSol
         return len(self.method.tableau.c)
 
 
-class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeSolver):
+class VariableAdaptiveQuadrature(_VariableAdaptiveQuadratureBase):
     """
     Parallel adaptive solver using Runge-Kutta with dynamic (variable) tableau weights.
 
@@ -252,9 +252,9 @@ class RKParallelVariableAdaptiveStepsizeSolver(ParallelVariableAdaptiveStepsizeS
         return self.method.n_tableau_c
 
 
-def get_parallel_RK_solver(
+def adaptive_quadrature(
     sampling_type: str | steps, *args, **kwargs
-) -> RKParallelUniformAdaptiveStepsizeSolver | RKParallelVariableAdaptiveStepsizeSolver:
+) -> UniformAdaptiveQuadrature | VariableAdaptiveQuadrature:
     """
     Factory function to create the appropriate parallel RK solver.
 
@@ -278,8 +278,8 @@ def get_parallel_RK_solver(
     if isinstance(sampling_type, str):
         sampling_type = get_sampling_type(sampling_type)
     if sampling_type == steps.ADAPTIVE_UNIFORM:
-        return RKParallelUniformAdaptiveStepsizeSolver(*args, **kwargs)
+        return UniformAdaptiveQuadrature(*args, **kwargs)
     elif sampling_type == steps.ADAPTIVE_VARIABLE:
-        return RKParallelVariableAdaptiveStepsizeSolver(*args, **kwargs)
+        return VariableAdaptiveQuadrature(*args, **kwargs)
     else:
         raise ValueError

@@ -7,9 +7,9 @@ from .examples import ODE_dict, wolf_schlegel
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
 from .path_integral import ode_path_integral
 from .runge_kutta import (
-    RKParallelUniformAdaptiveStepsizeSolver,
-    RKParallelVariableAdaptiveStepsizeSolver,
-    get_parallel_RK_solver,
+    UniformAdaptiveQuadrature,
+    VariableAdaptiveQuadrature,
+    adaptive_quadrature,
 )
 
 

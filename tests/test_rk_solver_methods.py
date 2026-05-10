@@ -1,4 +1,4 @@
-"""Unit tests for get_parallel_RK_solver factory, _get_tableau_b, and _get_num_tableau_c."""
+"""Unit tests for adaptive_quadrature factory, _get_tableau_b, and _get_num_tableau_c."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ from _helpers import (
 
 from torchpathdiffeq.base import steps
 from torchpathdiffeq.runge_kutta import (
-    RKParallelUniformAdaptiveStepsizeSolver,
-    RKParallelVariableAdaptiveStepsizeSolver,
-    get_parallel_RK_solver,
+    UniformAdaptiveQuadrature,
+    VariableAdaptiveQuadrature,
+    adaptive_quadrature,
 )
 
 # ---------------------------------------------------------------------------
-# get_parallel_RK_solver factory
+# adaptive_quadrature factory
 # ---------------------------------------------------------------------------
 
 
@@ -27,52 +27,52 @@ class TestGetParallelRKSolver:
 
     def test_uniform_string(self):
         """String 'uniform' returns a uniform solver."""
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type="uniform",
             method="bosh3",
             atol=1e-6,
             rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
-        assert isinstance(solver, RKParallelUniformAdaptiveStepsizeSolver)
+        assert isinstance(solver, UniformAdaptiveQuadrature)
 
     def test_variable_string(self):
         """String 'variable' returns a variable solver."""
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type="variable",
             method="adaptive_heun",
             atol=1e-6,
             rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
-        assert isinstance(solver, RKParallelVariableAdaptiveStepsizeSolver)
+        assert isinstance(solver, VariableAdaptiveQuadrature)
 
     def test_uniform_enum(self):
         """steps.ADAPTIVE_UNIFORM enum returns a uniform solver."""
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type=steps.ADAPTIVE_UNIFORM,
             method="bosh3",
             atol=1e-6,
             rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
-        assert isinstance(solver, RKParallelUniformAdaptiveStepsizeSolver)
+        assert isinstance(solver, UniformAdaptiveQuadrature)
 
     def test_variable_enum(self):
         """steps.ADAPTIVE_VARIABLE enum returns a variable solver."""
-        solver = get_parallel_RK_solver(
+        solver = adaptive_quadrature(
             sampling_type=steps.ADAPTIVE_VARIABLE,
             method="adaptive_heun",
             atol=1e-6,
             rtol=1e-6,
             remove_cut=REMOVE_CUT,
         )
-        assert isinstance(solver, RKParallelVariableAdaptiveStepsizeSolver)
+        assert isinstance(solver, VariableAdaptiveQuadrature)
 
     def test_fixed_raises(self):
         """steps.FIXED raises ValueError (not supported for parallel RK)."""
         with pytest.raises(ValueError):
-            get_parallel_RK_solver(
+            adaptive_quadrature(
                 sampling_type=steps.FIXED,
                 method="bosh3",
                 atol=1e-6,
@@ -87,7 +87,7 @@ class TestGetParallelRKSolver:
 
 
 class TestUniformGetTableauB:
-    """Tests for RKParallelUniformAdaptiveStepsizeSolver._get_tableau_b."""
+    """Tests for UniformAdaptiveQuadrature._get_tableau_b."""
 
     def test_shape(self):
         """b and b_error have shape [C, 1] for bosh3 (C=4)."""
@@ -121,7 +121,7 @@ class TestUniformGetTableauB:
 
 
 class TestVariableGetTableauB:
-    """Tests for RKParallelVariableAdaptiveStepsizeSolver._get_tableau_b."""
+    """Tests for VariableAdaptiveQuadrature._get_tableau_b."""
 
     def test_shape_adaptive_heun(self):
         """adaptive_heun variable: b shape [1, 2, 1] (constant, broadcast over N)."""

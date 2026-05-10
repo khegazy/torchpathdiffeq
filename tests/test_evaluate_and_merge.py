@@ -17,7 +17,7 @@ from torchpathdiffeq import UNIFORM_METHODS
 
 
 class TestUniformEvaluateAdaptiveY:
-    """Tests for ParallelUniformAdaptiveStepsizeSolver._evaluate_adaptive_y."""
+    """Tests for _UniformAdaptiveQuadratureBase._evaluate_adaptive_y."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
@@ -106,7 +106,7 @@ class TestUniformEvaluateAdaptiveY:
 
 
 class TestUniformMergeExcessT:
-    """Tests for ParallelUniformAdaptiveStepsizeSolver._merge_excess_t."""
+    """Tests for _UniformAdaptiveQuadratureBase._merge_excess_t."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
@@ -212,7 +212,7 @@ class TestUniformMergeExcessT:
 
 
 class TestVariableEvaluateAdaptiveY:
-    """Tests for ParallelVariableAdaptiveStepsizeSolver._evaluate_adaptive_y."""
+    """Tests for _VariableAdaptiveQuadratureBase._evaluate_adaptive_y."""
 
     def test_reuses_old_evals(self):
         """Split step: old y values appear in y_add."""
@@ -284,7 +284,7 @@ class TestVariableEvaluateAdaptiveY:
 
 
 class TestVariableMergeExcessT:
-    """Tests for ParallelVariableAdaptiveStepsizeSolver._merge_excess_t."""
+    """Tests for _VariableAdaptiveQuadratureBase._merge_excess_t."""
 
     def test_concatenate_and_subsample(self):
         """C=2: two steps merged → 3 combined → subsample to 2."""

@@ -13,7 +13,7 @@ from _helpers import (
 )
 from torch import nn
 
-from torchpathdiffeq import get_parallel_RK_solver, steps
+from torchpathdiffeq import adaptive_quadrature, steps
 from torchpathdiffeq.examples import _WS_MIN_FINAL, _WS_MIN_INIT
 
 GRADIENT_METHODS = ["bosh3", "dopri5"]
@@ -120,7 +120,7 @@ class _DerivativeNet(nn.Module):
 
 def _make_solver(method_name, ode_fxn):
     """Create a solver with loose tolerances for gradient tests."""
-    return get_parallel_RK_solver(
+    return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,
         atol=ATOL_LOOSE,

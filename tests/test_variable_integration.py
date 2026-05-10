@@ -3,7 +3,7 @@
 CLAUDE.md notes (line 69) that "Variable sampling integration tests
 are not currently enabled (only uniform methods are tested)".
 Investigation while writing this file revealed the deeper reason:
-``ParallelVariableAdaptiveStepsizeSolver`` is missing the
+``_VariableAdaptiveQuadratureBase`` is missing the
 ``_t_step_interpolate`` method (uniform has it at parallel_solver.py
 line 1443; variable has only a docstring-stubbed ``_initial_t_steps``
 in lines 1620-1671). Calling ``integrate(...)`` on the variable
@@ -37,12 +37,12 @@ from _helpers import (
     assert_time_ordering,
 )
 
-from torchpathdiffeq import ODE_dict, get_parallel_RK_solver, steps
+from torchpathdiffeq import ODE_dict, adaptive_quadrature, steps
 
 
 def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
     """Construct a parallel variable-sampling solver."""
-    return get_parallel_RK_solver(
+    return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_VARIABLE,
         method=method_name,
         atol=atol,
@@ -53,7 +53,7 @@ def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
 
 VARIABLE_BROKEN_REASON = (
     "Variable solver is currently non-functional: "
-    "ParallelVariableAdaptiveStepsizeSolver is missing _t_step_interpolate. "
+    "_VariableAdaptiveQuadratureBase is missing _t_step_interpolate. "
     "Phase 4 of the quadrature alignment plan restores the variable code "
     "path as part of the QuadratureMethod ABC redesign."
 )

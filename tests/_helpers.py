@@ -9,7 +9,7 @@ from torchpathdiffeq import (
     UNIFORM_METHODS,
     VARIABLE_METHODS,
     ODE_dict,
-    get_parallel_RK_solver,
+    adaptive_quadrature,
     steps,
 )
 
@@ -52,7 +52,7 @@ INTEGRAND_NAMES = list(ODE_dict.keys())
 
 def make_uniform_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT, **kwargs):
     """Create a parallel uniform-sampling RK solver."""
-    return get_parallel_RK_solver(
+    return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,
         atol=atol,
@@ -64,7 +64,7 @@ def make_uniform_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT, **kwargs)
 
 def make_solver_for_unit_test(method_name="bosh3", atol=1e-6, rtol=1e-6):
     """Create a minimal solver for testing internal methods (no ode_fxn needed)."""
-    return get_parallel_RK_solver(
+    return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,
         atol=atol,
@@ -77,7 +77,7 @@ def make_variable_solver_for_unit_test(
     method_name="adaptive_heun", atol=1e-6, rtol=1e-6
 ):
     """Create a minimal variable solver for testing internal methods."""
-    return get_parallel_RK_solver(
+    return adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_VARIABLE,
         method=method_name,
         atol=atol,

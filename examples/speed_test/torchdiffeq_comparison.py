@@ -99,7 +99,7 @@ logger.info("torchpathdiffeq integrator")
 tpdiffeq_int_results = []
 for ode_fxn in integrands:
     total_time = 0
-    integrator = tpdiffeq.get_parallel_RK_solver(
+    integrator = tpdiffeq.adaptive_quadrature(
         sampling_type="uniform",
         ode_fxn=ode_fxn,
         method=method,

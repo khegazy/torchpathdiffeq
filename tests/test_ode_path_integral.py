@@ -7,7 +7,7 @@ import torch
 from _helpers import ATOL_MED, RTOL_MED, SEED, T_FINAL, T_INIT, UNIFORM_METHOD_NAMES
 
 from torchpathdiffeq import (
-    RKParallelUniformAdaptiveStepsizeSolver,
+    UniformAdaptiveQuadrature,
     ode_path_integral,
 )
 
@@ -36,7 +36,7 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
 
     torch.manual_seed(SEED)
 
-    direct_solver = RKParallelUniformAdaptiveStepsizeSolver(
+    direct_solver = UniformAdaptiveQuadrature(
         method=method_name,
         atol=ATOL_MED,
         rtol=RTOL_MED,
