@@ -130,6 +130,7 @@ class TestIntegralOutputFields:
             "t_init",
             "t_final",
             "y0",
+            "converged",
         ):
             assert hasattr(r, name), f"IntegralOutput missing field {name!r}"
 

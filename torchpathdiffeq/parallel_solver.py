@@ -1325,7 +1325,13 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             logger.debug("error_ratios: %s", error_ratios)
             logger.debug("error_ratios_2steps: %s", error_ratios_2steps)
 
-            # Early exit if too many steps fail and user-provided mesh is given
+            # Early exit if too many steps fail and user-provided mesh is given.
+            # Bug B6 fix: previously returned bare `None`, breaking the
+            # documented return-type contract. Now returns an
+            # IntegralOutput with converged=False populated from the
+            # most-recent batch's intermediate result so callers can
+            # inspect partial state instead of having to special-case
+            # None.
             if t_is_given and self.max_path_change is not None:
                 fail_ratio = torch.sum(error_ratios > 1.0).to(float) / len(error_ratios)
                 if fail_ratio >= self.max_path_change:
@@ -1335,7 +1341,23 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         fail_ratio * 100,
                         self.max_path_change,
                     )
-                    return None
+                    return IntegralOutput(
+                        integral=method_output.integral,
+                        loss=None,
+                        gradient_taken=take_gradient,
+                        t_optimal=t_step_barriers,
+                        t=t_step_eval,
+                        h=method_output.h,
+                        y=y_step_eval,
+                        sum_steps=method_output.sum_steps,
+                        integral_error=method_output.integral_error,
+                        sum_step_errors=torch.abs(method_output.sum_step_errors),
+                        error_ratios=error_ratios,
+                        t_init=t_init,
+                        t_final=t_final,
+                        y0=y0,
+                        converged=False,
+                    )
 
             # --- Step 5: Adaptive refinement ---
             # Split steps with error_ratio >= 1, keep steps with error_ratio < 1,

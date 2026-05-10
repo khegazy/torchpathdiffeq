@@ -105,6 +105,11 @@ class IntegralOutput:
         t_init: Lower integration bound used. Shape: [T].
         t_final: Upper integration bound used. Shape: [T].
         y0: Initial integral value used. Shape: [D].
+        converged: Whether the adaptive refinement met the tolerance
+            criterion. ``True`` for normal completion, ``False`` if the
+            integrator hit ``max_path_change`` and exited with a partially-
+            refined mesh. Always set; do not assume ``None`` means
+            "converged".
     """
 
     integral: torch.Tensor
@@ -121,6 +126,7 @@ class IntegralOutput:
     t_init: torch.Tensor = None
     t_final: torch.Tensor = None
     y0: torch.Tensor = None
+    converged: bool = True
 
 
 @dataclass

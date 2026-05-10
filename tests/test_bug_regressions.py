@@ -42,7 +42,7 @@ import pytest
 import torch
 from tests._helpers import make_uniform_solver
 
-from torchpathdiffeq import ode_path_integral
+from torchpathdiffeq import IntegralOutput, ode_path_integral
 
 # -----------------------------------------------------------------------------
 # Anchor: the no-warm-start path is correct as-is. Phase 1 must not regress it.
@@ -155,6 +155,53 @@ def test_warm_start_with_new_t_final_yields_correct_mesh():
     assert torch.all(diffs >= 0), (
         f"warm-started mesh is not monotone: diffs.min()={diffs.min().item()}"
     )
+
+
+# -----------------------------------------------------------------------------
+# B6: max_path_change early exit must return an IntegralOutput with
+# converged=False, not bare None (which violated the type contract).
+# -----------------------------------------------------------------------------
+
+
+def test_max_path_change_returns_integral_output_not_none():
+    """When ``max_path_change`` triggers early exit on a user-provided
+    mesh, the solver must return an ``IntegralOutput`` with
+    ``converged=False``, not ``None``. Phase 1's Bug B6 fix.
+    """
+    # Provide a far-too-coarse mesh on a wiggly integrand so the solver
+    # cannot meet a tight tolerance on most steps. max_path_change=0.1
+    # means: exit if more than 10% of steps fail. With 4-point initial
+    # mesh on a damped sine and 1e-12 atol, that threshold trips hard.
+    solver = make_uniform_solver("dopri5", atol=1e-12, rtol=1e-12, max_path_change=0.1)
+    t = torch.linspace(0.0, 4.0, 4, dtype=torch.float64).unsqueeze(-1)
+
+    out = solver.integrate(
+        ode_fxn=lambda t, *_: torch.sin(10 * t) * torch.exp(-0.1 * t),
+        t=t,
+    )
+    assert isinstance(out, IntegralOutput), (
+        f"max_path_change early-exit returned {type(out).__name__}, "
+        f"expected IntegralOutput. This is bug B6."
+    )
+    assert out.converged is False, (
+        "early-exit IntegralOutput should have converged=False; "
+        f"got converged={out.converged!r}"
+    )
+
+
+def test_normal_completion_has_converged_true():
+    """A normal integration call returns ``converged=True``. Pins the
+    default value of the new field.
+    """
+    out = ode_path_integral(
+        ode_fxn=torch.sin,
+        method="dopri5",
+        atol=1e-6,
+        rtol=1e-6,
+        t_init=torch.tensor([0.0], dtype=torch.float64),
+        t_final=torch.tensor([math.pi], dtype=torch.float64),
+    )
+    assert out.converged is True
 
 
 # -----------------------------------------------------------------------------
