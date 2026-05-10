@@ -61,7 +61,12 @@ class _Tableau:
     b_error: torch.Tensor
 
     def to_dtype(self, dtype: torch.dtype) -> None:
-        """Convert all tableau tensors to the specified dtype."""
+        """Convert all tableau tensors to the specified dtype.
+
+        Mutates in place. Use ``clone()`` first if you want to leave
+        the original tensors at their pre-conversion precision (which
+        is irreversibly lossy when going to lower-precision dtypes).
+        """
         self.c = self.c.to(dtype)
         self.b = self.b.to(dtype)
         self.b_error = self.b_error.to(dtype)
@@ -71,6 +76,19 @@ class _Tableau:
         self.c = self.c.to(device)
         self.b = self.b.to(device)
         self.b_error = self.b_error.to(device)
+
+    def clone(self) -> _Tableau:
+        """Return a deep copy of this tableau.
+
+        Used by ``_get_method`` so that each solver instance gets its
+        own tableau and dtype/device mutations on one solver do not
+        propagate to other solvers via shared singletons.
+        """
+        return _Tableau(
+            c=self.c.clone(),
+            b=self.b.clone(),
+            b_error=self.b_error.clone(),
+        )
 
 
 class MethodClass:
@@ -101,6 +119,10 @@ class MethodClass:
     def to_device(self, device: str | torch.device) -> None:
         """Move tableau to the specified device."""
         self.tableau.to_device(device)
+
+    def clone(self) -> MethodClass:
+        """Return a copy with a deep-cloned tableau but the same order."""
+        return MethodClass(order=self.order, tableau=self.tableau.clone())
 
 
 # =============================================================================
@@ -756,21 +778,33 @@ def _get_method(
     """
     Retrieve and initialize an integration method by name and sampling type.
 
-    For uniform methods, returns the singleton MethodClass instance (shared
-    across calls). For variable methods, creates a new instance since each
-    needs its own device-specific state.
+    Each solver gets its OWN copy of the method's tableau. The
+    ``UNIFORM_METHODS`` dict holds canonical singletons at float64,
+    and we ``clone()`` them here so that downstream dtype/device
+    mutations stay isolated to one solver instance. Without this
+    cloning, two solvers running concurrently — or sequentially with
+    different dtypes — would corrupt each other's tableau values
+    (most notably, lower-precision conversions of the singleton are
+    irreversible).
+
+    Variable methods are constructed fresh per-solver too (they
+    already manage their own per-instance state).
 
     Args:
         sampling_type: Whether to use uniform or variable sampling.
-        method_name: Name of the method (e.g. 'dopri5', 'interpolatory3_variable').
+        method_name: Name of the method (e.g. 'dopri5',
+            'interpolatory3_variable').
         device: Device to place the method's tensors on.
         dtype: Floating-point dtype for the method's tensors.
 
     Returns:
-        An initialized method object with tensors on the correct device/dtype.
+        An initialized method object with tensors on the correct
+        device/dtype, independent of any other solver instance.
     """
     if sampling_type == steps.ADAPTIVE_UNIFORM:
-        method = UNIFORM_METHODS[method_name]
+        # Clone the canonical float64 singleton so dtype/device
+        # mutations below don't affect other solvers.
+        method = UNIFORM_METHODS[method_name].clone()
     else:
         method = VARIABLE_METHODS[method_name](device)
 

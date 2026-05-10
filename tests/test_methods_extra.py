@@ -67,7 +67,10 @@ class TestTableauToDevice:
 
     def test_method_class_to_device_cpu(self):
         """MethodClass.to_device('cpu') moves tableau to CPU."""
-        method = UNIFORM_METHODS["bosh3"]
+        # Clone to avoid mutating the singleton (cpu->cpu is a no-op
+        # in terms of values, but keeping the test isolated is good
+        # practice now that singletons are no longer self-protecting).
+        method = UNIFORM_METHODS["bosh3"].clone()
         method.to_device("cpu")
         assert method.tableau.c.device.type == "cpu"
         assert method.tableau.b.device.type == "cpu"

@@ -70,29 +70,24 @@ class TestTableau:
 
     def test_to_dtype_converts(self):
         """Converting float64 -> float32 changes all tensor dtypes."""
-        method = UNIFORM_METHODS["bosh3"]
+        # Clone the singleton so this test cannot pollute it for
+        # downstream tests (float32 round-trip is precision-lossy).
+        method = UNIFORM_METHODS["bosh3"].clone()
         original_b = method.tableau.b.clone()
-        try:
-            method.to_dtype(torch.float32)
-            assert method.tableau.b.dtype == torch.float32
-            assert method.tableau.c.dtype == torch.float32
-            assert method.tableau.b_error.dtype == torch.float32
-        finally:
-            method.to_dtype(torch.float64)
+        method.to_dtype(torch.float32)
+        assert method.tableau.b.dtype == torch.float32
+        assert method.tableau.c.dtype == torch.float32
+        assert method.tableau.b_error.dtype == torch.float32
+        method.to_dtype(torch.float64)
         assert torch.allclose(method.tableau.b, original_b)
 
     def test_to_dtype_preserves_values(self):
         """Round-tripping float64 -> float32 -> float64 preserves values within float32 precision."""
-        method = UNIFORM_METHODS["dopri5"]
-        # Ensure we start from a known float64 state
-        method.to_dtype(torch.float64)
+        method = UNIFORM_METHODS["dopri5"].clone()
         original_b = method.tableau.b.clone()
-        try:
-            method.to_dtype(torch.float32)
-            method.to_dtype(torch.float64)
-            assert torch.allclose(method.tableau.b, original_b, atol=1e-7)
-        finally:
-            method.to_dtype(torch.float64)
+        method.to_dtype(torch.float32)
+        method.to_dtype(torch.float64)
+        assert torch.allclose(method.tableau.b, original_b, atol=1e-7)
 
 
 # ---------------------------------------------------------------------------
