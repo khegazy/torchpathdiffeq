@@ -1,4 +1,4 @@
-"""Unit tests for _adaptively_add_steps: core adaptive refinement logic."""
+"""Unit tests for _adaptively_increase_mesh: core adaptive refinement logic."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _make_method_output(N, D=1):
 
 
 class TestAdaptivelyAddSteps:
-    """Tests for AdaptiveQuadrature._adaptively_add_steps."""
+    """Tests for AdaptiveQuadrature._adaptively_increase_mesh."""
 
     def setup_method(self):
         self.solver = make_solver_for_unit_test()
@@ -34,7 +34,7 @@ class TestAdaptivelyAddSteps:
         mo = _make_method_output(2)
 
         mo_out, _, _, barriers_new, trackers_new, er_kept = (
-            self.solver._adaptively_add_steps(
+            self.solver._adaptively_increase_mesh(
                 mo, error_ratios, None, None, barriers, idxs, trackers
             )
         )
@@ -52,7 +52,7 @@ class TestAdaptivelyAddSteps:
         mo = _make_method_output(2)
 
         mo_out, _, _, barriers_new, _trackers_new, er_kept = (
-            self.solver._adaptively_add_steps(
+            self.solver._adaptively_increase_mesh(
                 mo, error_ratios, None, None, barriers, idxs, trackers
             )
         )
@@ -70,7 +70,7 @@ class TestAdaptivelyAddSteps:
         mo = _make_method_output(2)
 
         mo_out, _, _, barriers_new, _trackers_new, er_kept = (
-            self.solver._adaptively_add_steps(
+            self.solver._adaptively_increase_mesh(
                 mo, error_ratios, None, None, barriers, idxs, trackers
             )
         )
@@ -86,8 +86,10 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0, 1])
         error_ratios = torch.tensor([2.0, 0.5])
 
-        mo_out, y_out, t_out, barriers_new, _, _ = self.solver._adaptively_add_steps(
-            None, error_ratios, None, None, barriers, idxs, trackers
+        mo_out, y_out, t_out, barriers_new, _, _ = (
+            self.solver._adaptively_increase_mesh(
+                None, error_ratios, None, None, barriers, idxs, trackers
+            )
         )
         assert mo_out is None
         assert y_out is None
@@ -102,7 +104,7 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0])
         error_ratios = torch.tensor([3.0])
 
-        _, _, _, barriers_new, _, _ = self.solver._adaptively_add_steps(
+        _, _, _, barriers_new, _, _ = self.solver._adaptively_increase_mesh(
             None, error_ratios, None, None, barriers, idxs, trackers
         )
         assert torch.allclose(barriers_new[1], torch.tensor([0.5], dtype=torch.float64))
@@ -114,7 +116,7 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0, 1, 2])
         error_ratios = torch.tensor([2.0, 2.0, 2.0])
 
-        _, _, _, barriers_new, _, _ = self.solver._adaptively_add_steps(
+        _, _, _, barriers_new, _, _ = self.solver._adaptively_increase_mesh(
             None, error_ratios, None, None, barriers, idxs, trackers
         )
         diffs = barriers_new[1:, 0] - barriers_new[:-1, 0]
@@ -127,7 +129,7 @@ class TestAdaptivelyAddSteps:
         idxs = torch.tensor([0])
         error_ratios = torch.tensor([2.0])
 
-        _, _, _, _barriers_new, trackers_new, _ = self.solver._adaptively_add_steps(
+        _, _, _, _barriers_new, trackers_new, _ = self.solver._adaptively_increase_mesh(
             None, error_ratios, None, None, barriers, idxs, trackers
         )
         # After split: barriers = [0, 0.5, 1]. Both step 0 and step 1 need eval.
@@ -142,7 +144,7 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([0.5, 2.0, 0.3])
         mo = _make_method_output(3)
 
-        mo_out, _, _, _, _, er_kept = self.solver._adaptively_add_steps(
+        mo_out, _, _, _, _, er_kept = self.solver._adaptively_increase_mesh(
             mo, error_ratios, None, None, barriers, idxs, trackers
         )
         assert mo_out.mesh_quadratures.shape[0] == 2
@@ -157,7 +159,7 @@ class TestAdaptivelyAddSteps:
         error_ratios = torch.tensor([0.5])
 
         _, _, _, barriers_new, trackers_new, er_kept = (
-            self.solver._adaptively_add_steps(
+            self.solver._adaptively_increase_mesh(
                 None, error_ratios, None, None, barriers, idxs, trackers
             )
         )

@@ -225,7 +225,7 @@ class AdaptiveQuadrature(SolverBase):
         """
         return torch.sqrt(torch.mean(error**2, -1))
 
-    def _adaptively_add_steps(
+    def _adaptively_increase_mesh(
         self,
         method_output: MethodOutput | None,
         error_ratios: torch.Tensor,
@@ -424,7 +424,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh_quadratures=mesh_quadratures_pruned,
             integral=record["integral"].detach(),
         )
-        adaptive_step = self._adaptively_add_steps(
+        adaptive_step = self._adaptively_increase_mesh(
             method_output=None,
             error_ratios=error_ratios,
             y_step_eval=None,
@@ -1322,7 +1322,7 @@ class AdaptiveQuadrature(SolverBase):
                 mesh,
                 mesh_trackers,
                 error_ratios,
-            ) = self._adaptively_add_steps(
+            ) = self._adaptively_increase_mesh(
                 method_output=method_output,
                 error_ratios=error_ratios,
                 y_step_eval=y_step_eval,
@@ -1384,7 +1384,7 @@ class AdaptiveQuadrature(SolverBase):
         self.previous_ode_fxn_id = id(f)
 
         return IntegrationResult(
-            integral=record["integral"],
+            integral=record["integral"] + y0,
             integral_error=record["integral_error"],
             mesh_optimal=mesh_optimal,
             mesh_init=mesh_init,
@@ -1397,4 +1397,5 @@ class AdaptiveQuadrature(SolverBase):
             error_ratios=record["error_ratios"],
             loss=record["loss"],
             gradient_taken=take_gradient,
+            y0=y0,
         )
