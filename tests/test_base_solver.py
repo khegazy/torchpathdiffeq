@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from _helpers import make_solver_for_unit_test
 
@@ -53,14 +54,16 @@ class TestSetDtype:
         finally:
             _restore_tableau("bosh3", saved)
 
-    def test_float16_tolerances(self):
-        """float16 sets loose assertion tolerances."""
+    def test_float16_raises(self):
+        """float16 is refused at _set_dtype time (Bug B4 fix). Its ~1e-3
+        precision floor exceeds typical adaptive tolerances; the
+        previous "loose-tolerance" path silently produced wrong results.
+        """
         saved = _save_tableau("bosh3")
         solver = make_solver_for_unit_test()
         try:
-            solver._set_dtype(torch.float16)
-            assert solver.atol_assert == 1e-3
-            assert solver.rtol_assert == 1e-1
+            with pytest.raises(ValueError, match=r"float16|coarse"):
+                solver._set_dtype(torch.float16)
         finally:
             _restore_tableau("bosh3", saved)
 

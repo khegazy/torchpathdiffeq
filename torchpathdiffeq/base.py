@@ -217,7 +217,10 @@ class SolverBase(ABC, DistributedEnvironment):
                 sub-operation during integration to a dedicated file
                 ``torchpathdiffeq_speed.log``.
             dtype: Floating point precision for all computations. Supported:
-                torch.float64, torch.float32, torch.float16.
+                torch.float64 (default, academic-grade), torch.float32 (fast
+                on GPU). torch.float16 is refused: its ~1e-3 precision floor
+                sits above typical adaptive tolerances and cannot support
+                meaningful error control.
             device: Device string (e.g. 'cuda', 'cpu'). Passed to
                 DistributedEnvironment for device assignment.
             *args: Additional arguments forwarded to DistributedEnvironment.
@@ -297,16 +300,33 @@ class SolverBase(ABC, DistributedEnvironment):
         The assertion tolerances by dtype are:
             - float64: atol_assert=1e-15, rtol_assert=1e-7
             - float32: atol_assert=1e-7,  rtol_assert=1e-5
-            - float16: atol_assert=1e-3,  rtol_assert=1e-1
+
+        float16 is refused (Bug B4): float16's ~1e-3 precision floor
+        sits *above* the typical adaptive integration tolerance, so
+        the solver cannot meaningfully verify "step error < tol" for
+        any user-relevant tolerance. Use float32 (still fast on GPU)
+        or float64 (academic-grade precision) instead.
 
         Args:
-            dtype: Target dtype. Must be float64, float32, or float16.
+            dtype: Target dtype. Must be float64 or float32.
 
         Raises:
-            ValueError: If dtype is not one of the three supported types.
+            ValueError: If dtype is float16 or any unsupported type.
         """
         if hasattr(self, "dtype") and dtype == self.dtype:
             return
+
+        # Bug B4 guard: refuse float16 + adaptive at construction time.
+        if dtype == torch.float16:
+            raise ValueError(
+                "torch.float16 is too coarse for adaptive error control "
+                "(precision floor ~1e-3 exceeds typical integration "
+                "tolerances). Use torch.float32 or torch.float64 instead."
+            )
+        if dtype not in (torch.float64, torch.float32):
+            raise ValueError(
+                f"Given dtype must be torch.float64 or torch.float32; got {dtype}"
+            )
 
         self.dtype = dtype
         self.y0 = self.y0.to(self.dtype)
@@ -321,16 +341,9 @@ class SolverBase(ABC, DistributedEnvironment):
         if self.dtype == torch.float64:
             self.atol_assert = 1e-15
             self.rtol_assert = 1e-7
-        elif self.dtype == torch.float32:
+        else:  # float32
             self.atol_assert = 1e-7
             self.rtol_assert = 1e-5
-        elif self.dtype == torch.float16:
-            self.atol_assert = 1e-3
-            self.rtol_assert = 1e-1
-        else:
-            raise ValueError(
-                "Given dtype must be torch.float64, torch.float32, or torch.float16"
-            )
 
         self._set_solver_dtype(self.dtype)
 

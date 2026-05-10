@@ -209,16 +209,13 @@ def test_normal_completion_has_converged_true():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Bug B4: float16 with adaptive refinement produces wrong "
-    "answers silently because precision floor exceeds typical tolerances. "
-    "Phase 1 will raise ValueError at construction.",
-    strict=True,
-)
 def test_float16_construction_raises():
-    """Constructing a parallel solver with dtype=float16 should raise
+    """Constructing a parallel solver with dtype=float16 raises
     ``ValueError`` because float16's ~1e-3 precision floor cannot
     support adaptive error control to typical tolerances.
+
+    Phase 1 fix (Bug B4): the guard lives in
+    ``SolverBase._set_dtype``.
     """
     with pytest.raises(ValueError, match=r"float16|coarse"):
         make_uniform_solver("dopri5", atol=1e-5, rtol=1e-5, dtype=torch.float16)
