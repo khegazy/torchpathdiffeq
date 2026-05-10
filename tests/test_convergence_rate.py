@@ -39,7 +39,7 @@ UNIFORM_RATE = {
 # theoretical convergence rate. Skip them here; their correctness is
 # anchored by test_exactness (polynomial-exactness) and
 # test_scipy_agreement.
-_CONVERGENCE_TEST_SKIP = {"gk21"}
+_CONVERGENCE_TEST_SKIP = {"gk15", "gk21", "gk31"}
 
 INTERVAL = (0.0, 1.0)
 PANEL_COUNTS = (8, 16, 32, 64, 128)

@@ -50,10 +50,13 @@ UNIFORM_EXACTNESS = {
     "bosh3": 2,  # order 3
     "dopri5": 4,  # order 5
     # Gauss-Kronrod K_{2n+1} integrates polynomials of degree 3n+1
-    # exactly. For G10-K21: 3*10 + 1 = 31. The G_n alone integrates
-    # 2n-1, so the embedded G estimate is exact for degree 19 only;
-    # the b_error indicator picks up the gap between the two.
-    "gk21": 31,
+    # exactly (n even) or 3n+2 (n odd). The G_n alone integrates
+    # 2n-1, so the embedded G estimate is exact for degree 19 (G10),
+    # 13 (G7), or 29 (G15); the b_error indicator picks up the gap
+    # between K and G.
+    "gk15": 22,  # G7-K15: K15 exactness = 3*7 + 1 = 22
+    "gk21": 31,  # G10-K21: K21 exactness = 3*10 + 1 = 31
+    "gk31": 46,  # G15-K31: K31 exactness = 3*15 + 1 = 46
 }
 
 # Methods for which the "not exact one degree higher" upper-bound check
