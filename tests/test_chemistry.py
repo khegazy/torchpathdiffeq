@@ -28,7 +28,7 @@ _SERIAL_METHOD_MAP = {"generic3": "bosh3"}
 # can't be parallel-vs-serial cross-validated). Phase 3 of the quadrature
 # alignment plan removes the serial path entirely, at which point this test
 # is rewritten as parallel-vs-scipy and the exclusion list goes away.
-_TORCHDIFFEQ_INCOMPATIBLE = {"gk15", "gk21", "gk31"}
+_TORCHDIFFEQ_INCOMPATIBLE = {"gk15", "gk21", "gk31", "cc17", "cc33", "cc65"}
 
 _SERIAL_TESTABLE_METHODS = [
     m for m in UNIFORM_METHOD_NAMES if m not in _TORCHDIFFEQ_INCOMPATIBLE

@@ -57,6 +57,10 @@ UNIFORM_EXACTNESS = {
     "gk15": 22,  # G7-K15: K15 exactness = 3*7 + 1 = 22
     "gk21": 31,  # G10-K21: K21 exactness = 3*10 + 1 = 31
     "gk31": 46,  # G15-K31: K31 exactness = 3*15 + 1 = 46
+    # Clenshaw-Curtis CC_n integrates polynomials of degree n exactly.
+    "cc17": 16,
+    "cc33": 32,
+    "cc65": 64,
 }
 
 # Methods for which the "not exact one degree higher" upper-bound check
