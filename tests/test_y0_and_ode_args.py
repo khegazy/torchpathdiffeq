@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
 import torch
 
 from torchpathdiffeq import adaptive_quadrature, integrate, steps
@@ -128,20 +127,8 @@ def test_y0_default_zero_gives_pure_integral():
     assert abs(result.integral.item() - 1.0) < 1e-9
 
 
-@pytest.mark.xfail(
-    reason=(
-        "y0 is documented as 'Initial value of the integral accumulator', "
-        "implying result = y0 + ∫f. The current implementation passes "
-        "y0=zeros to _calculate_integral inside the batch loop and the "
-        "user-supplied y0 is dropped. Either the documentation should "
-        "be corrected or y0 should be added to the final integral. "
-        "Pinned as xfail-strict so the documented behavior, once fixed, "
-        "is enforced."
-    ),
-    strict=True,
-)
 def test_y0_offsets_the_result_per_documentation():
-    """User-supplied y0 should add to the integral per the docstring."""
+    """User-supplied y0 adds an offset to the integral: result.integral = y0 + ∫f."""
     result = integrate(
         f=torch.ones_like,
         method="gk21",
