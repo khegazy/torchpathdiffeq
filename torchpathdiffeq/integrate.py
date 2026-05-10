@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def integrate(
     f: Callable,
-    method: str,
+    method: str = "gk21",
     sampling: str = "uniform",
     atol: float = 1e-5,
     rtol: float = 1e-5,

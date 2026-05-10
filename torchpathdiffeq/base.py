@@ -185,9 +185,9 @@ class SolverBase(ABC, DistributedEnvironment):
 
     def __init__(
         self,
-        method: str,
-        atol: float,
-        rtol: float,
+        method: str = "gk21",
+        atol: float = 1e-5,
+        rtol: float = 1e-5,
         y0: torch.Tensor | None = None,
         f: Callable | None = None,
         mesh_init: torch.Tensor | None = None,

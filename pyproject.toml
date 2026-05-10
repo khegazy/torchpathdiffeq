@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchpathdiffeq"
-description = "Parallelized path integration numerical method built on pytorch with backprop capabilities."
-version = "0.1.0"
+description = "PyTorch library for parallelized adaptive numerical quadrature with full autograd support."
+version = "0.2.0"
 readme = "README.md"
 license = "CC-BY-4.0"
 authors = [{ name = "Kareem Hegazy", email = "khegazy@berkeley.edu" }]
@@ -23,10 +23,27 @@ classifiers = [
   "Operating System :: MacOS",
 ]
 requires-python = ">=3.10"
-dependencies = ["numpy", "torch", "torchdiffeq", "einops", "psutil"]
+# Runtime dependencies for adaptive quadrature only. torchdiffeq is no longer
+# a runtime dep (the serial-solver wrapper around it was removed in Phase 3.1
+# of the quadrature alignment plan); it remains a dev/extras dependency for
+# the speed-test example that benchmarks against torchdiffeq directly.
+# scipy is used by the test suite (cross-validation against
+# scipy.integrate.quad) but is also needed at runtime by future tanh-sinh
+# support, so it lives here too.
+dependencies = ["numpy", "torch", "scipy", "einops", "psutil"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4.0", "pytest-cov>=3.10.0", "mypy", "pre-commit", "ruff>=0.4.0", "typos"]
+dev = [
+  "pytest>=7.4.0",
+  "pytest-cov>=3.10.0",
+  "mypy",
+  "pre-commit",
+  "ruff>=0.4.0",
+  "typos",
+  # torchdiffeq is needed for the speed-test benchmark in
+  # examples/speed_test/torchdiffeq_comparison.py. Not used by the library.
+  "torchdiffeq",
+]
 docs = [
   "mkdocs-material>=9.4.0",
   "mkdocstrings[python]>=0.22.0",
