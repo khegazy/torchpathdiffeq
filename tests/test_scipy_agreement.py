@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 import torch
 from scipy import integrate as scipy_integrate
-from tests._helpers import UNIFORM_METHOD_NAMES
+from tests._helpers import SEED, UNIFORM_METHOD_NAMES
 
 from torchpathdiffeq import ode_path_integral
 
@@ -91,6 +91,10 @@ def _ids():
 )
 def test_method_agrees_with_scipy_quad(method, integrand_name, a, b):
     """Library's integrate matches ``scipy.integrate.quad`` to ``10*atol``."""
+    # Seed for deterministic initial-mesh placement; otherwise this test's
+    # outcome depends on whatever random state was left by the previous test.
+    torch.manual_seed(SEED)
+
     # Locate the matching torch / scipy callables.
     torch_fn = next(t for n, t, _, _ in _INTEGRANDS if n == integrand_name)
     scipy_fn = next(s for n, _, s, _ in _INTEGRANDS if n == integrand_name)
