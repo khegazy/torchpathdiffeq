@@ -80,7 +80,7 @@ def _run_case(method: str, integrand: str, atol: float, rtol: float) -> dict:
     return {
         "integral": output.integral.tolist(),
         "integral_error": output.integral_error.tolist(),
-        "n_optimal_mesh": int(output.t_optimal.shape[0]),
+        "n_optimal_mesh": int(output.mesh_optimal.shape[0]),
     }
 
 

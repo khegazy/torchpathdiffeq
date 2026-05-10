@@ -21,7 +21,7 @@ import torchpathdiffeq
 from torchpathdiffeq import (
     UNIFORM_METHODS,
     VARIABLE_METHODS,
-    IntegralOutput,
+    IntegrationResult,
     ODE_dict,
     RKParallelUniformAdaptiveStepsizeSolver,
     RKParallelVariableAdaptiveStepsizeSolver,
@@ -39,7 +39,7 @@ class TestPublicExports:
     def test_classes_exist(self):
         assert RKParallelUniformAdaptiveStepsizeSolver is not None
         assert RKParallelVariableAdaptiveStepsizeSolver is not None
-        assert IntegralOutput is not None
+        assert IntegrationResult is not None
 
     def test_functions_exist(self):
         assert callable(ode_path_integral)
@@ -76,7 +76,7 @@ class TestOdePathIntegralEntryPoint:
             t_init=torch.tensor([0.0], dtype=torch.float64),
             t_final=torch.tensor([math.pi], dtype=torch.float64),
         )
-        assert isinstance(result, IntegralOutput)
+        assert isinstance(result, IntegrationResult)
         # int_0^pi sin(t) dt = 2
         assert abs(result.integral.item() - 2.0) < 1e-6
 
@@ -93,11 +93,11 @@ class TestOdePathIntegralEntryPoint:
         assert abs(result.integral.item() - 1.0) < 1e-9
 
 
-class TestIntegralOutputFields:
-    """The IntegralOutput dataclass exposes the documented fields.
+class TestIntegrationResultFields:
+    """The IntegrationResult dataclass exposes the documented fields.
 
-    Phase 3 of the plan renames these to value/error/mesh_*; this test
-    locks the current names so a rename omission is caught immediately.
+    Phase 3 renames: value/error/mesh_*/nodes replace the old
+    ODE-flavored names integral/integral_error/t_optimal/t/t_init/t_final.
     """
 
     def _run(self):
@@ -112,25 +112,24 @@ class TestIntegralOutputFields:
 
     def test_documented_fields_present(self):
         r = self._run()
-        # Public-facing fields per current docs.
         for name in (
             "integral",
-            "loss",
-            "gradient_taken",
-            "t_optimal",
-            "t",
+            "integral_error",
+            "mesh_optimal",
+            "mesh_init",
+            "mesh_final",
+            "nodes",
             "h",
             "y",
             "sum_steps",
-            "integral_error",
             "sum_step_errors",
             "error_ratios",
-            "t_init",
-            "t_final",
+            "loss",
+            "gradient_taken",
             "y0",
             "converged",
         ):
-            assert hasattr(r, name), f"IntegralOutput missing field {name!r}"
+            assert hasattr(r, name), f"IntegrationResult missing field {name!r}"
 
 
 class TestSolverFactory:

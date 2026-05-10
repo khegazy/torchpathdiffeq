@@ -42,7 +42,7 @@ import pytest
 import torch
 from tests._helpers import make_uniform_solver
 
-from torchpathdiffeq import IntegralOutput, ode_path_integral
+from torchpathdiffeq import IntegrationResult, ode_path_integral
 
 # -----------------------------------------------------------------------------
 # Anchor: the no-warm-start path is correct as-is. Phase 1 must not regress it.
@@ -148,24 +148,24 @@ def test_warm_start_with_new_t_final_yields_correct_mesh():
     # Bug B1 fix: the warm-started mesh ends at the new t_final
     # (previously the buggy concatenation appended t_init here,
     # producing non-monotone barriers).
-    assert abs(out_second.t_optimal[-1].item() - 1.5) < 1e-12
+    assert abs(out_second.mesh_optimal[-1].item() - 1.5) < 1e-12
 
     # Mesh is monotone non-decreasing.
-    diffs = out_second.t_optimal[1:, 0] - out_second.t_optimal[:-1, 0]
+    diffs = out_second.mesh_optimal[1:, 0] - out_second.mesh_optimal[:-1, 0]
     assert torch.all(diffs >= 0), (
         f"warm-started mesh is not monotone: diffs.min()={diffs.min().item()}"
     )
 
 
 # -----------------------------------------------------------------------------
-# B6: max_path_change early exit must return an IntegralOutput with
+# B6: max_path_change early exit must return an IntegrationResult with
 # converged=False, not bare None (which violated the type contract).
 # -----------------------------------------------------------------------------
 
 
 def test_max_path_change_returns_integral_output_not_none():
     """When ``max_path_change`` triggers early exit on a user-provided
-    mesh, the solver must return an ``IntegralOutput`` with
+    mesh, the solver must return an ``IntegrationResult`` with
     ``converged=False``, not ``None``. Phase 1's Bug B6 fix.
     """
     # Provide a far-too-coarse mesh on a wiggly integrand so the solver
@@ -179,12 +179,12 @@ def test_max_path_change_returns_integral_output_not_none():
         ode_fxn=lambda t, *_: torch.sin(10 * t) * torch.exp(-0.1 * t),
         t=t,
     )
-    assert isinstance(out, IntegralOutput), (
+    assert isinstance(out, IntegrationResult), (
         f"max_path_change early-exit returned {type(out).__name__}, "
-        f"expected IntegralOutput. This is bug B6."
+        f"expected IntegrationResult. This is bug B6."
     )
     assert out.converged is False, (
-        "early-exit IntegralOutput should have converged=False; "
+        "early-exit IntegrationResult should have converged=False; "
         f"got converged={out.converged!r}"
     )
 

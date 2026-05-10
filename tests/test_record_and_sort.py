@@ -5,11 +5,11 @@ from __future__ import annotations
 import torch
 from _helpers import make_solver_for_unit_test
 
-from torchpathdiffeq.base import IntegralOutput
+from torchpathdiffeq.base import IntegrationResult
 
 
 def _make_integral_output(t_start, t_end, N=2, C=4, D=1):
-    """Create an IntegralOutput with N steps spanning [t_start, t_end]."""
+    """Create an IntegrationResult with N steps spanning [t_start, t_end]."""
     boundaries = torch.linspace(t_start, t_end, N + 1, dtype=torch.float64)
     t_left = boundaries[:-1]
     t_right = boundaries[1:]
@@ -18,16 +18,16 @@ def _make_integral_output(t_start, t_end, N=2, C=4, D=1):
     t = t_left[:, None, None] + c[None, :, None] * (t_right - t_left)[:, None, None]
     h = (t_right - t_left).unsqueeze(-1)
 
-    return IntegralOutput(
+    return IntegrationResult(
         integral=torch.tensor([0.5], dtype=torch.float64),
-        loss=torch.tensor([1.0], dtype=torch.float64),
-        t=t,
+        integral_error=torch.tensor([0.01], dtype=torch.float64),
+        nodes=t,
         h=h,
         y=torch.ones(N, C, D, dtype=torch.float64),
         sum_steps=torch.ones(N, D, dtype=torch.float64) * 0.1,
         sum_step_errors=torch.ones(N, D, dtype=torch.float64) * 0.001,
-        integral_error=torch.tensor([0.01], dtype=torch.float64),
         error_ratios=torch.ones(N, dtype=torch.float64) * 0.5,
+        loss=torch.tensor([1.0], dtype=torch.float64),
     )
 
 
@@ -48,7 +48,7 @@ class TestRecordResults:
         results = _make_integral_output(0.0, 0.5)
         record = self.solver._record_results(record, False, results)
         assert "integral" in record
-        assert "t" in record
+        assert "nodes" in record
         assert "h" in record
         assert "y" in record
         assert "sum_steps" in record
@@ -74,9 +74,9 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert record["t"].shape[0] == 4  # 2 + 2 steps
+        assert record["nodes"].shape[0] == 4  # 2 + 2 steps
         # Times should be sorted ascending
-        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
+        assert torch.all(record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0)
 
     def test_integral_accumulated(self):
         """Integral values are summed across batches."""
@@ -115,7 +115,7 @@ class TestRecordResults:
         record = self.solver._record_results(record, False, batch1)
         record = self.solver._record_results(record, False, batch2)
 
-        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
+        assert torch.all(record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ class TestSortRecord:
         return {
             "integral": torch.tensor([1.0], dtype=torch.float64),
             "loss": torch.tensor([2.0], dtype=torch.float64),
-            "t": t,
+            "nodes": t,
             "h": torch.ones(N, 1, dtype=torch.float64) * 0.1,
             "y": torch.arange(N, dtype=torch.float64)
             .unsqueeze(-1)
@@ -154,21 +154,21 @@ class TestSortRecord:
     def test_already_sorted(self):
         """Ascending times: unchanged."""
         record = self._make_record([0.1, 0.3, 0.5])
-        original_t = record["t"].clone()
+        original_t = record["nodes"].clone()
         record = self.solver._sort_record(record)
-        assert torch.equal(record["t"], original_t)
+        assert torch.equal(record["nodes"], original_t)
 
     def test_reverse_order(self):
         """Descending times: sorted to ascending."""
         record = self._make_record([0.5, 0.3, 0.1])
         record = self.solver._sort_record(record)
-        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
+        assert torch.all(record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0)
 
     def test_single_step(self):
         """Single step: trivially sorted."""
         record = self._make_record([0.5])
         record = self.solver._sort_record(record)
-        assert record["t"].shape[0] == 1
+        assert record["nodes"].shape[0] == 1
 
     def test_scalars_untouched(self):
         """integral and loss are not reordered."""

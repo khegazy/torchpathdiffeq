@@ -51,7 +51,7 @@ import psutil
 import torch
 from einops import rearrange
 
-from .base import IntegralOutput, MethodOutput, SolverBase, steps
+from .base import IntegrationResult, MethodOutput, SolverBase, steps
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS, _get_method
 
 logger = logging.getLogger(__name__)
@@ -511,7 +511,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             integral=record["integral"].detach(),
         )
         t_pruned, sum_steps_pruned, sum_step_errors_pruned = self.prune_excess_t(
-            record["t"],
+            record["nodes"],
             record["sum_steps"],
             record["sum_step_errors"],
             error_ratios_2steps,
@@ -804,11 +804,15 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         # assert torch.sum(torch.isnan(record)) == 0
         return record
 
+    # Record dict keys that are cumulative scalars (sum across batches),
+    # not per-step arrays that need re-sorting.
+    _RECORD_SCALAR_KEYS = ("integral", "integral_error", "loss")
+
     def _record_results(
         self,
         record: dict[str, torch.Tensor],
         take_gradient: bool,
-        results: IntegralOutput,
+        results: IntegrationResult,
     ) -> dict[str, torch.Tensor]:
         """
         Add a batch of accepted step results to the running record.
@@ -822,14 +826,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             record: Running record dict. Empty dict {} on the first call.
             take_gradient: Whether gradients are being computed. If True,
                 detaches tensors before storing to keep graph manageable.
-            results: IntegralOutput from the current accepted batch.
+            results: IntegrationResult from the current accepted batch.
 
         Returns:
-            Updated record dict with the new results merged in.
+            Updated record dict with the new results merged in. Dict keys
+            match IntegrationResult field names so getattr-based merge
+            below can iterate without translation.
         """
         if len(record) == 0 and not take_gradient:
             record["integral"] = results.integral
-            record["t"] = results.t
+            record["nodes"] = results.nodes
             record["h"] = results.h
             record["y"] = results.y
             record["sum_steps"] = results.sum_steps
@@ -840,7 +846,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             return record
         elif len(record) == 0 and take_gradient:
             record["integral"] = results.integral.detach()
-            record["t"] = results.t.detach()
+            record["nodes"] = results.nodes.detach()
             record["h"] = results.h.detach()
             record["y"] = results.y.detach()
             record["sum_steps"] = results.sum_steps.detach()
@@ -851,16 +857,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             return record
 
         idxs_keep, idxs_input = self._get_sorted_indices(
-            record["t"][:, 0, 0].detach(), results.t[:, 0, 0].detach()
+            record["nodes"][:, 0, 0].detach(), results.nodes[:, 0, 0].detach()
         )
         for key, value in record.items():
-            if "integral" in key or "loss" in key:
+            if key in self._RECORD_SCALAR_KEYS:
                 record[key] = value + getattr(results, key).detach()
             else:
                 record[key] = self._insert_sorted_results(
                     value, idxs_keep, getattr(results, key), idxs_input
                 )
-        assert torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
+        assert torch.all(record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0)
 
         return record
 
@@ -878,12 +884,16 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         Returns:
             Record with per-step tensors sorted by start time of each step.
         """
-        sorted_idxs = torch.argsort(record["t"][:, 0, 0], dim=0)
+        sorted_idxs = torch.argsort(record["nodes"][:, 0, 0], dim=0)
         for key in record:
-            if "loss" not in key and "integral" not in key:
+            if key not in self._RECORD_SCALAR_KEYS:
                 record[key] = record[key][sorted_idxs]
-        all_ascending = torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] > 0)
-        all_descending = torch.all(record["t"][1:, 0, 0] - record["t"][:-1, 0, 0] < 0)
+        all_ascending = torch.all(
+            record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0
+        )
+        all_descending = torch.all(
+            record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] < 0
+        )
         assert all_ascending or all_descending, (
             "Times are required to be either in ascending or descending order"
         )
@@ -1039,7 +1049,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         max_batch: int | None = None,
         reuse_mesh: bool = False,
         random_initial_mesh: bool = True,
-    ) -> IntegralOutput:
+    ) -> IntegrationResult:
         """
         Perform parallel adaptive numerical integration of ode_fxn.
 
@@ -1079,7 +1089,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 nn.Module in training mode.
             total_mem_usage: Fraction of memory to use for batching. Overrides
                 the value from construction if provided.
-            loss_fxn: Custom loss function. Takes an IntegralOutput, returns a
+            loss_fxn: Custom loss function. Takes an IntegrationResult, returns a
                 scalar tensor. If None, uses the integral value itself.
             max_batch: Maximum evaluations per batch. Overrides dynamic memory
                 calculation if provided.
@@ -1109,7 +1119,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 explicitly (the explicit ``t`` always takes precedence).
 
         Returns:
-            IntegralOutput with the computed integral, error estimates, time
+            IntegrationResult with the computed integral, error estimates, time
             mesh (t), optimized mesh (t_optimal), and diagnostics.
 
         Note:
@@ -1351,7 +1361,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 current_integral = record["integral"] + method_output.integral.detach()
                 # Merge new steps into the sorted record to compute cumulative sums
                 idxs_keep, idxs_input = self._get_sorted_indices(
-                    record["t"][:, 0, 0], t_step_eval[:, 0, 0]
+                    record["nodes"][:, 0, 0], t_step_eval[:, 0, 0]
                 )
                 all_sum_steps = self._insert_sorted_results(
                     record["sum_steps"], idxs_keep, method_output.sum_steps, idxs_input
@@ -1379,7 +1389,7 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
             # Early exit if too many steps fail and user-provided mesh is given.
             # Bug B6 fix: previously returned bare `None`, breaking the
             # documented return-type contract. Now returns an
-            # IntegralOutput with converged=False populated from the
+            # IntegrationResult with converged=False populated from the
             # most-recent batch's intermediate result so callers can
             # inspect partial state instead of having to special-case
             # None.
@@ -1392,20 +1402,20 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                         fail_ratio * 100,
                         self.max_path_change,
                     )
-                    return IntegralOutput(
+                    return IntegrationResult(
                         integral=method_output.integral,
-                        loss=None,
-                        gradient_taken=take_gradient,
-                        t_optimal=t_step_barriers,
-                        t=t_step_eval,
+                        integral_error=method_output.integral_error,
+                        mesh_optimal=t_step_barriers,
+                        mesh_init=t_init,
+                        mesh_final=t_final,
+                        nodes=t_step_eval,
                         h=method_output.h,
                         y=y_step_eval,
                         sum_steps=method_output.sum_steps,
-                        integral_error=method_output.integral_error,
                         sum_step_errors=torch.abs(method_output.sum_step_errors),
                         error_ratios=error_ratios,
-                        t_init=t_init,
-                        t_final=t_final,
+                        loss=None,
+                        gradient_taken=take_gradient,
                         y0=y0,
                         converged=False,
                     )
@@ -1440,19 +1450,19 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
                 take_gradient = take_gradient or (
                     self.training and (torch.any(t_step_trackers) or take_gradient)
                 )
-                intermediate_results = IntegralOutput(
+                intermediate_results = IntegrationResult(
                     integral=method_output.integral,
-                    loss=None,
-                    gradient_taken=take_gradient,
-                    t=t_step_eval,
+                    integral_error=method_output.integral_error,
+                    nodes=t_step_eval,
                     h=method_output.h,
                     y=y_step_eval,
                     sum_steps=method_output.sum_steps,
-                    integral_error=method_output.integral_error,
                     sum_step_errors=torch.abs(method_output.sum_step_errors),
                     error_ratios=error_ratios,
-                    t_init=t_init,
-                    t_final=t_final,
+                    loss=None,
+                    gradient_taken=take_gradient,
+                    mesh_init=t_init,
+                    mesh_final=t_final,
                     y0=0,
                 )
 
@@ -1481,18 +1491,20 @@ class ParallelAdaptiveStepsizeSolver(SolverBase):
         self.t_step_barriers_previous = t_step_barriers_optimal
         self.previous_ode_fxn_id = id(ode_fxn)
 
-        return IntegralOutput(
+        return IntegrationResult(
             integral=record["integral"],
-            loss=record["loss"],
-            gradient_taken=take_gradient,
-            t_optimal=t_step_barriers_optimal,
-            t=record["t"],
+            integral_error=record["integral_error"],
+            mesh_optimal=t_step_barriers_optimal,
+            mesh_init=t_init,
+            mesh_final=t_final,
+            nodes=record["nodes"],
             h=record["h"],
             y=record["y"],
             sum_steps=record["sum_steps"],
-            integral_error=record["integral_error"],
             sum_step_errors=torch.abs(record["sum_step_errors"]),
             error_ratios=record["error_ratios"],
+            loss=record["loss"],
+            gradient_taken=take_gradient,
         )
 
 

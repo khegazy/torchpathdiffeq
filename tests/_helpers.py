@@ -95,24 +95,24 @@ def constant_ode_fxn(t, *args):
 
 def assert_time_ordering(integral_output):
     """Assert that all time points in the output are non-decreasing."""
-    t_flat = torch.flatten(integral_output.t, start_dim=0, end_dim=1)
-    assert torch.all(
-        t_flat[1:] - t_flat[:-1] >= 0
-    ), "Time points are not non-decreasing"
+    t_flat = torch.flatten(integral_output.nodes, start_dim=0, end_dim=1)
+    assert torch.all(t_flat[1:] - t_flat[:-1] >= 0), (
+        "Time points are not non-decreasing"
+    )
 
 
 def assert_optimal_mesh_ordering(integral_output):
     """Assert that the optimal mesh time points are non-decreasing."""
-    t_optimal_flat = torch.flatten(integral_output.t_optimal, start_dim=0, end_dim=1)
-    assert torch.all(
-        t_optimal_flat[1:] - t_optimal_flat[:-1] >= 0
-    ), "Optimal mesh time points are not non-decreasing"
+    t_optimal_flat = torch.flatten(integral_output.mesh_optimal, start_dim=0, end_dim=1)
+    assert torch.all(t_optimal_flat[1:] - t_optimal_flat[:-1] >= 0), (
+        "Optimal mesh time points are not non-decreasing"
+    )
 
 
 def assert_step_continuity(integral_output):
     """Assert that consecutive steps share boundary points (end of step i == start of step i+1)."""
     assert torch.allclose(
-        integral_output.t[1:, 0, :], integral_output.t[:-1, -1, :]
+        integral_output.nodes[1:, 0, :], integral_output.nodes[:-1, -1, :]
     ), "Consecutive steps do not share boundary points"
 
 

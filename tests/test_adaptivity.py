@@ -47,9 +47,9 @@ class TestStepAdding:
         solver = self._make_solver(method_name)
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
         output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-        assert len(t) < len(output.t_optimal), (
+        assert len(t) < len(output.mesh_optimal), (
             f"{method_name}: coarse mesh ({len(t)} points) should produce "
-            f"a larger optimal mesh, but got {len(output.t_optimal)} points"
+            f"a larger optimal mesh, but got {len(output.mesh_optimal)} points"
         )
 
     def test_time_ordering_after_refinement(self, method_name):
@@ -72,17 +72,17 @@ class TestStepAdding:
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
         for idx in range(3):
             output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-            t_optimal = output.t_optimal
+            t_optimal = output.mesh_optimal
             if idx == 0:
                 # First iteration: mesh must grow
-                assert len(t) < len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should grow from {len(t)} points"
+                assert len(t) < len(t_optimal), (
+                    f"Iteration {idx}: mesh should grow from {len(t)} points"
+                )
             else:
                 # Subsequent iterations: mesh should not shrink
-                assert len(t) <= len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should not shrink from {len(t)} points"
+                assert len(t) <= len(t_optimal), (
+                    f"Iteration {idx}: mesh should not shrink from {len(t)} points"
+                )
             t = t_optimal
 
 
@@ -107,9 +107,9 @@ class TestStepRemoval:
         solver = self._make_solver()
         t = torch.linspace(0, 1, 997).unsqueeze(1)
         output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-        assert len(t) > len(output.t_optimal), (
+        assert len(t) > len(output.mesh_optimal), (
             f"Dense mesh ({len(t)} points) should be pruned, "
-            f"but got {len(output.t_optimal)} points"
+            f"but got {len(output.mesh_optimal)} points"
         )
 
     def test_time_ordering_after_pruning(self):
@@ -132,15 +132,15 @@ class TestStepRemoval:
         t = torch.linspace(0, 1, 997).unsqueeze(1)
         for idx in range(3):
             output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-            t_optimal = output.t_optimal
+            t_optimal = output.mesh_optimal
             if idx == 0:
                 # First iteration: mesh must shrink
-                assert len(t) > len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should shrink from {len(t)} points"
+                assert len(t) > len(t_optimal), (
+                    f"Iteration {idx}: mesh should shrink from {len(t)} points"
+                )
             else:
                 # Subsequent iterations: mesh should not grow
-                assert len(t) >= len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should not grow from {len(t)} points"
+                assert len(t) >= len(t_optimal), (
+                    f"Iteration {idx}: mesh should not grow from {len(t)} points"
+                )
             t = t_optimal

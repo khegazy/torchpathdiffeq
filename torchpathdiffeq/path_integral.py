@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .base import IntegralOutput, steps
+from .base import IntegrationResult, steps
 from .runge_kutta import get_parallel_RK_solver
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ def ode_path_integral(
     use_absolute_error_ratio: bool = True,
     device: str | None = None,
     **kwargs,
-) -> IntegralOutput:
+) -> IntegrationResult:
     """
     Compute the definite integral of ode_fxn from t_init to t_final.
 
@@ -93,7 +93,7 @@ def ode_path_integral(
             constructor (e.g. max_batch, max_path_change, error_calc_idx).
 
     Returns:
-        IntegralOutput containing the computed integral, error estimates,
+        IntegrationResult containing the computed integral, error estimates,
         time mesh, and optimization diagnostics.
 
     Raises:

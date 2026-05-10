@@ -102,7 +102,7 @@ class TestGetOptimalTStepBarriers:
             boundaries[:-1].unsqueeze(-1), boundaries[1:].unsqueeze(-1)
         )
         return {
-            "t": t,
+            "nodes": t,
             "sum_steps": torch.ones(N, 1, dtype=torch.float64) * (integral_val / N),
             "sum_step_errors": torch.ones(N, 1, dtype=torch.float64) * error_scale,
             "integral": torch.tensor([integral_val], dtype=torch.float64),

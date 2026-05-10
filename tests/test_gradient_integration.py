@@ -149,9 +149,9 @@ class TestQuadratureWithGradients:
         result = solver.integrate(t_init=T_INIT, t_final=T_FINAL)
         analytical = _exp_analytical_integral(0.0, 1.0)
 
-        assert torch.allclose(
-            result.integral, analytical, atol=1e-3
-        ), f"Expected {analytical.item():.6f}, got {result.integral.item():.6f}"
+        assert torch.allclose(result.integral, analytical, atol=1e-3), (
+            f"Expected {analytical.item():.6f}, got {result.integral.item():.6f}"
+        )
 
     def test_exp_integral_gradient_to_params(self, method_name):
         """Gradient of integral w.r.t. scale is nonzero and positive."""
@@ -167,9 +167,9 @@ class TestQuadratureWithGradients:
         # Note: only the first batch's gradient flows through (library design),
         # so the exact value won't match the full analytical derivative.
         assert integrand.scale.grad is not None
-        assert (
-            integrand.scale.grad.item() > 0
-        ), f"Expected positive grad, got {integrand.scale.grad.item():.6f}"
+        assert integrand.scale.grad.item() > 0, (
+            f"Expected positive grad, got {integrand.scale.grad.item():.6f}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +215,9 @@ class TestPathOptimization:
             optimizer.step()
 
         final_loss = result.integral.sum().item()
-        assert (
-            final_loss < initial_loss
-        ), f"Loss did not decrease: initial={initial_loss:.6f}, final={final_loss:.6f}"
+        assert final_loss < initial_loss, (
+            f"Loss did not decrease: initial={initial_loss:.6f}, final={final_loss:.6f}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -242,9 +242,9 @@ class TestODESolvingViaQuadrature:
         y0 = torch.tensor([4.0], dtype=torch.float64)
         y_T = y0 + result.integral
         analytical = y0 + _exp_analytical_integral(0.0, 1.0)
-        assert torch.allclose(
-            y_T, analytical, atol=1e-3
-        ), f"Expected {analytical.item():.6f}, got {y_T.item():.6f}"
+        assert torch.allclose(y_T, analytical, atol=1e-3), (
+            f"Expected {analytical.item():.6f}, got {y_T.item():.6f}"
+        )
 
     def test_ode_with_neural_integrand(self, method_name):
         """Train MLP to approximate f(t), integrate, verify accuracy."""
@@ -268,9 +268,9 @@ class TestODESolvingViaQuadrature:
         with torch.no_grad():
             y_pred = net(t_train)
             pretrain_error = (y_pred - y_target).abs().max()
-        assert (
-            pretrain_error < 0.05
-        ), f"Pre-training failed: max_error={pretrain_error:.4f}"
+        assert pretrain_error < 0.05, (
+            f"Pre-training failed: max_error={pretrain_error:.4f}"
+        )
 
         # Now integrate using the trained network
         net.eval()
@@ -279,9 +279,9 @@ class TestODESolvingViaQuadrature:
 
         analytical = _exp_analytical_integral(0.0, 1.0)
         # Looser tolerance since the MLP is an approximation
-        assert torch.allclose(
-            result.integral, analytical, atol=0.1
-        ), f"Expected ~ {analytical.item():.4f}, got {result.integral.item():.4f}"
+        assert torch.allclose(result.integral, analytical, atol=0.1), (
+            f"Expected ~ {analytical.item():.4f}, got {result.integral.item():.4f}"
+        )
 
 
 # ---------------------------------------------------------------------------

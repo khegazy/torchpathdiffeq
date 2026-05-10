@@ -51,13 +51,13 @@ def test_wrapper_matches_direct_solver_uniform(method_name):
     assert torch.allclose(
         wrapper_output.integral_error, direct_output.integral_error
     ), f"Integral error mismatch for {method_name}"
-    assert torch.allclose(wrapper_output.t_optimal, direct_output.t_optimal), (
+    assert torch.allclose(wrapper_output.mesh_optimal, direct_output.mesh_optimal), (
         f"Optimal mesh mismatch for {method_name}"
     )
     assert torch.allclose(wrapper_output.y, direct_output.y), (
         f"y values mismatch for {method_name}"
     )
-    assert torch.allclose(wrapper_output.t, direct_output.t), (
+    assert torch.allclose(wrapper_output.nodes, direct_output.nodes), (
         f"t values mismatch for {method_name}"
     )
     assert torch.allclose(wrapper_output.h, direct_output.h), (

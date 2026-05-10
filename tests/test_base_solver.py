@@ -7,7 +7,7 @@ import torch
 from _helpers import make_solver_for_unit_test
 
 from torchpathdiffeq import UNIFORM_METHODS
-from torchpathdiffeq.base import IntegralOutput
+from torchpathdiffeq.base import IntegrationResult
 
 
 def _save_tableau(method_name):
@@ -232,13 +232,13 @@ class TestIntegralLoss:
     def test_returns_integral(self):
         """Default loss is the integral value itself."""
         solver = make_solver_for_unit_test()
-        output = IntegralOutput(integral=torch.tensor([5.0]))
+        output = IntegrationResult(integral=torch.tensor([5.0]))
         result = solver._integral_loss(output)
         assert torch.equal(result, torch.tensor([5.0]))
 
     def test_multidim(self):
         """Works with multi-dimensional integral."""
         solver = make_solver_for_unit_test()
-        output = IntegralOutput(integral=torch.tensor([1.0, 2.0]))
+        output = IntegrationResult(integral=torch.tensor([1.0, 2.0]))
         result = solver._integral_loss(output)
         assert torch.equal(result, torch.tensor([1.0, 2.0]))

@@ -5,7 +5,7 @@ Defines the core abstractions that all solvers build on:
 
 - ``steps`` enum: the three integration step strategies (fixed, adaptive uniform,
   adaptive variable).
-- ``IntegralOutput`` / ``MethodOutput``: dataclasses carrying results through the
+- ``IntegrationResult`` / ``MethodOutput``: dataclasses carrying results through the
   integration pipeline.
 - ``SolverBase``: abstract base class providing dtype/device management, default
   parameter handling, and the ``integrate()`` / ``_calculate_integral()`` interface
@@ -73,58 +73,59 @@ def get_sampling_type(sampling_type: str) -> steps:
 
 
 @dataclass
-class IntegralOutput:
+class IntegrationResult:
     """
     Complete output of a numerical integration run.
 
     Returned by all solver ``integrate()`` methods. Contains the computed
     integral value along with diagnostics about step sizes, errors, and
-    the optimized time mesh for potential reuse.
+    the optimized mesh for potential warm-start reuse.
 
     Attributes:
         integral: The computed integral value. Shape: [D].
-        loss: Loss value computed by the loss function (defaults to the
-            integral itself). Shape: scalar or [D].
-        gradient_taken: Whether backpropagation was performed during
-            this integration run.
-        t_optimal: Optimized time step barriers for reuse in subsequent
-            integration calls with the same integrand. Shape: [M, T].
-        t: Time points at which the integrand was evaluated, organized by
+        integral_error: Estimated total error (sum of per-step errors)
+            using the embedded lower-order method. Shape: [D].
+        mesh_optimal: Optimized step-barrier mesh for warm-start reuse
+            in subsequent integration calls with the same integrand.
+            Shape: [M, T].
+        mesh_init: Lower integration bound used. Shape: [T].
+        mesh_final: Upper integration bound used. Shape: [T].
+        nodes: Per-step quadrature node positions, organized by
             integration step. Shape: [N, C, T].
-        h: Step sizes (t_right - t_left) for each integration step.
+        h: Step sizes (right - left) for each integration step.
             Shape: [N, T].
-        y: Integrand evaluations at each time point. Shape: [N, C, D].
-        sum_steps: Weighted RK contribution of each step to the total
+        y: Integrand evaluations at each node. Shape: [N, C, D].
+        sum_steps: Weighted contribution of each step to the total
             integral (h * sum(b_i * y_i) per step). Shape: [N, D].
-        integral_error: Estimated total error (sum of step errors) using
-            the embedded lower-order method. Shape: [D].
-        sum_step_errors: Per-step error estimates from the difference between
-            the primary and embedded RK methods. Shape: [N, D].
-        error_ratios: Per-step error ratios (error / tolerance). Values > 1
-            indicate the step did not meet accuracy requirements. Shape: [N].
-        t_init: Lower integration bound used. Shape: [T].
-        t_final: Upper integration bound used. Shape: [T].
-        y0: Initial integral value used. Shape: [D].
+        sum_step_errors: Per-step error estimates from the difference
+            between the primary and embedded methods. Shape: [N, D].
+        error_ratios: Per-step error ratios (error / tolerance). Values
+            > 1 indicate the step did not meet accuracy requirements.
+            Shape: [N].
+        loss: Loss value computed by the loss function (defaults to
+            the integral itself). Shape: scalar or [D].
+        gradient_taken: Whether per-batch backpropagation was performed
+            during this integration run.
+        y0: Initial integral accumulator value used. Shape: [D].
         converged: Whether the adaptive refinement met the tolerance
             criterion. ``True`` for normal completion, ``False`` if the
-            integrator hit ``max_path_change`` and exited with a partially-
-            refined mesh. Always set; do not assume ``None`` means
-            "converged".
+            integrator hit ``max_path_change`` and exited with a
+            partially-refined mesh.
     """
 
     integral: torch.Tensor
-    loss: torch.Tensor = None
-    gradient_taken: bool = None
-    t_optimal: torch.Tensor = None
-    t: torch.Tensor = None
+    integral_error: torch.Tensor = None
+    mesh_optimal: torch.Tensor = None
+    mesh_init: torch.Tensor = None
+    mesh_final: torch.Tensor = None
+    nodes: torch.Tensor = None
     h: torch.Tensor = None
     y: torch.Tensor = None
     sum_steps: torch.Tensor = None
-    integral_error: torch.Tensor = None
     sum_step_errors: torch.Tensor = None
     error_ratios: torch.Tensor = None
-    t_init: torch.Tensor = None
-    t_final: torch.Tensor = None
+    loss: torch.Tensor = None
+    gradient_taken: bool = None
     y0: torch.Tensor = None
     converged: bool = True
 
@@ -136,7 +137,9 @@ class MethodOutput:
 
     Produced by ``_calculate_integral()`` in concrete solver subclasses.
     Contains both the primary integral estimate and the embedded error
-    estimate, broken down per step.
+    estimate, broken down per step. Field names mirror
+    ``IntegrationResult`` for consistency between the internal
+    batch-level output and the user-facing run-level output.
 
     Attributes:
         integral: Total integral contribution from this batch of steps
@@ -460,7 +463,12 @@ class SolverBase(ABC, DistributedEnvironment):
             per-step errors, and step sizes.
         """
 
-    def _integral_loss(self, integral: IntegralOutput, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
+    def _integral_loss(
+        self,
+        result: IntegrationResult,
+        *args,  # noqa: ARG002
+        **kwargs,  # noqa: ARG002
+    ) -> torch.Tensor:
         """
         Default loss function: returns the integral value itself.
 
@@ -469,12 +477,12 @@ class SolverBase(ABC, DistributedEnvironment):
         gradient-based optimization.
 
         Args:
-            integral: The current IntegralOutput from this batch.
+            result: The current IntegrationResult from this batch.
 
         Returns:
-            Loss tensor for backpropagation. Shape: same as integral.integral.
+            Loss tensor for backpropagation. Shape: same as result.integral.
         """
-        return integral.integral
+        return result.integral
 
     @abstractmethod
     def integrate(
@@ -486,7 +494,7 @@ class SolverBase(ABC, DistributedEnvironment):
         t: torch.Tensor | None = None,
         ode_args: tuple = (),
         is_training: bool | None = None,
-    ) -> IntegralOutput:
+    ) -> IntegrationResult:
         """
         Perform numerical path integration of ode_fxn from t_init to t_final.
 
@@ -513,7 +521,7 @@ class SolverBase(ABC, DistributedEnvironment):
                 from whether ode_fxn is an nn.Module in training mode.
 
         Returns:
-            IntegralOutput containing the computed integral, error estimates,
+            IntegrationResult containing the computed integral, error estimates,
             time mesh, and optimization diagnostics.
 
         Note:
