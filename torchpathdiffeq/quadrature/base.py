@@ -72,7 +72,7 @@ class AdaptiveQuadrature(SolverBase):
 
     Subclasses must implement:
         - ``_compute_nodes(mesh_left, mesh_right)``: Place quadrature points within steps.
-        - ``_evaluate_adaptive_y(...)``: Evaluate integrand at refined points.
+        - ``_evaluate_adaptive_nodes(...)``: Evaluate integrand at refined points.
         - ``_merge_excess_nodes(...)``: Merge consecutive low-error steps.
         - ``_calculate_integral(t, y, y0)``: Compute RK integral + error for a batch.
 
@@ -143,7 +143,7 @@ class AdaptiveQuadrature(SolverBase):
         self.total_mem_usage = total_mem_usage
 
     @abstractmethod
-    def _evaluate_adaptive_y(
+    def _evaluate_adaptive_nodes(
         self,
         f: Callable,
         idxs_add: torch.Tensor,

@@ -1,4 +1,4 @@
-"""Unit tests for _evaluate_adaptive_y and _merge_excess_nodes (uniform + variable)."""
+"""Unit tests for _evaluate_adaptive_nodes and _merge_excess_nodes (uniform + variable)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from _helpers import (
 from torchpathdiffeq import UNIFORM_METHODS
 
 # ---------------------------------------------------------------------------
-# Uniform _evaluate_adaptive_y
+# Uniform _evaluate_adaptive_nodes
 # ---------------------------------------------------------------------------
 
 
 class TestUniformEvaluateAdaptiveY:
-    """Tests for _UniformAdaptiveQuadratureBase._evaluate_adaptive_y."""
+    """Tests for _UniformAdaptiveQuadratureBase._evaluate_adaptive_nodes."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
@@ -33,7 +33,7 @@ class TestUniformEvaluateAdaptiveY:
         t = self._make_t(solver, 0.0, 1.0, 1)
         y = torch.ones(1, C, 1, dtype=torch.float64)
 
-        y_add, t_add = solver._evaluate_adaptive_y(
+        y_add, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -47,7 +47,7 @@ class TestUniformEvaluateAdaptiveY:
         t = self._make_t(solver, 0.0, 1.0, 3)
         y = torch.ones(3, C, 1, dtype=torch.float64)
 
-        y_add, t_add = solver._evaluate_adaptive_y(
+        y_add, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0, 2]), y, t
         )
 
@@ -61,7 +61,7 @@ class TestUniformEvaluateAdaptiveY:
         t = self._make_t(solver, 0.0, 1.0, 1)
         y = torch.ones(1, C, 1, dtype=torch.float64)
 
-        _, t_add = solver._evaluate_adaptive_y(
+        _, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -76,7 +76,7 @@ class TestUniformEvaluateAdaptiveY:
         t = self._make_t(solver, 0.0, 1.0, 1)
         y = torch.ones(1, solver.C, 1, dtype=torch.float64)
 
-        _, t_add = solver._evaluate_adaptive_y(
+        _, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -93,7 +93,7 @@ class TestUniformEvaluateAdaptiveY:
         t = self._make_t(solver, 0.0, 1.0, 1)
         y = torch.ones(1, solver.C, 1, dtype=torch.float64)
 
-        y_add, _ = solver._evaluate_adaptive_y(
+        y_add, _ = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -207,12 +207,12 @@ class TestUniformMergeExcessT:
 
 
 # ---------------------------------------------------------------------------
-# Variable _evaluate_adaptive_y
+# Variable _evaluate_adaptive_nodes
 # ---------------------------------------------------------------------------
 
 
 class TestVariableEvaluateAdaptiveY:
-    """Tests for _VariableAdaptiveQuadratureBase._evaluate_adaptive_y."""
+    """Tests for _VariableAdaptiveQuadratureBase._evaluate_adaptive_nodes."""
 
     def test_reuses_old_evals(self):
         """Split step: old y values appear in y_add."""
@@ -220,7 +220,7 @@ class TestVariableEvaluateAdaptiveY:
         t = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
         y = torch.tensor([[[10.0], [20.0]]], dtype=torch.float64)
 
-        y_add, _ = solver._evaluate_adaptive_y(
+        y_add, _ = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -235,7 +235,7 @@ class TestVariableEvaluateAdaptiveY:
         t = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
         y = torch.ones(1, 2, 1, dtype=torch.float64)
 
-        _, t_add = solver._evaluate_adaptive_y(
+        _, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 
@@ -257,7 +257,7 @@ class TestVariableEvaluateAdaptiveY:
         )
         y = torch.ones(3, C, 1, dtype=torch.float64)
 
-        y_add, t_add = solver._evaluate_adaptive_y(
+        y_add, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0, 2]), y, t
         )
 
@@ -270,7 +270,7 @@ class TestVariableEvaluateAdaptiveY:
         t = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
         y = torch.ones(1, 2, 1, dtype=torch.float64)
 
-        _, t_add = solver._evaluate_adaptive_y(
+        _, t_add = solver._evaluate_adaptive_nodes(
             constant_ode_fxn, torch.tensor([0]), y, t
         )
 

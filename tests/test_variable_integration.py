@@ -2,7 +2,7 @@
 
 Phase 4 restored the variable solver by implementing
 ``_compute_nodes`` with uniformly-spaced initial node
-placement. The existing ``_evaluate_adaptive_y`` (which interleaves
+placement. The existing ``_evaluate_adaptive_nodes`` (which interleaves
 old and new nodes for split reuse) and ``_merge_excess_nodes`` (which
 subsamples merged panels back to C nodes) now run end-to-end.
 """

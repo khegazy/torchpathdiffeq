@@ -87,48 +87,6 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         """Re-initialize the method when the solver's dtype changes."""
         self._setup_method(dtype)
 
-    """
-    def _initial_t_steps(self,
-            t,
-            mesh_init=None,
-            mesh_final=None
-        ):
-        Creates an initial time sampling tensor either from scratch or from a
-        tensor of time points with dimension d.
-
-        Args:
-            t (Tensor): Input time, either None or tensor starting and
-                ending at the integration bounds
-            mesh_init (Tensor, optional): Minimum of integral range
-            mesh_final (Tensor, optional): Maximum of integral range
-
-        Shapes:
-            t : [N, T] will populate intermediate evaluations according to
-                integration method; [N, C, T] will return t if C is the same
-                as the number of evaluations per step, otherwise it will create
-                C steps between the first and last values in the second dim
-            mesh_init: [T]
-            mesh_final: [T]
-
-        # Get variables or populate with default values, send to correct device
-        _, mesh_init, mesh_final, _ = self._check_variables(
-            None, mesh_init, mesh_final, None
-        )
-        if t is None:
-            t = torch.linspace(0, 1., 7*self.Cm1 + 1, device=self.device).unsqueeze(-1)
-            t = mesh_init + t*(mesh_final - mesh_init)
-        elif len(t.shape) == 3:
-            if t.shape[1] == self.C:
-                return t
-            else:
-                if len(t) > 1:
-                    logger.debug("t values: %s", t[:,:,0])
-                    assert torch.allclose(t[:-1,-1], t[1:,0], atol=self.atol_assert, rtol=self.rtol_assert)
-                t = t[:,torch.tensor([0,-1], dtype=torch.int, device=self.device),:]
-                t = torch.flatten(t, start_dim=0, end_dim=1)
-        return self._compute_nodes(t[:-1], t[1:])
-    """
-
     def _compute_nodes(
         self, mesh_left: torch.Tensor, mesh_right: torch.Tensor
     ) -> torch.Tensor:
@@ -153,7 +111,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         steps = self.method.tableau.c.unsqueeze(-1) * dt
         return mesh_left.unsqueeze(1) + steps
 
-    def _evaluate_adaptive_y(
+    def _evaluate_adaptive_nodes(
         self,
         f: Callable,
         idxs_add: torch.Tensor,

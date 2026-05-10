@@ -91,7 +91,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         evenly-spaced fractions ``[0, 1/(C-1), ..., 1]`` so that the
         first call lays out C points spanning each panel from end to
         end. Subsequent splits and merges (handled by
-        ``_evaluate_adaptive_y`` and ``_merge_excess_nodes``) reuse and
+        ``_evaluate_adaptive_nodes`` and ``_merge_excess_nodes``) reuse and
         rearrange these points.
 
         At ``a = 1/2`` for the 3-point ``interpolatory3_variable``
@@ -112,7 +112,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         ).view(self.C, 1)
         return mesh_left.unsqueeze(1) + fractions * dt
 
-    def _evaluate_adaptive_y(
+    def _evaluate_adaptive_nodes(
         self,
         f: Callable,
         idxs_add: torch.Tensor,
