@@ -73,7 +73,11 @@ class _VARIABLE_SECOND_ORDER(_VariableSubclass):
         """Initialize the 2nd-order variable method using adaptive Heun's tableau."""
         super().__init__(device)
         self.device = device
-        self.tableau = _ADAPTIVE_HEUN.tableau
+        # Clone instead of aliasing the canonical RK singleton: ``to_dtype``
+        # below mutates the tableau in place, so an alias would corrupt the
+        # global ``_ADAPTIVE_HEUN`` (the same hazard Phase 4 fixed for the
+        # uniform side via MethodClass.clone()).
+        self.tableau = _ADAPTIVE_HEUN.tableau.clone()
 
     def to_device(self, device: str | torch.device) -> None:
         """Move tableau tensors to the specified device."""
