@@ -1,4 +1,4 @@
-"""Unit tests for prune_excess_t and _get_optimal_mesh."""
+"""Unit tests for prune_excess_mesh and _get_optimal_mesh."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import torch
 from _helpers import make_solver_for_unit_test
 
 # ---------------------------------------------------------------------------
-# prune_excess_t
+# prune_excess_mesh
 # ---------------------------------------------------------------------------
 
 
 class TestPruneExcessT:
-    """Tests for AdaptiveQuadrature.prune_excess_t."""
+    """Tests for AdaptiveQuadrature.prune_excess_mesh."""
 
     def _make_t(self, solver, t_start, t_end, N):
         """Create [N, C, 1] time tensor with uniform steps."""
@@ -28,7 +28,7 @@ class TestPruneExcessT:
         se = torch.ones(4, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([0.5, 0.8, 0.3])  # All > 0.1
 
-        t_p, _ss_p, _se_p = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _ss_p, _se_p = solver.prune_excess_mesh(t, ss, se, er2)
 
         assert t_p.shape[0] == 4
         assert torch.equal(t_p, t)
@@ -41,7 +41,7 @@ class TestPruneExcessT:
         se = torch.ones(4, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([0.05, 0.8, 0.9])  # Pair 0 below 0.1
 
-        t_p, _, _ = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _, _ = solver.prune_excess_mesh(t, ss, se, er2)
 
         assert t_p.shape[0] == 3
 
@@ -53,7 +53,7 @@ class TestPruneExcessT:
         se = torch.ones(1, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([])
 
-        t_p, _ss_p, _se_p = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _ss_p, _se_p = solver.prune_excess_mesh(t, ss, se, er2)
 
         assert t_p.shape[0] == 1
         assert torch.equal(t_p, t)
@@ -66,7 +66,7 @@ class TestPruneExcessT:
         se = torch.ones(5, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([0.01, 0.01, 0.8, 0.01])  # Pairs 0,1 adjacent
 
-        t_p, _, _ = solver.prune_excess_t(t, ss, se, er2)
+        t_p, _, _ = solver.prune_excess_mesh(t, ss, se, er2)
 
         # Only non-adjacent pairs merged: pair 0 and pair 3 (indices 0 and 3)
         # Pair 1 blocked by adjacency. Result: 5 - 2 = 3 steps
@@ -80,7 +80,7 @@ class TestPruneExcessT:
         se = torch.ones(3, 1, dtype=torch.float64) * 0.01
         er2 = torch.tensor([0.01, 0.8])  # Pair 0 below cut
 
-        _, ss_p, _ = solver.prune_excess_t(t, ss, se, er2)
+        _, ss_p, _ = solver.prune_excess_mesh(t, ss, se, er2)
 
         assert ss_p.shape[0] == 2
         # Merged: 1+2=3, remaining: 3

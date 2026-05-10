@@ -319,7 +319,7 @@ class AdaptiveQuadrature(SolverBase):
             error_ratios[keep_mask],
         )
 
-    def prune_excess_t(
+    def prune_excess_mesh(
         self, nodes, mesh_quadratures, mesh_quadrature_errors, error_ratios_2steps
     ):
         """
@@ -388,7 +388,7 @@ class AdaptiveQuadrature(SolverBase):
             integral=record["integral"].detach(),
         )
         nodes_pruned, mesh_quadratures_pruned, mesh_quadrature_errors_pruned = (
-            self.prune_excess_t(
+            self.prune_excess_mesh(
                 record["nodes"],
                 record["mesh_quadratures"],
                 record["mesh_quadrature_errors"],
