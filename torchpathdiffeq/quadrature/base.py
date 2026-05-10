@@ -167,7 +167,7 @@ class AdaptiveQuadrature(SolverBase):
         f: Callable,
         idxs_add: torch.Tensor,
         y: torch.Tensor,
-        t: torch.Tensor,
+        nodes: torch.Tensor,
         ode_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -182,27 +182,28 @@ class AdaptiveQuadrature(SolverBase):
             f: The integrand function.
             idxs_add: Indices of steps that need to be split. Shape: [n_add].
             y: Current integrand evaluations for all steps. Shape: [N, C, D].
-            t: Current time points for all steps. Shape: [N, C, T].
+            nodes: Current quadrature point positions for all steps.
+                Shape: [N, C, T].
             ode_args: Extra arguments passed to f.
 
         Returns:
-            Tuple of (y_new, t_new): integrand evaluations and time points
-            for the replacement (split) steps.
+            Tuple of (y_new, nodes_new): integrand evaluations and quadrature
+            point positions for the replacement (split) steps.
         """
 
     @abstractmethod
-    def _merge_excess_t(self, t, sum_steps, sum_step_errors, remove_idxs):
+    def _merge_excess_t(self, nodes, sum_steps, sum_step_errors, remove_idxs):
         """
         Merges neighboring time steps or removes and one time steps and extends
         its neighbor to cover the same range.
 
         Args:
-            t (Tensor): Integration time steps
+            nodes (Tensor): Per-step quadrature point positions.
             remove_idxs (Tensor): First index of neighboring steps needed to be
                 merged, or remove at given index and extend the following step
 
         Shapes:
-            t : [N, C, T]
+            nodes : [N, C, T]
             removed_idxs : [n]
         """
 
@@ -438,26 +439,26 @@ class AdaptiveQuadrature(SolverBase):
             error_ratios[keep_mask],
         )
 
-    def prune_excess_t(self, t, sum_steps, sum_step_errors, error_ratios_2steps):
+    def prune_excess_t(self, nodes, sum_steps, sum_step_errors, error_ratios_2steps):
         """
         Remove a single integration time step where
         error_ratios_2steps < remove_cut by merging two neighboring time steps,
         error_ratios_2steps corresponds to the first time step of the pair.
-        This function only alters t, where remove_fxn merges the two steps.
+        This function only alters nodes, where remove_fxn merges the two steps.
 
         Args:
-            t (Tensor): Current time evaluations in the path integral
+            nodes (Tensor): Per-step quadrature point positions.
             error_ratios_2steps (Tensor): The merged errors of neighboring time
                 steps, these indices align with the first step of the pair
-                (error_ratios_2steps[i] -> t[i])
+                (error_ratios_2steps[i] -> nodes[i])
 
         Shapes:
-            t: [N, C, T]
+            nodes: [N, C, T]
             error_ratios_2steps: [N-1]
         """
 
         if len(error_ratios_2steps) == 0:
-            return t, sum_steps, sum_step_errors
+            return nodes, sum_steps, sum_step_errors
         # Since error ratios encompasses 2 RK steps each neighboring element shares
         # a step, we cannot remove that same step twice and therefore remove the
         # first in pair of steps that it appears in
@@ -467,9 +468,9 @@ class AdaptiveQuadrature(SolverBase):
         assert not torch.any(ratio_idxs_cut[:-1] + 1 == ratio_idxs_cut[1:])
 
         if len(ratio_idxs_cut) == 0:
-            return t, sum_steps, sum_step_errors
+            return nodes, sum_steps, sum_step_errors
 
-        return self._merge_excess_t(t, sum_steps, sum_step_errors, ratio_idxs_cut)
+        return self._merge_excess_t(nodes, sum_steps, sum_step_errors, ratio_idxs_cut)
 
     def _get_optimal_mesh(
         self, record: dict[str, torch.Tensor], mesh: torch.Tensor
@@ -502,14 +503,14 @@ class AdaptiveQuadrature(SolverBase):
             sum_steps=record["sum_steps"],
             integral=record["integral"].detach(),
         )
-        t_pruned, sum_steps_pruned, sum_step_errors_pruned = self.prune_excess_t(
+        nodes_pruned, sum_steps_pruned, sum_step_errors_pruned = self.prune_excess_t(
             record["nodes"],
             record["sum_steps"],
             record["sum_step_errors"],
             error_ratios_2steps,
         )
         mesh_pruned = torch.concatenate(
-            [t_pruned[:, 0, :], mesh[-1].unsqueeze(0)], dim=0
+            [nodes_pruned[:, 0, :], mesh[-1].unsqueeze(0)], dim=0
         )
 
         # Add new t steps using converged integral value

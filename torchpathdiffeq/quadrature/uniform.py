@@ -157,7 +157,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         f: Callable,
         idxs_add: torch.Tensor,
         _y: torch.Tensor,
-        t: torch.Tensor,
+        nodes: torch.Tensor,
         ode_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -171,33 +171,33 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         Args:
             f: The integrand function f(t). Takes [N, T], returns [N, D].
             idxs_add: Indices of steps that need splitting. Shape: [R].
-            y: Current integrand evaluations (unused here, present for
+            _y: Current integrand evaluations (unused here, present for
                 interface compatibility with the variable solver). Shape: [N, C, D].
-            t: Current quadrature point positions. Shape: [N, C, T].
+            nodes: Current quadrature point positions. Shape: [N, C, T].
             ode_args: Extra arguments passed to f.
 
         Returns:
-            Tuple of (y_add, t_eval_steps) where:
+            Tuple of (y_add, nodes_new) where:
                 - y_add: Integrand values at new quadrature points.
                     Shape: [2*R, C, D] (two sub-steps per split step).
-                - t_eval_steps: New quadrature point positions.
+                - nodes_new: New quadrature point positions.
                     Shape: [2*R, C, T].
         """
-        D = t.shape[-1]
+        T = nodes.shape[-1]
         # Compute the midpoint of each failed step
-        t_mid = (t[idxs_add, -1] + t[idxs_add, 0]) / 2.0
+        t_mid = (nodes[idxs_add, -1] + nodes[idxs_add, 0]) / 2.0
         # Build left and right boundaries for the two new sub-steps
-        t_left = torch.concatenate([t[idxs_add, None, 0], t_mid[:, None]], dim=1)
-        t_right = torch.concatenate([t_mid[:, None], t[idxs_add, None, -1]], dim=1)
+        t_left = torch.concatenate([nodes[idxs_add, None, 0], t_mid[:, None]], dim=1)
+        t_right = torch.concatenate([t_mid[:, None], nodes[idxs_add, None, -1]], dim=1)
         # Place quadrature points in each sub-step and evaluate
-        t_eval_steps = self._t_step_interpolate(t_left.view(-1, D), t_right.view(-1, D))
-        y_add = f(t_eval_steps.view(-1, D), *ode_args)
+        nodes_new = self._t_step_interpolate(t_left.view(-1, T), t_right.view(-1, T))
+        y_add = f(nodes_new.view(-1, T), *ode_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
-        return y_add, t_eval_steps
+        return y_add, nodes_new
 
     def _merge_excess_t(
         self,
-        t: torch.Tensor,
+        nodes: torch.Tensor,
         sum_steps: torch.Tensor,
         sum_step_errors: torch.Tensor,
         remove_idxs: torch.Tensor,
@@ -211,7 +211,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         The integral contributions and errors of both steps are summed.
 
         Args:
-            t: Quadrature point positions for all steps. Shape: [N, C, T].
+            nodes: Quadrature point positions for all steps. Shape: [N, C, T].
             sum_steps: Integral contribution of each step. Shape: [N, D].
             sum_step_errors: Error estimate of each step. Shape: [N, D].
             remove_idxs: Indices of the first step in each pair to merge.
@@ -219,16 +219,18 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
                 Shape: [R].
 
         Returns:
-            Tuple of (t_pruned, sum_steps_pruned, sum_step_errors_pruned)
+            Tuple of (nodes_pruned, sum_steps_pruned, sum_step_errors_pruned)
             with the merged steps replacing the original pairs. Each has
             N-R entries along the first dimension.
         """
-        if len(remove_idxs) == 0 or len(t) == 1:
-            return t, sum_steps, sum_step_errors
+        if len(remove_idxs) == 0 or len(nodes) == 1:
+            return nodes, sum_steps, sum_step_errors
 
         # Create merged steps spanning from the left edge of the first step
         # to the right edge of the second step, with new c-based quadrature points
-        t_replace = self._t_step_interpolate(t[remove_idxs, 0], t[remove_idxs + 1, -1])
+        nodes_replace = self._t_step_interpolate(
+            nodes[remove_idxs, 0], nodes[remove_idxs + 1, -1]
+        )
 
         # Sum integral contributions and errors of the merged pair
         sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs + 1]
@@ -237,9 +239,9 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         )
 
         # Remove the first step of each pair from the arrays
-        remove_mask = torch.ones(len(t), device=self.device, dtype=torch.bool)
+        remove_mask = torch.ones(len(nodes), device=self.device, dtype=torch.bool)
         remove_mask[remove_idxs] = False
-        t_pruned = t[remove_mask]
+        nodes_pruned = nodes[remove_mask]
         sum_steps_pruned = sum_steps[remove_mask]
         sum_step_errors_pruned = sum_step_errors[remove_mask]
 
@@ -248,14 +250,16 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         remove_idxs_shifted = remove_idxs - torch.arange(
             len(remove_idxs), device=self.device
         )
-        t_pruned[remove_idxs_shifted] = t_replace
+        nodes_pruned[remove_idxs_shifted] = nodes_replace
         sum_steps_pruned[remove_idxs_shifted] = sum_steps_replace
         sum_step_errors_pruned[remove_idxs_shifted] = sum_step_errors_replace
 
         # Verify time ordering is preserved after merging
-        t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
-        t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-        assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
+        nodes_pruned_flat = torch.flatten(nodes_pruned, start_dim=0, end_dim=1)
+        assert torch.all(
+            nodes_pruned_flat[1:] - nodes_pruned_flat[:-1] + self.atol_assert >= 0
+        )
+        nodes_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
+        assert torch.all(nodes_flat[1:] - nodes_flat[:-1] + self.atol_assert >= 0)
 
-        return t_pruned, sum_steps_pruned, sum_step_errors_pruned
+        return nodes_pruned, sum_steps_pruned, sum_step_errors_pruned

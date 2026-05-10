@@ -117,7 +117,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         f: Callable,
         idxs_add: torch.Tensor,
         y: torch.Tensor,
-        t: torch.Tensor,
+        nodes: torch.Tensor,
         ode_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -138,20 +138,20 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
             f: The integrand function f(t). Takes [N, T], returns [N, D].
             idxs_add: Indices of steps that need splitting. Shape: [R].
             y: Current integrand evaluations, reused in sub-steps. Shape: [N, C, D].
-            t: Current quadrature point positions. Shape: [N, C, T].
+            nodes: Current quadrature point positions. Shape: [N, C, T].
             ode_args: Extra arguments passed to f.
 
         Returns:
-            Tuple of (y_add_combined, t_add_combined) where:
+            Tuple of (y_add_combined, nodes_new) where:
                 - y_add_combined: Integrand values for the new sub-steps,
                     interleaving old and new evaluations. Shape: [2*R, C, D].
-                - t_add_combined: Time positions for the new sub-steps.
+                - nodes_new: Quadrature point positions for the new sub-steps.
                     Shape: [2*R, C, T].
         """
         # Compute midpoints between each pair of consecutive quadrature points
-        t_steps_add = (t[idxs_add, 1:] + t[idxs_add, :-1]) / 2  # [n_add, C-1, 1]
+        nodes_mid = (nodes[idxs_add, 1:] + nodes[idxs_add, :-1]) / 2  # [n_add, C-1, 1]
         # Evaluate the integrand at the new midpoints
-        y_add = f(t_steps_add.view(-1, t.shape[-1]), *ode_args)
+        y_add = f(nodes_mid.view(-1, nodes.shape[-1]), *ode_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", N=len(idxs_add))
         D = y_add.shape[-1]
 
@@ -163,15 +163,15 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         select_add_idxs[select_add_idxs >= self.C] += 1
 
         # Interleave old and new time points into a combined array
-        t_add_combined = torch.nan * torch.ones(
+        nodes_new = torch.nan * torch.ones(
             (len(idxs_add), (self.C) * 2, D), dtype=self.dtype, device=self.device
         )
-        t_add_combined[:, select_prev_idxs] = t[idxs_add]
-        t_add_combined[:, select_add_idxs] = t_steps_add
+        nodes_new[:, select_prev_idxs] = nodes[idxs_add]
+        nodes_new[:, select_add_idxs] = nodes_mid
         # Duplicate the boundary point so both sub-steps share it
-        t_add_combined[:, self.C] = t_add_combined[:, self.C - 1]
+        nodes_new[:, self.C] = nodes_new[:, self.C - 1]
         # Reshape from [R, 2*C] into [2*R, C] (two sub-steps per original step)
-        t_add_combined = torch.reshape(t_add_combined, (len(idxs_add) * 2, self.C, D))
+        nodes_new = torch.reshape(nodes_new, (len(idxs_add) * 2, self.C, D))
 
         # Interleave old and new integrand values the same way
         y_add_combined = torch.nan * torch.ones(
@@ -182,11 +182,11 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         y_add_combined[:, self.C] = y_add_combined[:, self.C - 1]
         y_add_combined = torch.reshape(y_add_combined, (len(idxs_add) * 2, self.C, D))
 
-        return y_add_combined, t_add_combined
+        return y_add_combined, nodes_new
 
     def _merge_excess_t(
         self,
-        t: torch.Tensor,
+        nodes: torch.Tensor,
         sum_steps: torch.Tensor,
         sum_step_errors: torch.Tensor,
         remove_idxs: torch.Tensor,
@@ -202,7 +202,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         ``tableau_b(c)`` will recompute appropriate weights on the next evaluation.
 
         Args:
-            t: Quadrature point positions for all steps. Shape: [N, C, T].
+            nodes: Quadrature point positions for all steps. Shape: [N, C, T].
             sum_steps: Integral contribution of each step. Shape: [N, D].
             sum_step_errors: Error estimate of each step. Shape: [N, D].
             remove_idxs: Indices of the first step in each pair to merge.
@@ -210,19 +210,19 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
                 Shape: [R].
 
         Returns:
-            Tuple of (t_pruned, sum_steps_pruned, sum_step_errors_pruned)
+            Tuple of (nodes_pruned, sum_steps_pruned, sum_step_errors_pruned)
             with the merged steps replacing the original pairs. Each has
             N-R entries along the first dimension.
         """
-        if len(remove_idxs) == 0 or len(t) == 1:
-            return t, sum_steps, sum_step_errors
-        t_flat = torch.flatten(t, start_dim=0, end_dim=1)
-        assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
+        if len(remove_idxs) == 0 or len(nodes) == 1:
+            return nodes, sum_steps, sum_step_errors
+        nodes_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
+        assert torch.all(nodes_flat[1:] - nodes_flat[:-1] + self.atol_assert >= 0)
 
         # Concatenate points from both steps (skip first point of second step
         # since it equals the last point of the first step), giving 2C-1 points
         combined_steps = torch.concatenate(
-            [t[remove_idxs, :], t[remove_idxs + 1, 1:]], dim=1
+            [nodes[remove_idxs, :], nodes[remove_idxs + 1, 1:]], dim=1
         )
         sum_steps_replace = sum_steps[remove_idxs] + sum_steps[remove_idxs + 1]
         sum_step_errors_replace = (
@@ -232,27 +232,29 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         keep_idxs = torch.arange(self.C, dtype=torch.long, device=self.device) * 2
 
         # Remove the first step of each pair from the arrays
-        remove_mask = torch.ones(len(t), dtype=torch.bool, device=self.device)
+        remove_mask = torch.ones(len(nodes), dtype=torch.bool, device=self.device)
         remove_mask[remove_idxs] = False
-        t_pruned = t[remove_mask]
+        nodes_pruned = nodes[remove_mask]
         sum_steps_pruned = sum_steps[remove_mask]
         sum_step_errors_pruned = sum_step_errors[remove_mask]
 
         # Place the merged step data at the position of the second (kept) step,
         # adjusting indices to account for earlier removals shifting positions
         update_idxs = remove_idxs - torch.arange(len(remove_idxs), device=self.device)
-        t_pruned[update_idxs] = combined_steps[:, keep_idxs]
+        nodes_pruned[update_idxs] = combined_steps[:, keep_idxs]
         sum_steps_pruned[update_idxs] = sum_steps_replace
         sum_step_errors_pruned[update_idxs] = sum_step_errors_replace
 
         # Verify time ordering and step continuity after merging
-        t_pruned_flat = torch.flatten(t_pruned, start_dim=0, end_dim=1)
-        assert torch.all(t_pruned_flat[1:] - t_pruned_flat[:-1] + self.atol_assert >= 0)
+        nodes_pruned_flat = torch.flatten(nodes_pruned, start_dim=0, end_dim=1)
+        assert torch.all(
+            nodes_pruned_flat[1:] - nodes_pruned_flat[:-1] + self.atol_assert >= 0
+        )
         assert np.allclose(
-            t_pruned[:-1, -1, :],
-            t_pruned[1:, 0, :],
+            nodes_pruned[:-1, -1, :],
+            nodes_pruned[1:, 0, :],
             atol=self.atol_assert,
             rtol=self.rtol_assert,
         )
 
-        return t_pruned, sum_steps_pruned, sum_step_errors_pruned
+        return nodes_pruned, sum_steps_pruned, sum_step_errors_pruned
