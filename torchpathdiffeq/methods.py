@@ -31,6 +31,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 
 from .base import steps
@@ -169,6 +170,155 @@ _DORMAND_PRINCE_SHAMPINE = MethodClass(
 )
 
 
+# =============================================================================
+# Gauss-Kronrod Quadrature Pairs
+# =============================================================================
+# Embedded pairs (G_n, K_{2n+1}): an n-point Gauss-Legendre rule plus an
+# (n+1)-point Kronrod extension. K_{2n+1} integrates polynomials of degree
+# 3n+1 exactly; the pair's error indicator is K_{2n+1} - G_n.
+#
+# Nodes / weights tabulated to ~30 decimal digits, sourced from QUADPACK
+# (Piessens et al. 1983) and Laurie 1997 (Math. Comp. 66 #213). Truncated
+# to float64 precision below. Polynomial-exactness tests in
+# tests/test_exactness.py validate the values.
+
+
+def _build_gauss_kronrod_tableau(
+    xgk_half_with_zero: list[float],
+    wgk_half_with_zero: list[float],
+    wg_at_g_nodes: list[float],
+    g_indices_in_half: list[int],
+) -> _Tableau:
+    """Construct a Gauss-Kronrod _Tableau on [0, 1].
+
+    Inputs are tabulated for the canonical interval (-1, 1) with values
+    given for the positive half plus the center node (which is the last
+    entry of ``xgk_half_with_zero``). The full K_{2n+1} arrays are built
+    by mirroring the positive-half about 0.
+
+    Args:
+        xgk_half_with_zero: K_{2n+1} node positions in (-1, 1), positive
+            half (descending magnitude) followed by the center 0.0.
+            Length n + 1. For K21 this has 11 entries: 10 positive +
+            center.
+        wgk_half_with_zero: K_{2n+1} weights at the corresponding nodes.
+            Length n + 1.
+        wg_at_g_nodes: G_n weights at the G_n nodes (positive half
+            only). Length n // 2 (Kronrod's theorem: G_n has n nodes
+            symmetric about 0).
+        g_indices_in_half: indices into ``xgk_half_with_zero``
+            (excluding the center) where G_n nodes coincide with K
+            extension nodes. Length n // 2.
+
+    Returns:
+        _Tableau with c (K nodes mapped to [0, 1]), b (K weights, the
+        high-order estimate), and b_error (K - G_extended, where
+        G_extended has 0 at K-only nodes — the standard error
+        indicator for an embedded G-K pair).
+    """
+    xgk_half = np.array(xgk_half_with_zero, dtype=np.float64)  # [n+1]
+    wgk_half = np.array(wgk_half_with_zero, dtype=np.float64)  # [n+1]
+    wg_g = np.array(wg_at_g_nodes, dtype=np.float64)  # [n//2]
+
+    # Build full K_{2n+1} arrays in (-1, 1), ascending order:
+    #   [-x_n, ..., -x_1, 0, x_1, ..., x_n]
+    # The positive half is xgk_half[:-1] in DESCENDING magnitude order
+    # (largest first); reversed, it is in ascending order.
+    pos_x = xgk_half[:-1]  # descending magnitudes
+    pos_w = wgk_half[:-1]
+    center_w = wgk_half[-1]
+
+    # Negative side (ascending nodes from most negative): -pos_x in original
+    # order is [-largest, -second_largest, ..., -smallest], which is exactly
+    # ascending from most negative to least negative.
+    xgk_full = np.concatenate([-pos_x, [0.0], pos_x[::-1]])
+    wgk_full = np.concatenate([pos_w, [center_w], pos_w[::-1]])
+
+    # Build G_n weights extended to the K_{2n+1} grid (zero at K-only
+    # nodes). G_n has n nodes total (n/2 positive, n/2 negative,
+    # symmetric, NO center); g_indices_in_half identifies which
+    # positive-half indices coincide with G_n positions.
+    wg_extended_pos_half = np.zeros_like(pos_w)
+    for i, gi in enumerate(g_indices_in_half):
+        wg_extended_pos_half[gi] = wg_g[i]
+    wg_extended_full = np.concatenate(
+        [wg_extended_pos_half, [0.0], wg_extended_pos_half[::-1]]
+    )
+
+    # Map (-1, 1) -> [0, 1]: c = (x + 1) / 2, w = w / 2 (Jacobian).
+    c_unit = (xgk_full + 1.0) / 2.0
+    b_unit = wgk_full / 2.0
+    b_g_unit = wg_extended_full / 2.0
+
+    # The parallel solver's _RK_integral computes the per-panel step size
+    # as ``h = t[:, -1] - t[:, 0]`` and assumes ``c[0] == 0`` and
+    # ``c[-1] == 1``. Gauss-Kronrod nodes are interior (no endpoints) so
+    # without padding ``h`` would equal 0.99566... instead of 1.0 and the
+    # integral would be off by that factor. Standard fix: pad with two
+    # zero-weight nodes at 0 and 1; they're evaluated but contribute
+    # nothing to the integral or error estimate. The cost is 2 wasted
+    # ode_fxn evaluations per panel — negligible for an N+2 = 23-node rule.
+    c_padded = np.concatenate([[0.0], c_unit, [1.0]])
+    b_padded = np.concatenate([[0.0], b_unit, [0.0]])
+    b_g_padded = np.concatenate([[0.0], b_g_unit, [0.0]])
+    b_error = b_padded - b_g_padded
+
+    return _Tableau(
+        c=torch.from_numpy(c_padded).to(torch.float64),
+        b=torch.from_numpy(b_padded).to(torch.float64),
+        b_error=torch.from_numpy(b_error).to(torch.float64),
+    )
+
+
+# G10-K21 (Gauss-Kronrod 21-point). K21 polynomial exactness = 31.
+# Source: QUADPACK / Laurie 1997. Positive half-axis nodes followed by
+# the center node 0.0.
+_GK21_XGK_HALF = [
+    0.995657163025808080735527280689003,
+    0.973906528517171720077964012084452,
+    0.930157491355708226001207180059508,
+    0.865063366688984510732096688423493,
+    0.780817726586416897063717578345042,
+    0.679409568299024406234327365114874,
+    0.562757134668604683339000099272694,
+    0.433395394129247190799265943165784,
+    0.294392862701460198131126603103866,
+    0.148874338981631210884826001129720,
+    0.0,
+]
+_GK21_WGK_HALF = [
+    0.011694638867371874278064396062192,
+    0.032558162307964727478818972459390,
+    0.054755896574351996031381300244582,
+    0.075039674810919952767043140916190,
+    0.093125454583697605535065465083366,
+    0.109387158802297641899210590325805,
+    0.123491976262065851077958109831074,
+    0.134709217311473325928054001771707,
+    0.142775938577060080797094273138717,
+    0.147739104901338491374841515972068,
+    0.149445554002916905664936468389821,
+]
+# G10 weights at G10 positive nodes. G10 nodes coincide with K21 nodes
+# at indices 1, 3, 5, 7, 9 of the positive half (the "G" rows in the
+# Patterson-style Kronrod construction).
+_GK21_WG = [
+    0.066671344308688137593568809893332,
+    0.149451349150580593145776339657697,
+    0.219086362515982043995534934228163,
+    0.269266719309996355091226921569469,
+    0.295524224714752870173892994651338,
+]
+_GK21_G_INDICES = [1, 3, 5, 7, 9]
+
+_GAUSS_KRONROD_21 = MethodClass(
+    order=32,  # K21 polynomial exactness 31, global convergence rate 32
+    tableau=_build_gauss_kronrod_tableau(
+        _GK21_XGK_HALF, _GK21_WGK_HALF, _GK21_WG, _GK21_G_INDICES
+    ),
+)
+
+
 # Registry of uniform-sampling methods, keyed by name.
 # These are singleton instances since their tableaux are constant.
 UNIFORM_METHODS = {
@@ -176,6 +326,7 @@ UNIFORM_METHODS = {
     "fehlberg2": _FEHLBERG2,
     "bosh3": _BOGACKI_SHAMPINE,
     "dopri5": _DORMAND_PRINCE_SHAMPINE,
+    "gk21": _GAUSS_KRONROD_21,
 }
 
 

@@ -538,5 +538,140 @@
       2.2841174571447065e-07
     ],
     "n_optimal_mesh": 8833
+  },
+  "gk21|damped_sine|loose": {
+    "integral": [
+      0.04125535091261351
+    ],
+    "integral_error": [
+      4.269368675825866e-18
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|damped_sine|medium": {
+    "integral": [
+      0.04125535091261351
+    ],
+    "integral_error": [
+      4.269368675825866e-18
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|damped_sine|tight": {
+    "integral": [
+      0.04125535091261351
+    ],
+    "integral_error": [
+      4.269368675825866e-18
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|exp|loose": {
+    "integral": [
+      29.482631820515323
+    ],
+    "integral_error": [
+      3.3483090216631006e-16
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|exp|medium": {
+    "integral": [
+      29.482631820515323
+    ],
+    "integral_error": [
+      3.3483090216631006e-16
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|exp|tight": {
+    "integral": [
+      29.482631820515323
+    ],
+    "integral_error": [
+      3.3483090216631006e-16
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|sine_squared|loose": {
+    "integral": [
+      0.4936791264608876
+    ],
+    "integral_error": [
+      1.704043764092669e-12
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|sine_squared|medium": {
+    "integral": [
+      0.4936791264608876
+    ],
+    "integral_error": [
+      1.704043764092669e-12
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|sine_squared|tight": {
+    "integral": [
+      0.4936791264608876
+    ],
+    "integral_error": [
+      1.704043764092669e-12
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t_squared|loose": {
+    "integral": [
+      0.3333333333333333
+    ],
+    "integral_error": [
+      -1.3181855406719341e-17
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t_squared|medium": {
+    "integral": [
+      0.3333333333333333
+    ],
+    "integral_error": [
+      -1.3181855406719341e-17
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t_squared|tight": {
+    "integral": [
+      0.3333333333333333
+    ],
+    "integral_error": [
+      -1.3181855406719341e-17
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t|loose": {
+    "integral": [
+      0.5
+    ],
+    "integral_error": [
+      -4.884759247794814e-18
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t|medium": {
+    "integral": [
+      0.5
+    ],
+    "integral_error": [
+      -4.884759247794814e-18
+    ],
+    "n_optimal_mesh": 7
+  },
+  "gk21|t|tight": {
+    "integral": [
+      0.5
+    ],
+    "integral_error": [
+      -4.884759247794814e-18
+    ],
+    "n_optimal_mesh": 7
   }
 }

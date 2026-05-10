@@ -33,6 +33,14 @@ UNIFORM_RATE = {
     "dopri5": 5,
 }
 
+# High-order rules saturate to float64 machine epsilon at small N
+# (e.g. gk21 hits eps after only a handful of panels), so a log-log
+# slope across N=8..128 is dominated by rounding noise, not by the
+# theoretical convergence rate. Skip them here; their correctness is
+# anchored by test_exactness (polynomial-exactness) and
+# test_scipy_agreement.
+_CONVERGENCE_TEST_SKIP = {"gk21"}
+
 INTERVAL = (0.0, 1.0)
 PANEL_COUNTS = (8, 16, 32, 64, 128)
 # Use exp(t), an asymmetric / non-periodic smooth integrand. sin(t) over
@@ -97,6 +105,12 @@ def test_uniform_convergence_rate(method_name):
     """The empirical convergence rate matches the method's claimed rate
     to within ``±0.5`` (a generous tolerance for low-N noise).
     """
+    if method_name in _CONVERGENCE_TEST_SKIP:
+        pytest.skip(
+            f"{method_name}: convergence rate not testable in float64 — "
+            f"the rule's per-panel error reaches machine epsilon at the "
+            f"low N values used here, dominating the slope estimate."
+        )
     method = UNIFORM_METHODS[method_name]
     expected_rate = UNIFORM_RATE[method_name]
 

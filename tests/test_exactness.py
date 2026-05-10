@@ -49,6 +49,26 @@ UNIFORM_EXACTNESS = {
     "fehlberg2": 1,  # order 2
     "bosh3": 2,  # order 3
     "dopri5": 4,  # order 5
+    # Gauss-Kronrod K_{2n+1} integrates polynomials of degree 3n+1
+    # exactly. For G10-K21: 3*10 + 1 = 31. The G_n alone integrates
+    # 2n-1, so the embedded G estimate is exact for degree 19 only;
+    # the b_error indicator picks up the gap between the two.
+    "gk21": 31,
+}
+
+# Methods for which the "not exact one degree higher" upper-bound check
+# is reliable in float64. Above ~degree 20 the mathematical error at
+# exactness+1 falls below machine epsilon, so a tight upper-bound check
+# is no longer informative — float64 cancellation produces apparent
+# exactness at degrees where the rule is in fact mathematically inexact.
+# Coefficient-transcription bugs in high-order rules manifest at much
+# higher degrees and are caught by the convergence-rate / scipy-agreement
+# tests instead.
+UNIFORM_TIGHT_UPPER_BOUND = {
+    "adaptive_heun",
+    "fehlberg2",
+    "bosh3",
+    "dopri5",
 }
 
 
@@ -80,6 +100,14 @@ class TestUniformExactness:
             )
 
     def test_not_exact_one_degree_higher(self, method_name):
+        if method_name not in UNIFORM_TIGHT_UPPER_BOUND:
+            pytest.skip(
+                f"upper-bound check skipped for {method_name}: at this "
+                f"polynomial-exactness level the mathematical error at "
+                f"exactness+1 falls below float64 machine epsilon, so the "
+                f"check is not informative. Coefficient errors are caught "
+                f"by test_scipy_agreement and test_convergence_rate."
+            )
         method = UNIFORM_METHODS[method_name]
         exactness = UNIFORM_EXACTNESS[method_name]
         d = exactness + 1

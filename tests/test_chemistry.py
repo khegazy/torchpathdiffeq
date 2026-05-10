@@ -24,8 +24,18 @@ from torchpathdiffeq import (
 # Map variable method names to their serial equivalents
 _SERIAL_METHOD_MAP = {"generic3": "bosh3"}
 
+# Methods native to this library that have no torchdiffeq equivalent (and so
+# can't be parallel-vs-serial cross-validated). Phase 3 of the quadrature
+# alignment plan removes the serial path entirely, at which point this test
+# is rewritten as parallel-vs-scipy and the exclusion list goes away.
+_TORCHDIFFEQ_INCOMPATIBLE = {"gk21"}
 
-@pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
+_SERIAL_TESTABLE_METHODS = [
+    m for m in UNIFORM_METHOD_NAMES if m not in _TORCHDIFFEQ_INCOMPATIBLE
+]
+
+
+@pytest.mark.parametrize("method_name", _SERIAL_TESTABLE_METHODS)
 def test_wolf_schlegel_parallel_vs_serial(method_name):
     """Parallel integration of Wolf-Schlegel matches serial within tolerance."""
     torch.manual_seed(SEED)
