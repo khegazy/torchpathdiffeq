@@ -142,3 +142,41 @@ def test_y0_offsets_the_result_per_documentation():
     assert abs(result.integral.item() - 6.0) < 1e-9, (
         f"got {result.integral.item()}; expected 6.0 = y0 + integral"
     )
+
+
+def test_y0_difference_equals_y0_for_same_integral():
+    """Running the same integral with y0=0 and y0=c must differ by exactly c.
+
+    This is the core contract of y0: it is an additive offset on the
+    integral, independent of the integrand or mesh. Comparing the two
+    runs against each other (rather than against an analytic value)
+    keeps the test sensitive to additive-offset bugs while remaining
+    robust to small adaptive-mesh numerical drift.
+    """
+    common = {
+        "f": torch.sin,
+        "method": "gk21",
+        "atol": 1e-10,
+        "rtol": 1e-10,
+        "mesh_init": torch.tensor([0.0], dtype=torch.float64),
+        "mesh_final": torch.tensor([math.pi], dtype=torch.float64),
+    }
+    offset = torch.tensor([7.5], dtype=torch.float64)
+
+    result_zero = integrate(**common, y0=torch.zeros(1, dtype=torch.float64))
+    result_offset = integrate(**common, y0=offset)
+
+    # Sanity: the zero-y0 run should match the analytic ∫_0^π sin t dt = 2.
+    assert abs(result_zero.integral.item() - 2.0) < 1e-9
+
+    # The two runs must differ by exactly y0.
+    diff = result_offset.integral.item() - result_zero.integral.item()
+    assert abs(diff - offset.item()) < 1e-9, (
+        f"y0=0 -> {result_zero.integral.item()}, "
+        f"y0={offset.item()} -> {result_offset.integral.item()}, "
+        f"diff={diff}; expected diff == {offset.item()}"
+    )
+
+    # y0 field on the result should echo what was passed in.
+    assert result_offset.y0 is not None
+    assert torch.allclose(result_offset.y0, offset)
