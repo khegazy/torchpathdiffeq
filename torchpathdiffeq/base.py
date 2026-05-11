@@ -194,19 +194,97 @@ class SolverBase(ABC, DistributedEnvironment):
 
         self._set_dtype(dtype)
 
-    def _infer_training(
-        self, is_training: bool | None = None, f: Callable | None = None
-    ):
-        """Set solver training mode from explicit flag or f's module state.
+    # -------------------------------------------------------------------------------- #
+    #                                 ABSTRACT METHODS                                 #
+    # -------------------------------------------------------------------------------- #
 
-        Priority: explicit is_training > f.training (if nn.Module) > False.
+    @abstractmethod
+    def _set_solver_dtype(self, dtype: torch.dtype) -> None:
         """
-        if is_training is not None:
-            self.training = is_training
-        elif f is None or not isinstance(f, torch.nn.Module):
-            self.training = False
-        else:
-            self.training = f.training
+        Update solver-specific state when dtype changes.
+
+        Called by ``_set_dtype()`` after converting base tensors. Subclasses
+        must implement this to convert their own tensors (e.g., RK tableaux).
+
+        Args:
+            dtype: The new dtype to convert to.
+        """
+
+    @abstractmethod
+    def _calculate_integral(
+        self,
+        t: torch.Tensor,
+        y: torch.Tensor,
+        y0: torch.Tensor | None,
+    ) -> MethodOutput:
+        """
+        Compute the integral and error estimate for a batch of integration steps.
+
+        This is the core numerical method that subclasses must implement.
+        Given time points and integrand evaluations at those points, applies
+        the specific RK quadrature rule to produce integral contributions
+        and error estimates for each step.
+
+        Args:
+            t: Time points for each step, with C quadrature points per step.
+                Shape: [N, C, T] where N=steps, C=quadrature points, T=time dims.
+            y: Integrand evaluations at the time points in t.
+                Shape: [N, C, D] where D=output dimensionality of the integrand.
+            y0: Starting value for the integral accumulator. Shape: [D].
+
+        Returns:
+            MethodOutput containing the integral, error, per-step contributions,
+            per-step errors, and step sizes.
+        """
+
+    @abstractmethod
+    def integrate(
+        self,
+        f: Callable,
+        y0: torch.Tensor | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
+        mesh: torch.Tensor | None = None,
+        ode_args: tuple = (),
+        is_training: bool | None = None,
+    ) -> IntegrationResult:
+        """
+        Perform numerical path integration of f from mesh_init to mesh_final.
+
+        This is the main entry point that users call. Subclasses implement
+        the actual integration logic (serial or parallel adaptive).
+
+        The integrand f should be a function of time only: f(t) -> Tensor.
+        It does NOT depend on accumulated state y (this is numerical quadrature,
+        not ODE solving). This independence between steps is what enables
+        parallel evaluation.
+
+        Args:
+            f: The integrand function. Takes time points of shape [N, T]
+                and returns values of shape [N, D].
+            y0: Initial value of the integral (accumulator start). Shape: [D].
+            mesh_init: Lower integration bound. Shape: [T].
+            mesh_final: Upper integration bound. Shape: [T].
+            t: Optional initial time points. If provided, these serve as the
+                starting mesh for adaptive refinement. Shape depends on solver:
+                [N, T] for step barriers, [N, C, T] for full quadrature points.
+            ode_args: Extra arguments passed to f after the time tensor.
+            is_training: If True, enables training mode (gradient computation
+                via take_gradient). If False, disables it. If None, inferred
+                from whether f is an nn.Module in training mode.
+
+        Returns:
+            IntegrationResult containing the computed integral, error estimates,
+            time mesh, and optimization diagnostics.
+
+        Note:
+            Handling of the input time ``t`` differs between parallel and serial
+            solvers. See each solver's documentation for details.
+        """
+
+    # -------------------------------------------------------------------------------- #
+    #                         DATA TYPE AND VARIABLE HANDLING                          #
+    # -------------------------------------------------------------------------------- #
 
     def _set_dtype(self, dtype: torch.dtype) -> None:
         """
@@ -292,18 +370,6 @@ class SolverBase(ABC, DistributedEnvironment):
         elif mesh_final is not None:
             self._set_dtype(mesh_final.dtype)
 
-    @abstractmethod
-    def _set_solver_dtype(self, dtype: torch.dtype) -> None:
-        """
-        Update solver-specific state when dtype changes.
-
-        Called by ``_set_dtype()`` after converting base tensors. Subclasses
-        must implement this to convert their own tensors (e.g., RK tableaux).
-
-        Args:
-            dtype: The new dtype to convert to.
-        """
-
     def _check_variables(
         self,
         f: Callable | None = None,
@@ -345,6 +411,24 @@ class SolverBase(ABC, DistributedEnvironment):
 
         return f, mesh_init, mesh_final, y0
 
+    # -------------------------------------------------------------------------------- #
+    #                         TRAINING AND EVALUATION TOGGLING                         #
+    # -------------------------------------------------------------------------------- #
+
+    def _infer_training(
+        self, is_training: bool | None = None, f: Callable | None = None
+    ):
+        """Set solver training mode from explicit flag or f's module state.
+
+        Priority: explicit is_training > f.training (if nn.Module) > False.
+        """
+        if is_training is not None:
+            self.training = is_training
+        elif f is None or not isinstance(f, torch.nn.Module):
+            self.training = False
+        else:
+            self.training = f.training
+
     def train(self) -> None:
         """Enable training mode (gradients will be computed during integration)."""
         self.training = True
@@ -352,33 +436,6 @@ class SolverBase(ABC, DistributedEnvironment):
     def eval(self) -> None:
         """Enable evaluation mode (no gradient computation during integration)."""
         self.training = False
-
-    @abstractmethod
-    def _calculate_integral(
-        self,
-        t: torch.Tensor,
-        y: torch.Tensor,
-        y0: torch.Tensor | None,
-    ) -> MethodOutput:
-        """
-        Compute the integral and error estimate for a batch of integration steps.
-
-        This is the core numerical method that subclasses must implement.
-        Given time points and integrand evaluations at those points, applies
-        the specific RK quadrature rule to produce integral contributions
-        and error estimates for each step.
-
-        Args:
-            t: Time points for each step, with C quadrature points per step.
-                Shape: [N, C, T] where N=steps, C=quadrature points, T=time dims.
-            y: Integrand evaluations at the time points in t.
-                Shape: [N, C, D] where D=output dimensionality of the integrand.
-            y0: Starting value for the integral accumulator. Shape: [D].
-
-        Returns:
-            MethodOutput containing the integral, error, per-step contributions,
-            per-step errors, and step sizes.
-        """
 
     def _integral_loss(
         self,
@@ -401,50 +458,9 @@ class SolverBase(ABC, DistributedEnvironment):
         """
         return result.integral
 
-    @abstractmethod
-    def integrate(
-        self,
-        f: Callable,
-        y0: torch.Tensor | None = None,
-        mesh_init: torch.Tensor | None = None,
-        mesh_final: torch.Tensor | None = None,
-        mesh: torch.Tensor | None = None,
-        ode_args: tuple = (),
-        is_training: bool | None = None,
-    ) -> IntegrationResult:
-        """
-        Perform numerical path integration of f from mesh_init to mesh_final.
-
-        This is the main entry point that users call. Subclasses implement
-        the actual integration logic (serial or parallel adaptive).
-
-        The integrand f should be a function of time only: f(t) -> Tensor.
-        It does NOT depend on accumulated state y (this is numerical quadrature,
-        not ODE solving). This independence between steps is what enables
-        parallel evaluation.
-
-        Args:
-            f: The integrand function. Takes time points of shape [N, T]
-                and returns values of shape [N, D].
-            y0: Initial value of the integral (accumulator start). Shape: [D].
-            mesh_init: Lower integration bound. Shape: [T].
-            mesh_final: Upper integration bound. Shape: [T].
-            t: Optional initial time points. If provided, these serve as the
-                starting mesh for adaptive refinement. Shape depends on solver:
-                [N, T] for step barriers, [N, C, T] for full quadrature points.
-            ode_args: Extra arguments passed to f after the time tensor.
-            is_training: If True, enables training mode (gradient computation
-                via take_gradient). If False, disables it. If None, inferred
-                from whether f is an nn.Module in training mode.
-
-        Returns:
-            IntegrationResult containing the computed integral, error estimates,
-            time mesh, and optimization diagnostics.
-
-        Note:
-            Handling of the input time ``t`` differs between parallel and serial
-            solvers. See each solver's documentation for details.
-        """
+    # -------------------------------------------------------------------------------- #
+    #                                    DESTRUCTOR                                    #
+    # -------------------------------------------------------------------------------- #
 
     def __del__(self) -> None:
         """Destructor that cleans up the distributed process group."""
