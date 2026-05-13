@@ -15,7 +15,7 @@ from _helpers import (
     assert_time_ordering,
 )
 
-from torchpathdiffeq import RKParallelUniformAdaptiveStepsizeSolver
+from torchpathdiffeq import UniformAdaptiveQuadrature
 
 
 def _integrand(t):
@@ -35,9 +35,9 @@ class TestStepAdding:
     """Starting from a coarse mesh, verify the solver adds steps to meet tolerance."""
 
     def _make_solver(self, method_name):
-        return RKParallelUniformAdaptiveStepsizeSolver(
+        return UniformAdaptiveQuadrature(
             method=method_name,
-            ode_fxn=_integrand,
+            f=_integrand,
             atol=ATOL_MED,
             rtol=RTOL_MED,
         )
@@ -46,24 +46,24 @@ class TestStepAdding:
         """A minimal mesh (Cm1+1 points) should grow after integration."""
         solver = self._make_solver(method_name)
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-        assert len(t) < len(output.t_optimal), (
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
+        assert len(t) < len(output.mesh_optimal), (
             f"{method_name}: coarse mesh ({len(t)} points) should produce "
-            f"a larger optimal mesh, but got {len(output.t_optimal)} points"
+            f"a larger optimal mesh, but got {len(output.mesh_optimal)} points"
         )
 
     def test_time_ordering_after_refinement(self, method_name):
         """Time points remain ordered after adaptive refinement."""
         solver = self._make_solver(method_name)
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
         assert_time_ordering(output)
 
     def test_step_continuity_after_refinement(self, method_name):
         """Consecutive steps share boundaries after adaptive refinement."""
         solver = self._make_solver(method_name)
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
         assert_step_continuity(output)
 
     def test_mesh_stabilizes_after_repeated_refinement(self, method_name):
@@ -71,18 +71,18 @@ class TestStepAdding:
         solver = self._make_solver(method_name)
         t = torch.linspace(0, 1.0, solver.Cm1 + 1).unsqueeze(1)
         for idx in range(3):
-            output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-            t_optimal = output.t_optimal
+            output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
+            t_optimal = output.mesh_optimal
             if idx == 0:
                 # First iteration: mesh must grow
-                assert len(t) < len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should grow from {len(t)} points"
+                assert len(t) < len(t_optimal), (
+                    f"Iteration {idx}: mesh should grow from {len(t)} points"
+                )
             else:
                 # Subsequent iterations: mesh should not shrink
-                assert len(t) <= len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should not shrink from {len(t)} points"
+                assert len(t) <= len(t_optimal), (
+                    f"Iteration {idx}: mesh should not shrink from {len(t)} points"
+                )
             t = t_optimal
 
 
@@ -95,9 +95,9 @@ class TestStepRemoval:
     """Starting from an over-resolved mesh, verify the solver prunes excess steps."""
 
     def _make_solver(self):
-        return RKParallelUniformAdaptiveStepsizeSolver(
+        return UniformAdaptiveQuadrature(
             method="dopri5",
-            ode_fxn=_integrand,
+            f=_integrand,
             atol=ATOL_LOOSE,
             rtol=RTOL_LOOSE,
         )
@@ -106,24 +106,24 @@ class TestStepRemoval:
         """A very dense mesh (997 points) should be pruned after integration."""
         solver = self._make_solver()
         t = torch.linspace(0, 1, 997).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-        assert len(t) > len(output.t_optimal), (
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
+        assert len(t) > len(output.mesh_optimal), (
             f"Dense mesh ({len(t)} points) should be pruned, "
-            f"but got {len(output.t_optimal)} points"
+            f"but got {len(output.mesh_optimal)} points"
         )
 
     def test_time_ordering_after_pruning(self):
         """Time points remain ordered after pruning."""
         solver = self._make_solver()
         t = torch.linspace(0, 1, 997).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
         assert_time_ordering(output)
 
     def test_step_continuity_after_pruning(self):
         """Consecutive steps share boundaries after pruning."""
         solver = self._make_solver()
         t = torch.linspace(0, 1, 997).unsqueeze(1)
-        output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
+        output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
         assert_step_continuity(output)
 
     def test_mesh_stabilizes_after_repeated_pruning(self):
@@ -131,16 +131,16 @@ class TestStepRemoval:
         solver = self._make_solver()
         t = torch.linspace(0, 1, 997).unsqueeze(1)
         for idx in range(3):
-            output = solver.integrate(t=t, t_init=T_INIT, t_final=T_FINAL)
-            t_optimal = output.t_optimal
+            output = solver.integrate(mesh=t, mesh_init=T_INIT, mesh_final=T_FINAL)
+            t_optimal = output.mesh_optimal
             if idx == 0:
                 # First iteration: mesh must shrink
-                assert len(t) > len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should shrink from {len(t)} points"
+                assert len(t) > len(t_optimal), (
+                    f"Iteration {idx}: mesh should shrink from {len(t)} points"
+                )
             else:
                 # Subsequent iterations: mesh should not grow
-                assert len(t) >= len(
-                    t_optimal
-                ), f"Iteration {idx}: mesh should not grow from {len(t)} points"
+                assert len(t) >= len(t_optimal), (
+                    f"Iteration {idx}: mesh should not grow from {len(t)} points"
+                )
             t = t_optimal

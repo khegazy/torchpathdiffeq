@@ -4,6 +4,7 @@ import logging
 import time
 
 import torch
+from torchdiffeq import odeint
 
 import torchpathdiffeq as tpdiffeq
 from torchpathdiffeq.examples import (
@@ -33,8 +34,8 @@ device = "cuda"
 method = "dopri5"
 atol = 1e-9
 rtol = 1e-7
-t_init = torch.tensor([0], dtype=torch.float64, device=device)
-t_final = torch.tensor([1], dtype=torch.float64, device=device)
+mesh_init = torch.tensor([0], dtype=torch.float64, device=device)
+mesh_final = torch.tensor([1], dtype=torch.float64, device=device)
 y0 = torch.tensor([0], dtype=torch.float64, device=device)
 
 ########################
@@ -46,23 +47,25 @@ integrands = [wolf_schlegel, damped_sine, sine_squared, exp, t_squared]
 ###################################
 #####  torchdiffeq Speed Test #####
 ###################################
+# Compare against torchdiffeq.odeint directly. The serial wrapper that
+# previously lived in this library was removed in Phase 3 of the
+# quadrature alignment plan; calling torchdiffeq directly is a more
+# honest comparison anyway.
 logger.info("torchdiffeq")
+t_eval = torch.stack([mesh_init, mesh_final]).reshape(-1)
 tdiffeq_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
-    integrator = tpdiffeq.SerialAdaptiveStepsizeSolver(
-        ode_fxn=ode_fxn,
-        method=method,
-        atol=atol,
-        rtol=rtol,
-        t_init=t_init,
-        t_final=t_final,
-        y0=y0,
-        device=device,
-    )
     for _ in range(n_runs):
         t0 = time.time()
-        _ = integrator.integrate()
+        _ = odeint(
+            f,
+            y0=y0,
+            mesh=t_eval,
+            method=method,
+            atol=atol,
+            rtol=rtol,
+        )
         total_time = total_time + (time.time() - t0)
     tdiffeq_results.append(total_time / n_runs)
 
@@ -73,19 +76,18 @@ for ode_fxn in integrands:
 
 logger.info("torchpathdiffeq api")
 tpdiffeq_api_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
     for _ in range(n_runs):
         t0 = time.time()
-        _ = tpdiffeq.ode_path_integral(
-            ode_fxn=ode_fxn,
+        _ = tpdiffeq.integrate(
+            f=f,
             method=method,
-            computation="parallel",
             sampling="uniform",
             atol=atol,
             rtol=rtol,
-            t_init=t_init,
-            t_final=t_final,
+            mesh_init=mesh_init,
+            mesh_final=mesh_final,
             y0=y0,
             device=device,
         )
@@ -95,16 +97,16 @@ for ode_fxn in integrands:
 
 logger.info("torchpathdiffeq integrator")
 tpdiffeq_int_results = []
-for ode_fxn in integrands:
+for f in integrands:
     total_time = 0
-    integrator = tpdiffeq.get_parallel_RK_solver(
+    integrator = tpdiffeq.adaptive_quadrature(
         sampling_type="uniform",
-        ode_fxn=ode_fxn,
+        f=f,
         method=method,
         atol=atol,
         rtol=rtol,
-        t_init=t_init,
-        t_final=t_final,
+        mesh_init=mesh_init,
+        mesh_final=mesh_final,
         y0=y0,
         device=device,
     )

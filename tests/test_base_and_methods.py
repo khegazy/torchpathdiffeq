@@ -30,7 +30,7 @@ from torchpathdiffeq.examples import (
 from torchpathdiffeq.examples import (
     t as t_fn,
 )
-from torchpathdiffeq.methods import _VARIABLE_THIRD_ORDER, _get_method
+from torchpathdiffeq.methods import _get_method, _Interpolatory3Variable
 
 # ---------------------------------------------------------------------------
 # get_sampling_type
@@ -70,29 +70,24 @@ class TestTableau:
 
     def test_to_dtype_converts(self):
         """Converting float64 -> float32 changes all tensor dtypes."""
-        method = UNIFORM_METHODS["bosh3"]
+        # Clone the singleton so this test cannot pollute it for
+        # downstream tests (float32 round-trip is precision-lossy).
+        method = UNIFORM_METHODS["bosh3"].clone()
         original_b = method.tableau.b.clone()
-        try:
-            method.to_dtype(torch.float32)
-            assert method.tableau.b.dtype == torch.float32
-            assert method.tableau.c.dtype == torch.float32
-            assert method.tableau.b_error.dtype == torch.float32
-        finally:
-            method.to_dtype(torch.float64)
+        method.to_dtype(torch.float32)
+        assert method.tableau.b.dtype == torch.float32
+        assert method.tableau.c.dtype == torch.float32
+        assert method.tableau.b_error.dtype == torch.float32
+        method.to_dtype(torch.float64)
         assert torch.allclose(method.tableau.b, original_b)
 
     def test_to_dtype_preserves_values(self):
         """Round-tripping float64 -> float32 -> float64 preserves values within float32 precision."""
-        method = UNIFORM_METHODS["dopri5"]
-        # Ensure we start from a known float64 state
-        method.to_dtype(torch.float64)
+        method = UNIFORM_METHODS["dopri5"].clone()
         original_b = method.tableau.b.clone()
-        try:
-            method.to_dtype(torch.float32)
-            method.to_dtype(torch.float64)
-            assert torch.allclose(method.tableau.b, original_b, atol=1e-7)
-        finally:
-            method.to_dtype(torch.float64)
+        method.to_dtype(torch.float32)
+        method.to_dtype(torch.float64)
+        assert torch.allclose(method.tableau.b, original_b, atol=1e-7)
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +121,7 @@ class TestGetMethod:
 
 
 # ---------------------------------------------------------------------------
-# _VARIABLE_THIRD_ORDER weight computation
+# _Interpolatory3Variable weight computation
 # ---------------------------------------------------------------------------
 
 
@@ -135,37 +130,37 @@ class TestVariableThirdOrder:
 
     def test_b0_at_half(self):
         """b0(0.5) = 0.5 - 1/(6*0.5) = 1/6."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._b0(a), torch.tensor([1.0 / 6]))
 
     def test_ba_at_half(self):
         """ba(0.5) = 1/(6*0.5*0.5) = 2/3."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._ba(a), torch.tensor([2.0 / 3]))
 
     def test_b1_at_half(self):
         """b1(0.5) = (2-1.5)/(6*0.5) = 1/6."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a = torch.tensor([0.5])
         assert torch.allclose(method._b1(a), torch.tensor([1.0 / 6]))
 
     def test_weights_sum_to_one_sweep(self):
         """b0 + ba + b1 = 1 for many values of a in (0, 1)."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         a_vals = torch.linspace(0.01, 0.99, 50)
         b0 = method._b0(a_vals)
         ba = method._ba(a_vals)
         b1 = method._b1(a_vals)
         sums = b0 + ba + b1
-        assert torch.allclose(
-            sums, torch.ones_like(sums), atol=1e-12
-        ), f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
+        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-12), (
+            f"Max deviation from 1: {torch.max(torch.abs(sums - 1)).item():.2e}"
+        )
 
     def test_tableau_b_shape(self):
         """tableau_b returns correct shapes for N=5, C=3."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         c = torch.rand(5, 3, 1)
         # Ensure c[:,0,:] = 0 and c[:,2,:] = 1 (endpoints)
         c[:, 0, :] = 0.0
@@ -180,7 +175,7 @@ class TestVariableThirdOrder:
 
     def test_tableau_b_midpoint_weights(self):
         """With a=0.5 (midpoint), weights should be [1/6, 2/3, 1/6] (Simpson's rule)."""
-        method = _VARIABLE_THIRD_ORDER()
+        method = _Interpolatory3Variable()
         c = torch.tensor([[[0.0], [0.5], [1.0]]])  # [1, 3, 1]
         b, _ = method.tableau_b(c)
         expected = torch.tensor([[1.0 / 6, 2.0 / 3, 1.0 / 6]])
@@ -258,6 +253,6 @@ class TestExampleSolutions:
     def test_solution_consistency_with_ode_dict(self, integrand_name):
         """Each ODE_dict solution function gives a finite result on [0, 1]."""
         _, solution_fxn, _ = ODE_dict[integrand_name]
-        result = solution_fxn(t_init=T_INIT, t_final=T_FINAL)
+        result = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         assert torch.isfinite(result).all(), f"{integrand_name} solution is not finite"
         assert result.numel() > 0, f"{integrand_name} solution is empty"

@@ -1,0 +1,1433 @@
+"""
+Parallel adaptive-stepsize integration solvers.
+
+This module contains the core parallel integration engine. Unlike traditional
+sequential integrators that must evaluate one step at a time (because each step
+depends on the previous result), this solver evaluates many integration steps
+simultaneously in a batch. This is possible because the integrand f(x) depends
+only on x, not on accumulated state -- each step's contribution to the integral
+is independent and can be computed in parallel.
+
+The integration domain [mesh_init, mesh_final] is divided by "barriers" into steps.
+Within each step, C quadrature points are placed (per the RK tableau). The
+solver adaptively refines this mesh: steps with too much error are split into
+smaller steps; consecutive steps with very little error are merged.
+
+Key concepts:
+
+- **mesh**: Boundary points dividing [mesh_init, mesh_final] into steps.
+  Shape: [M, T] where M is the number of barriers. Step i spans from
+  barrier[i] to barrier[i+1].
+
+- **mesh_trackers**: Boolean array of length M. True means the step starting
+  at that barrier still needs to be evaluated (or re-evaluated after splitting).
+
+- **Batching**: When there are more steps than fit in GPU memory, the solver
+  processes them in batches. Batch size is determined dynamically by measuring
+  the memory footprint of the integrand function.
+
+Class hierarchy (defined here):
+
+- ``AdaptiveQuadrature``: Abstract base with the main integrate()
+  loop, adaptive step management, error computation, and memory management.
+
+- ``_UniformAdaptiveQuadratureBase``: Concrete subclass for methods with
+  fixed tableau c values (quadrature points at constant fractional positions).
+
+- ``_VariableAdaptiveQuadratureBase``: Concrete subclass for methods
+  where quadrature points can be at arbitrary positions within each step.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import warnings
+from abc import abstractmethod
+from typing import TYPE_CHECKING
+
+import psutil
+import torch
+
+from torchpathdiffeq.base import SolverBase
+from torchpathdiffeq.results import IntegrationResult, MethodOutput
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class AdaptiveQuadrature(SolverBase):
+    """
+    Base class for parallel adaptive-stepsize numerical integration.
+
+    Implements the main integration loop that:
+    1. Initializes a mesh of quadrature step barriers across the integration domain.
+    2. Evaluates the integrand at quadrature points within each step (in batches).
+    3. Computes integral contributions and error estimates per step using RK methods.
+    4. Adaptively refines the mesh: splits high-error steps, merges low-error pairs.
+    5. Repeats until all steps meet the error tolerance.
+    6. Computes an optimal mesh for potential reuse.
+
+    Subclasses must implement:
+        - ``_compute_nodes(mesh_left, mesh_right)``: Place quadrature points within steps.
+        - ``_evaluate_adaptive_nodes(...)``: Evaluate integrand at refined points.
+        - ``_merge_excess_nodes(...)``: Merge consecutive low-error steps.
+        - ``_calculate_integral(t, y, y0)``: Compute RK integral + error for a batch.
+
+    Attributes:
+        remove_cut: Error ratio threshold for merging steps (default 0.1).
+        max_batch: Maximum number of integrand evaluations per batch. If None,
+            determined dynamically from available memory.
+        total_mem_usage: Fraction of total memory to use (0 < value <= 1).
+        max_path_change: If set, stops integration when the fraction of failing
+            steps exceeds this value (used with pre-specified meshes).
+        use_absolute_error_ratio: If True, uses the total integral for error
+            normalization. If False, uses cumulative integral up to each step.
+        error_calc_idx: If set, only this output dimension is used for error
+            computation (useful for multi-dimensional integrands where only
+            one dimension should drive adaptivity).
+        method: The RK method object (set by subclass).
+        order: Convergence order of the RK method (set by subclass).
+        C: Number of quadrature points per integration step (set by subclass).
+        Cm1: C - 1, used frequently in index calculations (set by subclass).
+    """
+
+    def __init__(
+        self,
+        remove_cut: float = 0.1,
+        max_batch: int | None = None,
+        total_mem_usage: float = 0.9,
+        max_path_change: float | None = None,
+        use_absolute_error_ratio: bool = True,
+        error_calc_idx: int | None = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        """
+        Initialize the parallel adaptive solver.
+
+        Args:
+            remove_cut: Error ratio threshold below which consecutive step pairs
+                are merged. Must be < 1. Lower values keep more steps (more
+                conservative). Default: 0.1.
+            max_batch: Maximum number of integrand evaluations per batch. If None,
+                batch size is determined dynamically based on available memory.
+            total_mem_usage: Fraction of total device memory the solver may use
+                for batched evaluations (0 < value <= 1). Default: 0.9.
+            max_path_change: If set, and the user provides a mesh (mesh is not
+                None), integration stops early if this fraction of steps fail
+                the error tolerance. Useful for iterative optimization.
+            use_absolute_error_ratio: If True, error ratios use the total
+                (converging) integral value. If False, uses cumulative sum up
+                to each step. Default: True.
+            error_calc_idx: If set, only this dimension index of the integrand
+                output is used for error-based step decisions.
+            *args: Forwarded to SolverBase (and DistributedEnvironment).
+            **kwargs: Forwarded to SolverBase (and DistributedEnvironment).
+        """
+
+        super().__init__(*args, **kwargs)
+        assert remove_cut < 1.0
+        self.remove_cut = remove_cut
+        self.max_batch = max_batch
+        self.max_path_change = max_path_change
+        self.use_absolute_error_ratio = use_absolute_error_ratio
+
+        self.method = None
+        self.order = None
+        self.C = None
+        self.Cm1 = None
+        self.error_calc_idx = error_calc_idx
+        self.total_mem_usage = total_mem_usage
+
+    # -------------------------------------------------------------------------------- #
+    #                                 ABSTRACT METHODS                                 #
+    # -------------------------------------------------------------------------------- #
+
+    @abstractmethod
+    def _evaluate_adaptive_nodes(
+        self,
+        f: Callable,
+        idxs_add: torch.Tensor,
+        y: torch.Tensor,
+        nodes: torch.Tensor,
+        ode_args: tuple = (),
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Evaluate the integrand at new points created by splitting failed steps.
+
+        When steps fail the error tolerance, they are split into two smaller
+        steps. This method evaluates the integrand at the new quadrature points
+        needed for the smaller steps. The implementation differs between uniform
+        and variable solvers.
+
+        Args:
+            f: The integrand function.
+            idxs_add: Indices of steps that need to be split. Shape: [n_add].
+            y: Current integrand evaluations for all steps. Shape: [N, C, D].
+            nodes: Current quadrature point positions for all steps.
+                Shape: [N, C, T].
+            ode_args: Extra arguments passed to f.
+
+        Returns:
+            Tuple of (y_new, nodes_new): integrand evaluations and quadrature
+            point positions for the replacement (split) steps.
+        """
+
+    @abstractmethod
+    def _merge_excess_nodes(
+        self, nodes, mesh_quadratures, mesh_quadrature_errors, remove_idxs
+    ):
+        """
+        Merges neighboring quadrature steps or removes and one quadtrature steps
+        and extends its neighbor to cover the same range.
+
+        Args:
+            nodes (Tensor): Per-step quadrature point positions.
+            remove_idxs (Tensor): First index of neighboring steps needed to be
+                merged, or remove at given index and extend the following step
+
+        Shapes:
+            nodes : [N, C, T]
+            removed_idxs : [n]
+        """
+
+    # -------------------------------------------------------------------------------- #
+    #                            PRIMARY INTEGRATION METHOD                            #
+    # -------------------------------------------------------------------------------- #
+
+    def integrate(
+        self,
+        f: Callable | None = None,
+        y0: torch.Tensor | None = None,
+        mesh: torch.Tensor | None = None,
+        mesh_init: torch.Tensor | None = None,
+        mesh_final: torch.Tensor | None = None,
+        N_init_steps: int = 13,
+        ode_args: tuple = (),
+        take_gradient: bool = False,
+        is_training: bool | None = None,
+        total_mem_usage: float | None = None,
+        loss_fxn: Callable | None = None,
+        max_batch: int | None = None,
+        reuse_mesh: bool = False,
+        random_initial_mesh: bool = True,
+    ) -> IntegrationResult:
+        """
+        Perform parallel adaptive numerical integration of f.
+
+        This is the main integration loop. It divides [mesh_init, mesh_final] into
+        steps using barrier points, evaluates the integrand in parallel batches,
+        and adaptively refines the mesh until all steps meet the error tolerance.
+
+        The algorithm:
+        1. Initialize barriers (random mesh or user-provided).
+        2. While unevaluated steps remain:
+           a. Select a batch of steps that fits in memory.
+           b. Place C quadrature points in each step.
+           c. Evaluate the integrand at all points in parallel.
+           d. Compute integral contributions and error estimates via RK.
+           e. Accept steps with error_ratio < 1; split the rest.
+           f. Record accepted results.
+        3. Optimize the final mesh (prune over-resolved + refine under-resolved).
+        4. Return the integral, error, and diagnostics.
+
+        Args:
+            f: The integrand f(t). Takes shape [N, T], returns [N, D].
+                If None, uses the function from construction.
+            y0: Initial integral accumulator value. Shape: [D].
+            mesh: Optional initial step barriers. If provided, these are the
+                starting mesh. If None, a random mesh is generated. Shape: [N, T].
+            mesh_init: Lower integration bound. Shape: [T].
+            mesh_final: Upper integration bound. Shape: [T].
+            N_init_steps: Approximate number of initial steps when mesh is None.
+                The actual count is ~sqrt(N_init_steps) segments with
+                ~sqrt(N_init_steps)+1 random sub-barriers each.
+            ode_args: Extra arguments passed to f.
+            take_gradient: If True, calls loss.backward() after each batch
+                to compute gradients through the integration.
+            is_training: If True, enables training mode so that take_gradient
+                is activated. If False, disables gradient computation regardless
+                of take_gradient. If None, inferred from whether f is an
+                nn.Module in training mode.
+            total_mem_usage: Fraction of memory to use for batching. Overrides
+                the value from construction if provided.
+            loss_fxn: Custom loss function. Takes an IntegrationResult, returns a
+                scalar tensor. If None, uses the integral value itself.
+            max_batch: Maximum evaluations per batch. Overrides dynamic memory
+                calculation if provided.
+            random_initial_mesh: When True (default), the fresh initial
+                mesh is built with random sub-barrier offsets within each
+                top-level segment. Randomness is essential here, not
+                cosmetic: when the integrand has features at uniformly-
+                spaced positions (e.g. zeros of ``sin(2*pi*k*t)``,
+                polynomial extrema), an evenly-spaced mesh can align
+                with those features in a way the adaptive controller
+                cannot recover from. Random offsets break this
+                alignment. Set to False only for debugging or for
+                integrands you have separately verified to be safe
+                against uniform-mesh aliasing; reproducibility is
+                better achieved via ``torch.manual_seed`` before the
+                call.
+            reuse_mesh: When True, seed the integration from the optimal mesh
+                cached by the previous successful call (warm start). Default
+                False. The cached mesh is the *optimal* mesh produced after
+                prune-and-refine on the previous call; reusing it across
+                training-loop iterations where the integrand changes only
+                slightly between calls saves substantial adaptive-refinement
+                cost. If reuse_mesh=True but no cache exists, falls back to
+                a fresh initial mesh and emits a warning. If the cached mesh
+                was produced for a different integrand (id mismatch), emits
+                a warning but proceeds. Ignored when ``mesh`` is provided
+                explicitly (the explicit ``mesh`` always takes precedence).
+
+        Returns:
+            IntegrationResult with the computed integral, error estimates, the
+            optimized mesh (mesh_optimal), per-step nodes, and diagnostics.
+
+        Note:
+            If mesh is provided, the solver uses these as initial barriers.
+            Steps may be split or merged, but the bounds [mesh[0], mesh[-1]]
+            are preserved. If mesh is None and reuse_mesh is False (default),
+            a random initial mesh is generated in [mesh_init, mesh_final].
+        """
+        # Set dtype based on input
+        self.set_dtype_by_input(mesh=mesh, mesh_init=mesh_init, mesh_final=mesh_init)
+
+        # If mesh is given set mesh_init and mesh_final, else use input, else use saved values
+        mesh_init, mesh_final = self._setup_integral_bounds(mesh, mesh_init, mesh_final)
+
+        # Replace max_batch if default it given
+        max_batch = self.max_batch if max_batch is None else max_batch
+
+        # Get variables or populate with default values, send to correct device
+        f, mesh_init, mesh_final, y0 = self._check_variables(
+            f, mesh_init, mesh_final, y0, is_training
+        )
+        total_mem_usage = (
+            self.total_mem_usage if total_mem_usage is None else total_mem_usage
+        )
+        MEM_ERROR = "total_mem_usage is a ratio and must be 0 < total_mem_usage <= 1"
+        assert total_mem_usage <= 1.0, MEM_ERROR
+        assert total_mem_usage > 0, MEM_ERROR
+        # Has memory been benchmarked for this integrand yet? Skip the
+        # benchmark if id(f) matches what we've already measured.
+        # Using id() avoids the lambda-collision bug present in earlier
+        # versions which compared f.__name__ (every lambda has
+        # __name__ == "<lambda>").
+        same_ode_fxn = (
+            self.previous_ode_fxn_id is not None and id(f) == self.previous_ode_fxn_id
+        )
+        # Benchmark memory footprint on first call with a new integrand
+        if not same_ode_fxn and max_batch is None:
+            self._setup_memory_checks(f, mesh_init, ode_args=ode_args)
+        assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
+            "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        )
+        loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
+
+        # Make sure f exists and provides the correct output
+        assert f is not None, "Must specify f or pass it during class initialization."
+        test_output = f(
+            torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *ode_args
+        )
+        assert len(test_output.shape) >= 2
+        del test_output
+
+        # Decide initial mesh:
+        #   - explicit mesh passed in: use it (always takes precedence);
+        #   - reuse_mesh=True with a populated cache: warm-start from the
+        #     cached optimal mesh, snapping its endpoints to [mesh_init, mesh_final];
+        #   - otherwise: generate a fresh random initial mesh.
+        mesh, mesh_trackers, mesh_is_given = self._setup_initial_mesh(
+            mesh,
+            mesh_init,
+            mesh_final,
+            reuse_mesh,
+            same_ode_fxn,
+            random_initial_mesh,
+            N_init_steps,
+        )
+        nodes, y = None, None
+
+        record = {}
+        # === Main integration loop ===
+        # Continues until all steps have been evaluated and accepted
+        # (mesh_trackers[i] == False for all i)
+        while torch.any(mesh_trackers):
+            # Determine how many steps fit in one batch based on memory
+            if max_batch is not None:
+                max_steps = max_batch // self.C
+            else:
+                max_steps = int(self._get_max_ode_evals(total_mem_usage) // self.C)
+
+            if y is not None:
+                assert max_steps >= len(y), f"{max_steps}  {len(y)}"
+
+            # --- Step 1: Select a batch of unevaluated steps ---
+            # Find barrier indices where mesh_trackers is True, take up to max_steps
+            step_idxs = torch.arange(len(mesh), device=self.device)
+            step_idxs = step_idxs[mesh_trackers]
+            step_idxs = step_idxs[:max_steps]
+            # Place C quadrature points within each selected step
+            nodes = self._compute_nodes(mesh[step_idxs], mesh[step_idxs + 1])
+            t_flat = torch.flatten(nodes, start_dim=0, end_dim=1)
+            assert torch.all(t_flat[1:] - t_flat[:-1] + self.atol_assert >= 0)
+            error_ratios = None
+
+            # --- Step 2: Evaluate the integrand at all quadrature points ---
+            # Flatten [N, C, T] -> [N*C, T] for batch evaluation, then reshape back
+            N, C, _T = nodes.shape
+            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *ode_args)
+            y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
+
+            # --- Step 3: Compute integral contributions via RK formula ---
+            t0 = time.time()
+            method_output = self._calculate_integral(
+                nodes,
+                y_step_eval,
+                y0=torch.zeros(1, device=self.device, dtype=self.dtype),
+            )
+            if len(record) == 0:
+                # First batch: integral is just this batch's contribution
+                current_integral = method_output.integral.detach()
+                all_mesh_quadratures = method_output.mesh_quadratures.detach()
+                cum_mesh_quadratures = torch.cumsum(all_mesh_quadratures, 0)
+            else:
+                # Subsequent batches: add to previously recorded integral
+                current_integral = record["integral"] + method_output.integral.detach()
+                # Merge new steps into the sorted record to compute cumulative sums
+                idxs_keep, idxs_input = self._get_sorted_indices(
+                    record["nodes"][:, 0, 0], nodes[:, 0, 0]
+                )
+                all_mesh_quadratures = self._insert_sorted_results(
+                    record["mesh_quadratures"],
+                    idxs_keep,
+                    method_output.mesh_quadratures,
+                    idxs_input,
+                )
+                cum_mesh_quadratures = torch.cumsum(all_mesh_quadratures, 0)[idxs_input]
+            if self.speed_logger:
+                self.speed_logger.debug("calc integrals: %s", time.time() - t0)
+
+            # --- Step 4: Compute error ratios for each step ---
+            t0 = time.time()
+            error_ratios, error_ratios_2steps = self._compute_error_ratios(
+                mesh_quadrature_errors=method_output.mesh_quadrature_errors,
+                cum_mesh_quadratures=cum_mesh_quadratures,
+                integral=current_integral,
+            )
+            if self.speed_logger:
+                self.speed_logger.debug("calculate errors: %s", time.time() - t0)
+            assert len(y_step_eval) == len(error_ratios)
+            assert len(y_step_eval) - 1 == len(error_ratios_2steps), (
+                f" y: {y_step_eval.shape} | ratios: {error_ratios_2steps.shape} | nodes: {nodes.shape}"
+            )
+            logger.debug("error_ratios: %s", error_ratios)
+            logger.debug("error_ratios_2steps: %s", error_ratios_2steps)
+
+            # Early exit if too many steps fail and user-provided mesh is given.
+            # Bug B6 fix: previously returned bare `None`, breaking the
+            # documented return-type contract. Now returns an
+            # IntegrationResult with converged=False populated from the
+            # most-recent batch's intermediate result so callers can
+            # inspect partial state instead of having to special-case
+            # None.
+            if mesh_is_given and self.max_path_change is not None:
+                fail_ratio = torch.sum(error_ratios > 1.0).to(float) / len(error_ratios)
+                if fail_ratio >= self.max_path_change:
+                    logger.warning(
+                        "%.1f%% of integration steps failed error requirements, "
+                        "which is greater than max_path_change (%s), now exiting.",
+                        fail_ratio * 100,
+                        self.max_path_change,
+                    )
+                    return IntegrationResult(
+                        integral=method_output.integral,
+                        integral_error=method_output.integral_error,
+                        mesh_optimal=mesh,
+                        mesh_init=mesh_init,
+                        mesh_final=mesh_final,
+                        nodes=nodes,
+                        h=method_output.h,
+                        y=y_step_eval,
+                        mesh_quadratures=method_output.mesh_quadratures,
+                        mesh_quadrature_errors=torch.abs(
+                            method_output.mesh_quadrature_errors
+                        ),
+                        error_ratios=error_ratios,
+                        loss=None,
+                        gradient_taken=take_gradient,
+                        y0=y0,
+                        converged=False,
+                    )
+
+            # --- Step 5: Adaptive refinement ---
+            # Split steps with error_ratio >= 1, keep steps with error_ratio < 1,
+            # and update barriers/trackers accordingly
+            (
+                method_output,
+                y_step_eval,
+                nodes,
+                mesh,
+                mesh_trackers,
+                error_ratios,
+            ) = self._adaptively_increase_mesh(
+                method_output=method_output,
+                error_ratios=error_ratios,
+                y_step_eval=y_step_eval,
+                nodes=nodes,
+                mesh=mesh,
+                mesh_idxs=step_idxs,
+                mesh_trackers=mesh_trackers,
+            )
+            # Verify barrier ordering after adaptive refinement
+            mesh_diff = mesh[1:, 0] - mesh[:-1, 0]
+            assert torch.all(mesh_diff + self.atol_assert > 0) or torch.all(
+                mesh_diff - self.atol_assert < 0
+            )
+
+            # --- Step 6: Record accepted results and handle gradients ---
+            if nodes.shape[0] > 0:
+                take_gradient = take_gradient or (
+                    self.training and (torch.any(mesh_trackers) or take_gradient)
+                )
+                intermediate_results = IntegrationResult(
+                    integral=method_output.integral,
+                    integral_error=method_output.integral_error,
+                    nodes=nodes,
+                    h=method_output.h,
+                    y=y_step_eval,
+                    mesh_quadratures=method_output.mesh_quadratures,
+                    mesh_quadrature_errors=torch.abs(
+                        method_output.mesh_quadrature_errors
+                    ),
+                    error_ratios=error_ratios,
+                    loss=None,
+                    gradient_taken=take_gradient,
+                    mesh_init=mesh_init,
+                    mesh_final=mesh_final,
+                    y0=0,
+                )
+
+                # TODO make sure growing string loss center is a time not the number of evals because eval number is meaningless here.
+                # Compute loss and accumulate into the record
+                loss = loss_fxn(intermediate_results)
+                intermediate_results.loss = loss
+                record = self._record_results(
+                    record=record,
+                    take_gradient=take_gradient,
+                    results=intermediate_results,
+                )
+
+                # Backpropagate gradients through the integration if requested
+                if take_gradient and loss.requires_grad:
+                    loss.backward()
+            del y_step_eval
+
+        # === Post-convergence: sort results and optimize the mesh ===
+        record = self._sort_record(record)
+        # Prune over-resolved steps and refine under-resolved ones
+        mesh_optimal = self._get_optimal_mesh(record, mesh)
+        # Cache results for warm-starting subsequent calls with the same integrand
+        self.mesh_previous = mesh_optimal
+        self.previous_ode_fxn_id = id(f)
+
+        return IntegrationResult(
+            integral=record["integral"] + y0,
+            integral_error=record["integral_error"],
+            mesh_optimal=mesh_optimal,
+            mesh_init=mesh_init,
+            mesh_final=mesh_final,
+            nodes=record["nodes"],
+            h=record["h"],
+            y=record["y"],
+            mesh_quadratures=record["mesh_quadratures"],
+            mesh_quadrature_errors=torch.abs(record["mesh_quadrature_errors"]),
+            error_ratios=record["error_ratios"],
+            loss=record["loss"],
+            gradient_taken=take_gradient,
+            y0=y0,
+        )
+
+    # -------------------------------------------------------------------------------- #
+    #                             ADAPTIVE MESH REFINEMENT                             #
+    # -------------------------------------------------------------------------------- #
+
+    def _adaptively_increase_mesh(
+        self,
+        method_output: MethodOutput | None,
+        error_ratios: torch.Tensor,
+        y_step_eval: torch.Tensor | None,
+        nodes: torch.Tensor | None,
+        mesh: torch.Tensor,
+        mesh_idxs: torch.Tensor,
+        mesh_trackers: torch.Tensor,
+    ) -> tuple[
+        MethodOutput | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """
+        Accept accurate steps and split inaccurate ones.
+
+        This is the core adaptive refinement operation. For each evaluated step:
+        - If error_ratio < 1.0: ACCEPT the step. Mark it as done in mesh_trackers.
+          Keep its integral contribution.
+        - If error_ratio >= 1.0: REJECT the step. Insert a new midpoint barrier
+          between its start and end, splitting it into two smaller steps. These
+          new steps will be evaluated in the next iteration.
+
+        The midpoint barrier is placed at the average of the two neighboring
+        barriers: mesh_new = (mesh_left + mesh_right) / 2.
+
+        Args:
+            method_output: RK results from the current batch (may be None when
+                called during post-convergence optimization). If present, rejected
+                steps are removed from it.
+            error_ratios: Per-step error ratios. Shape: [N_batch].
+            y_step_eval: Integrand evaluations for current batch. Shape: [N_batch, C, D].
+            nodes: Quadrature points for current batch. Shape: [N_batch, C, T].
+            mesh: All barrier positions. Shape: [M, T].
+            mesh_idxs: Indices into mesh for the steps
+                in the current batch. Shape: [N_batch].
+            mesh_trackers: Boolean array tracking which steps need evaluation.
+                Shape: [M].
+
+        Returns:
+            Tuple of (method_output, y_step_eval, nodes,
+            mesh_new, mesh_trackers_new, error_ratios_kept):
+                - method_output: Updated with rejected steps removed.
+                - y_step_eval: Kept evaluations only.
+                - nodes: Kept quadrature points only.
+                - mesh_new: Barriers with new midpoints inserted.
+                - mesh_trackers_new: Updated tracker with new steps marked True.
+                - error_ratios_kept: Error ratios for accepted steps only.
+        """
+        # Steps that pass the error tolerance are accepted (done)
+        keep_mask = error_ratios < 1.0
+        mesh_trackers[mesh_idxs[keep_mask]] = False
+
+        # Steps that fail the error tolerance need to be split
+        remove_mask = error_ratios >= 1.0
+        N_t_add = torch.sum(remove_mask)
+        # Allocate new barriers array with room for inserted midpoints
+        mesh_new = torch.nan * torch.ones(
+            (N_t_add + len(mesh), mesh.shape[-1]),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        mesh_trackers_new = torch.ones(
+            N_t_add + len(mesh), dtype=bool, device=self.device
+        )
+
+        # Transfer existing barriers to their new positions in the expanded array.
+        # Each rejected step causes a +1 offset for all subsequent barriers
+        # (because a midpoint is being inserted). idx_offset tracks this shift.
+        idx_offset = torch.zeros(len(mesh), dtype=torch.long, device=self.device)
+        idx_offset[mesh_idxs[remove_mask] + 1] = 1
+        idx_offset = torch.cumsum(idx_offset, dim=0)
+        idxs_transfer = idx_offset + torch.arange(len(mesh), device=self.device)
+        mesh_new[idxs_transfer] = mesh.clone()
+        mesh_trackers_new[idxs_transfer] = mesh_trackers.clone()
+
+        # Insert new midpoint barriers between the start and end of rejected steps.
+        # The midpoint is placed at (left_barrier + right_barrier) / 2.
+        idxs_new = (
+            mesh_idxs[remove_mask] + torch.arange(N_t_add, device=self.device) + 1
+        )
+        t_add_barriers = 0.5 * (mesh_new[idxs_new - 1] + mesh_new[idxs_new + 1])
+        mesh_new[idxs_new] = t_add_barriers
+        assert torch.sum(torch.isnan(mesh_new)) == 0
+        assert len(idxs_new) + len(idxs_transfer) == len(mesh_new)
+
+        if method_output is not None:
+            method_output.mesh_quadratures = method_output.mesh_quadratures[keep_mask]
+            method_output.mesh_quadrature_errors = method_output.mesh_quadrature_errors[
+                keep_mask
+            ]
+            method_output.h = method_output.h[keep_mask]
+            method_output.integral = torch.sum(method_output.mesh_quadratures, 0)
+            method_output.integral_error = torch.sum(
+                method_output.mesh_quadrature_errors, 0
+            )
+        if y_step_eval is not None:
+            y_step_eval = y_step_eval[keep_mask]
+        if nodes is not None:
+            nodes = nodes[keep_mask]
+        return (
+            method_output,
+            y_step_eval,
+            nodes,
+            mesh_new,
+            mesh_trackers_new,
+            error_ratios[keep_mask],
+        )
+
+    def _prune_excess_mesh(
+        self, nodes, mesh_quadratures, mesh_quadrature_errors, error_ratios_2steps
+    ):
+        """
+        Remove a single integration mesh step where
+        error_ratios_2steps < remove_cut by merging two neighboring mesh steps,
+        error_ratios_2steps corresponds to the first mesh step of the pair. This
+        function only alters nodes, where remove_fxn merges the two mesh steps.
+
+        Args:
+            nodes (Tensor): Per-step quadrature point positions.
+            error_ratios_2steps (Tensor): The merged errors of neighboring mesh
+                steps, these indices align with the first step of the pair
+                (error_ratios_2steps[i] -> nodes[i])
+
+        Shapes:
+            nodes: [N, C, T]
+            error_ratios_2steps: [N-1]
+        """
+
+        if len(error_ratios_2steps) == 0:
+            return nodes, mesh_quadratures, mesh_quadrature_errors
+        # Since error ratios encompasses 2 RK steps each neighboring element shares
+        # a step, we cannot remove that same step twice and therefore remove the
+        # first in pair of steps that it appears in
+        ratio_idxs_cut = torch.where(
+            self._rec_remove(error_ratios_2steps < self.remove_cut)
+        )[0]  # Index for first interval of 2
+        assert not torch.any(ratio_idxs_cut[:-1] + 1 == ratio_idxs_cut[1:])
+
+        if len(ratio_idxs_cut) == 0:
+            return nodes, mesh_quadratures, mesh_quadrature_errors
+
+        return self._merge_excess_nodes(
+            nodes, mesh_quadratures, mesh_quadrature_errors, ratio_idxs_cut
+        )
+
+    def _get_optimal_mesh(
+        self, record: dict[str, torch.Tensor], mesh: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute an optimized mesh from the converged integration results.
+
+        After the integration loop converges, this method produces a refined
+        mesh that can be reused for subsequent integrations of the same function.
+        It does two things:
+        1. Prunes: merges consecutive step pairs whose combined error ratio
+           is below remove_cut (they were over-resolved).
+        2. Adds: inserts midpoints for steps that still have high error ratios
+           relative to the final integral value.
+
+        This produces a mesh tailored to the difficulty of the integrand at
+        different positions along the integration domain.
+
+        Args:
+            record: Dictionary of converged results including 't', 'mesh_quadratures',
+                'mesh_quadrature_errors', and 'integral'.
+            mesh: Current barrier positions. Shape: [M, T].
+
+        Returns:
+            Optimized barrier positions. Shape: [M_opt, T].
+        """
+        # Prune steps with excess accuracy (over-resolved regions)
+        _, error_ratios_2steps = self._compute_error_ratios(
+            mesh_quadrature_errors=record["mesh_quadrature_errors"],
+            mesh_quadratures=record["mesh_quadratures"],
+            integral=record["integral"].detach(),
+        )
+        nodes_pruned, mesh_quadratures_pruned, mesh_quadrature_errors_pruned = (
+            self._prune_excess_mesh(
+                record["nodes"],
+                record["mesh_quadratures"],
+                record["mesh_quadrature_errors"],
+                error_ratios_2steps,
+            )
+        )
+        mesh_pruned = torch.concatenate(
+            [nodes_pruned[:, 0, :], mesh[-1].unsqueeze(0)], dim=0
+        )
+
+        # Add new t steps using converged integral value
+        error_ratios, error_ratios_2steps = self._compute_error_ratios(
+            mesh_quadrature_errors=mesh_quadrature_errors_pruned,
+            mesh_quadratures=mesh_quadratures_pruned,
+            integral=record["integral"].detach(),
+        )
+        adaptive_step = self._adaptively_increase_mesh(
+            method_output=None,
+            error_ratios=error_ratios,
+            y_step_eval=None,
+            nodes=None,
+            mesh=mesh_pruned,
+            mesh_idxs=torch.arange(len(mesh_pruned) - 1, device=self.device),
+            mesh_trackers=torch.zeros(len(mesh_pruned), dtype=bool, device=self.device),
+        )
+        _, _, _, mesh_optimal, _, _ = adaptive_step
+
+        return mesh_optimal
+
+    def _rec_remove(self, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Ensure no two adjacent True values exist in a boolean mask.
+
+        When merging step pairs, two adjacent steps cannot both be merged
+        (they share a boundary). This recursively resolves conflicts by
+        keeping the first flagged step in any adjacent pair and un-flagging
+        the second.
+
+        Example: [True, True, False, True] -> [True, False, False, True]
+
+        Args:
+            mask: Boolean mask where True = flagged for removal. Shape: [N].
+
+        Returns:
+            Modified mask with no adjacent True values. Shape: [N].
+        """
+
+        mask2 = mask[:-1] * mask[1:]
+        if not torch.any(mask2):
+            return mask
+
+        # Must keep the first integration step
+        if mask2[0]:
+            mask[1] = False
+
+        # Mask is too small to remove points
+        if len(mask) <= 2:
+            return mask
+
+        return self._rec_remove(
+            torch.concatenate(
+                [mask[:2], mask2[1:] * mask[:-2] + (~mask2[1:]) * mask[2:]]
+            )
+        )
+
+        # if torch.any(mask2):
+        #     if mask2[0]:
+        #         mask[1] = False
+        #     if len(mask) > 2:
+        #         return self._rec_remove(torch.concatenate(
+        #             [
+        #                 mask[:2],
+        #                 mask2[1:]*mask[:-2] + (~mask2[1:])*mask[2:]
+        #             ]
+        #         ))
+        #     else:
+        #         return mask
+        # else:
+        #     return mask
+
+    def _setup_integral_bounds(self, mesh, mesh_init, mesh_final):
+        if mesh is not None:
+            assert len(mesh.shape) == 2
+            mesh = mesh.to(self.dtype).to(self.device)
+            if mesh_init is not None:
+                mesh_init = mesh_init.to(self.dtype).to(self.device)
+                assert torch.allclose(
+                    mesh[0], mesh_init, atol=self.atol_assert, rtol=self.rtol_assert
+                )
+            if mesh_final is not None:
+                mesh_final = mesh_final.to(self.dtype).to(self.device)
+                assert torch.allclose(
+                    mesh[-1], mesh_final, atol=self.atol_assert, rtol=self.rtol_assert
+                )
+            mesh_init = mesh[0]
+            mesh_final = mesh[-1]
+            assert mesh_init < mesh_final, (
+                "Integrator requires mesh_init < mesh_final, consider switching them and multiplying the integral by -1. Please also consider effects to your f."
+            )
+        else:
+            mesh_init = self.mesh_init if mesh_init is None else mesh_init
+            mesh_final = self.mesh_final if mesh_final is None else mesh_final
+        mesh_init = mesh_init.to(self.dtype).to(self.device)
+        mesh_final = mesh_final.to(self.dtype).to(self.device)
+
+        assert mesh_init < mesh_final, (
+            "Integrator requires mesh_init < mesh_final, consider switching them and multiplying the integral by -1. Please also consider the effects your loss function if one is provided."
+        )
+        return mesh_init, mesh_final
+
+    def _setup_initial_mesh(
+        self,
+        mesh,
+        mesh_init,
+        mesh_final,
+        reuse_mesh,
+        same_ode_fxn,
+        random_initial_mesh,
+        N_init_steps,
+    ):
+        if mesh is not None:
+            mesh_is_given = True
+        elif reuse_mesh and self.mesh_previous is not None:
+            mesh_is_given = False
+            # Warn if the cached mesh was produced for a different integrand;
+            # the user has opted into reuse but we should flag the mismatch.
+            if not same_ode_fxn:
+                warnings.warn(
+                    "reuse_mesh=True but f id differs from the cached "
+                    "integrand; warm-started mesh may be poorly tuned for "
+                    "this f.",
+                    stacklevel=2,
+                )
+            # Filter cached barriers to within the new [mesh_init, mesh_final].
+            # TODO: CHECK THIS PART WITH MULTI DIM T
+            mask = (self.mesh_previous[:, 0] <= mesh_final[0]) & (
+                self.mesh_previous[:, 0] >= mesh_init[0]
+            )
+            mesh = self.mesh_previous[mask]
+            # Ensure the warm-started mesh starts at mesh_init.
+            if len(mesh) == 0 or not torch.all(mesh[0] == mesh_init):
+                mesh = torch.concatenate([mesh_init.unsqueeze(0), mesh], dim=0)
+            # Ensure the warm-started mesh ends at mesh_final.
+            # (Bug B1 fix: previously concatenated mesh_init here, producing a
+            # non-monotone mesh whenever the cached endpoint did not match
+            # the new mesh_final.)
+            if not torch.all(mesh[-1] == mesh_final):
+                mesh = torch.concatenate([mesh, mesh_final.unsqueeze(0)], dim=0)
+        else:
+            mesh_is_given = False
+            if reuse_mesh:
+                warnings.warn(
+                    "reuse_mesh=True but no cached mesh is available "
+                    "(first call, or after solver state was reset). "
+                    "Falling back to a fresh initial mesh.",
+                    stacklevel=2,
+                )
+            # Generate a fresh initial mesh of barriers across [mesh_init, mesh_final].
+            # Layout: sqrt(N_init_steps) evenly-spaced top-level segments, each
+            # subdivided into sqrt(N_init_steps)+1 sub-barriers. The total
+            # barrier count is ~N_init_steps. Sub-barriers are placed
+            # randomly (default) or uniformly within each segment.
+            N_even_t = torch.sqrt(torch.tensor(N_init_steps, dtype=torch.float)).to(
+                torch.int
+            )
+            dt = (mesh_final - mesh_init) / N_even_t
+            mesh = (
+                mesh_init
+                + dt * torch.arange(N_even_t, device=self.device)[:, None, None]
+            )  # TODO: this assumes the mesh is 1d
+
+            n_sub = N_even_t + 1  # sub-barriers per segment
+            if random_initial_mesh:
+                # Random sub-barrier offsets within each segment, sorted.
+                # Default. Random offsets break alignment between the
+                # mesh and any uniformly-spaced features of the
+                # integrand (e.g. zeros of a sinusoid, polynomial
+                # extrema): on such integrands, a uniform mesh can
+                # produce step errors the adaptive controller cannot
+                # recover from. For deterministic reproducibility,
+                # call ``torch.manual_seed`` before integrate().
+                random_ts = dt * torch.rand((N_even_t, n_sub, 1), device=self.device)
+                random_ts = torch.sort(random_ts, dim=1)[0]
+                mesh = mesh + random_ts
+            else:
+                # Deterministic uniformly-spaced sub-barriers within
+                # each segment. Available for debugging and for
+                # integrands separately verified safe against uniform-
+                # mesh aliasing; not the default because uniform meshes
+                # fail to integrate certain test cases due to feature
+                # alignment.
+                #
+                # Sub-barrier offsets are in [0, dt) — excluding dt to
+                # avoid duplicating the top-level segment boundary
+                # (segment k's last sub-barrier would otherwise
+                # coincide with segment k+1's first sub-barrier and
+                # the strict monotonicity assertion below would fail).
+                offsets = (
+                    dt
+                    * torch.arange(n_sub, dtype=self.dtype, device=self.device)
+                    / n_sub
+                )
+                mesh = mesh + offsets[None, :, None]
+            # Enforce exact start and end points
+            mesh[0] += mesh_init - mesh[0, 0]
+            mesh[-1] += mesh_final - mesh[-1, -1]
+            # Flatten segments into a single sorted barrier array
+            mesh = torch.flatten(mesh, start_dim=0, end_dim=1)
+            mesh[0] = mesh_init
+            mesh[-1] = mesh_final
+            assert torch.all(mesh[1:] - mesh[:-1] > 0)
+        mesh_trackers = torch.ones(len(mesh), device=self.device).to(bool)
+        mesh_trackers[-1] = False  # mesh_final cannot be a step starting point
+
+        return mesh, mesh_trackers, mesh_is_given
+
+    # -------------------------------------------------------------------------------- #
+    #                           ADAPTIVE ERROR CALCULATIONS                            #
+    # -------------------------------------------------------------------------------- #
+
+    def _error_norm(self, error: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the RMS (root-mean-square) norm of per-dimension errors.
+
+        For multi-dimensional integrands (D > 1), reduces the error across
+        all output dimensions to a single scalar per step using the L2 norm.
+        For 1D integrands, this is equivalent to torch.abs().
+
+        Args:
+            error: Per-dimension error values. Shape: [N, D] or [N].
+
+        Returns:
+            RMS error per step. Shape: [N].
+        """
+        return torch.sqrt(torch.mean(error**2, -1))
+
+    def _compute_error_ratios(
+        self,
+        mesh_quadrature_errors,
+        mesh_quadratures=None,
+        cum_mesh_quadratures=None,
+        integral=None,
+    ):
+        """
+        Computes the ratio of the difference between chosen method of order p
+        and a method of order p-1, and the error tolerance determined by atol,
+        rtol, and the value of the integral. Integration steps of order p-1
+        use the same points.
+
+        Args:
+            mesh_quadrature_errors (Tensor): Similar to mesh_quadratures but evaluated with
+                and error tableau made of the differences between a method of
+                order p and one of order p-1
+            mesh_quadratures (Tensor): Sum over all t and y evaluations in a single
+                RK step multiplied by the total delta t for that step (h)
+            Integral (Tensor): The evaluated path integral
+
+        Shapes:
+            mesh_quadrature_errors: [N, D]
+            mesh_quadratures: [N, D]
+            integral: [D]
+        """
+        if self.error_calc_idx is not None:
+            mesh_quadrature_errors = mesh_quadrature_errors[
+                :, self.error_calc_idx, None
+            ]
+            integral = integral[self.error_calc_idx, None]
+            # y = y[:,:,self.error_calc_idx, None]
+            if mesh_quadratures is not None:
+                mesh_quadratures = mesh_quadratures[:, self.error_calc_idx, None]
+            if cum_mesh_quadratures is not None:
+                cum_mesh_quadratures = cum_mesh_quadratures[
+                    :, self.error_calc_idx, None
+                ]
+                # DEBUG: add y0 to cum_steps to get get integral values at different times?
+
+        if self.use_absolute_error_ratio:
+            return self._compute_error_ratios_absolute(mesh_quadrature_errors, integral)
+        else:
+            return self._compute_error_ratios_cumulative(
+                mesh_quadrature_errors,
+                mesh_quadratures=mesh_quadratures,
+                cum_mesh_quadratures=cum_mesh_quadratures,
+            )
+
+    def _compute_error_ratios_absolute(self, mesh_quadrature_errors, integral):
+        """
+        Computes per-step error ratios against the *total* integral
+        magnitude (uniform-across-steps tolerance). This is the default
+        for path integrals because the total integral is meaningful in
+        its own right, so a single reference for the relative tolerance
+        is appropriate.
+
+        For each step k::
+
+            error_ratio[k] = |step_error[k]| / (atol + rtol * |integral|)
+
+        Every step uses the same denominator, so for an integrand whose
+        per-step error is constant the ratios across steps are
+        identical. Compare ``_compute_error_ratios_cumulative`` for the
+        ODE-style alternative where the denominator grows with the
+        running integral.
+
+        Args:
+            mesh_quadrature_errors (Tensor): Per-step error estimates (the
+                difference between the method of order p and embedded
+                order p-1).
+            integral (Tensor): The current total integral estimate.
+
+        Shapes:
+            mesh_quadrature_errors: [N, D]
+            integral: [D]
+        """
+        error_tol = self.atol + self.rtol * torch.abs(integral)
+        error_estimate = torch.abs(mesh_quadrature_errors)
+        error_ratio = self._error_norm(error_estimate / error_tol)
+
+        error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
+        error_ratio_2steps = self._error_norm(error_estimate_2steps / error_tol)
+
+        return error_ratio, error_ratio_2steps
+
+    def _compute_error_ratios_cumulative(
+        self, mesh_quadrature_errors, mesh_quadratures=None, cum_mesh_quadratures=None
+    ):
+        """
+        Computes per-step error ratios using the *running* (cumulative)
+        integral as the magnitude reference, mimicking traditional ODE
+        error control where the state magnitude grows with the
+        integration variable.
+
+        For each step k::
+
+            error_ratio[k] = |step_error[k]| / (atol + rtol * |cumsum[k]|)
+
+        where ``cumsum[k]`` is the integral accumulated up to and
+        including step k. As cumsum grows monotonically through the
+        integration, the *denominator* grows, so the per-step
+        tolerance loosens for later steps. Equivalently, the controller
+        applies a *tighter* tolerance to early steps when the running
+        sum is still small.
+
+        Empirical behavior (see tests/test_error_indicator.py):
+
+          - For an integrand whose per-step error is constant and
+            whose step values are positive, the per-step ratios
+            decrease monotonically.
+          - At the last step ``cumsum == integral``, so the ratio
+            agrees with what the absolute mode produces for that step.
+
+        Use this mode when you want the integrator to accept progressively
+        larger absolute step errors as the integration progresses (i.e.,
+        a fixed *relative* error against the running state). Use the
+        absolute mode (``use_absolute_error_ratio=True``, the default)
+        when you want a uniform-across-steps tolerance keyed to the
+        total integral value — the better default for path integrals
+        where the total is meaningful in its own right.
+
+        Args:
+            mesh_quadrature_errors (Tensor): Per-step error estimates (the
+                difference between the method of order p and embedded
+                order p-1).
+            mesh_quadratures (Tensor): Per-step contributions to the integral,
+                shape ``[N, D]``. If provided, ``cum_mesh_quadratures`` is
+                computed as ``torch.cumsum(mesh_quadratures, dim=0)``.
+            cum_mesh_quadratures (Tensor): Pre-computed cumulative sum.
+                Provide directly when called inside the integration
+                loop where the running integral is already known.
+
+        Shapes:
+            mesh_quadratures: [N, D]
+            mesh_quadrature_errors: [N, D]
+        """
+        if cum_mesh_quadratures is not None:
+            cum_steps = cum_mesh_quadratures
+        elif mesh_quadratures is not None:
+            cum_steps = torch.cumsum(mesh_quadratures, dim=0)
+        else:
+            raise ValueError("Must give mesh_quadratures or cum_mesh_quadratures")
+        error_estimate = torch.abs(mesh_quadrature_errors)
+        error_tol = self.atol + self.rtol * torch.abs(cum_steps)
+        error_ratio = self._error_norm(error_estimate / error_tol).abs()
+
+        error_estimate_2steps = error_estimate[:-1] + error_estimate[1:]
+        error_tol_2steps = (
+            self.atol
+            + self.rtol
+            * torch.max(
+                torch.stack([cum_steps[:-1].abs(), cum_steps[1:].abs()]), dim=0
+            )[0]
+        )
+        error_ratio_2steps = self._error_norm(
+            error_estimate_2steps / error_tol_2steps
+        ).abs()
+
+        return error_ratio, error_ratio_2steps
+
+    # -------------------------------------------------------------------------------- #
+    #                                    RECORDING                                     #
+    # -------------------------------------------------------------------------------- #
+
+    # Record dict keys that are cumulative scalars (sum across batches),
+    # not per-step arrays that need re-sorting.
+    _RECORD_SCALAR_KEYS = ("integral", "integral_error", "loss")
+
+    def _get_sorted_indices(
+        self, record: torch.Tensor, result: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute indices for merging new results into an existing sorted record.
+
+        Uses binary search (searchsorted) to find where new results should be
+        inserted, then computes the indices for both the existing and new entries
+        in the merged array.
+
+        Args:
+            record: Sorted 1D tensor of existing values (e.g. start node of
+                recorded steps). Shape: [N_record].
+            result: New values to insert. Shape: [N_result].
+
+        Returns:
+            Tuple of (idxs_keep, idxs_input):
+                - idxs_keep: Where existing record entries go in the merged array.
+                - idxs_input: Where new result entries go in the merged array.
+        """
+        idxs_sorted = torch.searchsorted(record, result)
+        idxs_input = idxs_sorted + torch.arange(len(result), device=self.device)
+        idxs_keep = torch.arange(len(result) + len(record), device=self.device)
+        keep_mask = torch.ones(len(idxs_keep), device=self.device).to(bool)
+        keep_mask[idxs_input] = False
+        idxs_keep = idxs_keep[keep_mask]
+        return idxs_keep, idxs_input
+
+    def _insert_sorted_results(
+        self,
+        record: torch.Tensor,
+        record_idxs: torch.Tensor,
+        result: torch.Tensor,
+        result_idxs: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Merge new results into an existing record at pre-computed sorted positions.
+
+        Creates a new tensor large enough for both, places existing entries at
+        record_idxs and new entries at result_idxs.
+
+        Args:
+            record: Existing recorded data. Shape: [N_record, ...].
+            record_idxs: Positions for existing data in merged array. Shape: [N_record].
+            result: New data to insert. Shape: [N_result, ...].
+            result_idxs: Positions for new data in merged array. Shape: [N_result].
+
+        Returns:
+            Merged tensor with both record and result entries in sorted order.
+            Shape: [N_record + N_result, ...].
+        """
+        add_shape = (len(record) + len(result), *record.shape[1:])
+        old_record = record.clone()
+        record = torch.nan * torch.ones(add_shape, device=self.device, dtype=self.dtype)
+        record[record_idxs] = old_record
+        record[result_idxs] = result
+        # assert torch.sum(torch.isnan(record)) == 0
+        return record
+
+    def _record_results(
+        self,
+        record: dict[str, torch.Tensor],
+        take_gradient: bool,
+        results: IntegrationResult,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Add a batch of accepted step results to the running record.
+
+        On the first batch, initializes the record dict. On subsequent batches,
+        inserts new results in sorted order and accumulates the integral
+        and loss. When take_gradient is True, detaches results to prevent
+        the computation graph from growing across batches.
+
+        Args:
+            record: Running record dict. Empty dict {} on the first call.
+            take_gradient: Whether gradients are being computed. If True,
+                detaches tensors before storing to keep graph manageable.
+            results: IntegrationResult from the current accepted batch.
+
+        Returns:
+            Updated record dict with the new results merged in. Dict keys
+            match IntegrationResult field names so getattr-based merge
+            below can iterate without translation.
+        """
+        if len(record) == 0 and not take_gradient:
+            record["integral"] = results.integral
+            record["nodes"] = results.nodes
+            record["h"] = results.h
+            record["y"] = results.y
+            record["mesh_quadratures"] = results.mesh_quadratures
+            record["mesh_quadrature_errors"] = results.mesh_quadrature_errors
+            record["integral_error"] = results.integral_error
+            record["error_ratios"] = results.error_ratios
+            record["loss"] = results.loss
+            return record
+        elif len(record) == 0 and take_gradient:
+            record["integral"] = results.integral.detach()
+            record["nodes"] = results.nodes.detach()
+            record["h"] = results.h.detach()
+            record["y"] = results.y.detach()
+            record["mesh_quadratures"] = results.mesh_quadratures.detach()
+            record["mesh_quadrature_errors"] = results.mesh_quadrature_errors.detach()
+            record["integral_error"] = results.integral_error.detach()
+            record["error_ratios"] = results.error_ratios.detach()
+            record["loss"] = results.loss.detach()
+            return record
+
+        idxs_keep, idxs_input = self._get_sorted_indices(
+            record["nodes"][:, 0, 0].detach(), results.nodes[:, 0, 0].detach()
+        )
+        for key, value in record.items():
+            if key in self._RECORD_SCALAR_KEYS:
+                record[key] = value + getattr(results, key).detach()
+            else:
+                record[key] = self._insert_sorted_results(
+                    value, idxs_keep, getattr(results, key), idxs_input
+                )
+        assert torch.all(record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0)
+
+        return record
+
+    def _sort_record(self, record: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """
+        Sort all per-step entries in the record by ascending order.
+
+        The integration loop may process batches in any order, so the record
+        needs to be sorted before final output. Scalar values (integral, loss)
+        are not reordered since they are cumulative sums.
+
+        Args:
+            record: Record dict with per-step tensors.
+
+        Returns:
+            Record with per-step tensors sorted by start node of each step.
+        """
+        sorted_idxs = torch.argsort(record["nodes"][:, 0, 0], dim=0)
+        for key in record:
+            if key not in self._RECORD_SCALAR_KEYS:
+                record[key] = record[key][sorted_idxs]
+        all_ascending = torch.all(
+            record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] > 0
+        )
+        all_descending = torch.all(
+            record["nodes"][1:, 0, 0] - record["nodes"][:-1, 0, 0] < 0
+        )
+        assert all_ascending or all_descending, (
+            "Nodes are required to be either in ascending or descending order"
+        )
+        return record
+
+    # -------------------------------------------------------------------------------- #
+    #                                MEMORY MANAGEMENT                                 #
+    # -------------------------------------------------------------------------------- #
+
+    def _get_cpu_memory(self) -> tuple[float, float]:
+        """
+        Query available and total CPU (system) memory in GB.
+
+        Returns:
+            Tuple of (free_gb, total_gb).
+        """
+        mem = psutil.virtual_memory()
+        free = mem.available / 1024**3
+        total = mem.total / 1024**3
+        return free, total
+
+    def _get_cuda_memory(self) -> tuple[float, float]:
+        """
+        Query available and total CUDA (GPU) memory in GB.
+
+        Accounts for both free system GPU memory and unused PyTorch cache
+        memory (reserved but not allocated). This gives a more accurate
+        picture of how much memory is truly available for new allocations.
+
+        Returns:
+            Tuple of (free_gb, total_gb).
+        """
+        mem_info = torch.cuda.mem_get_info(self.device)
+        # Total memory on the GPU
+        total_gpu = mem_info[1] / 1024**3
+        # Memory that is free outside of the PyTorch cache
+        free_gpu = mem_info[0] / 1024**3
+        # Memory reserved for the PyTorch cache
+        torch_cache = torch.cuda.memory_reserved(self.device) / 1024**3
+        # Cache memory being used by tensors
+        torch_cache_used = torch.cuda.memory_allocated(self.device) / 1024**3
+        # Total free amount of memory that can be used
+        total_free = free_gpu + (torch_cache - torch_cache_used)
+
+        return total_free, total_gpu
+
+    def _get_memory(self) -> tuple[float, float]:
+        """
+        Query available and total memory in GB for the active device type.
+
+        Dispatches to _get_cuda_memory() or _get_cpu_memory() based on
+        self.device_type.
+
+        Returns:
+            Tuple of (free_gb, total_gb).
+        """
+        if self.device_type == "cuda":
+            return self._get_cuda_memory()
+        else:
+            return self._get_cpu_memory()
+
+    def _setup_memory_checks(
+        self, f: Callable, node_test: torch.Tensor, ode_args: tuple = ()
+    ) -> None:
+        """
+        Benchmark the integrand's memory footprint to determine batch sizes.
+
+        Runs the integrand with increasing batch sizes (10, 100, 1000, ...)
+        and measures the memory consumed per evaluation. This per-evaluation
+        memory cost (ode_unit_mem_size) is then used throughout integration
+        to dynamically compute how many steps can fit in one batch.
+
+        A 2.1x safety factor is applied to the measured memory to account
+        for intermediate allocations during integration (RK computation,
+        error estimation, etc.).
+
+        Args:
+            f: The integrand function to benchmark.
+            node_test: A sample node point for benchmarking. Shape: [T] or [1, T].
+            ode_args: Extra arguments passed to f.
+        """
+        assert len(node_test.shape) <= 2
+        if len(node_test.shape) == 2:
+            node_test = node_test[0]
+        node_test = node_test.unsqueeze(0)
+        self.ode_unit_mem_size = None
+
+        N = 10
+        max_evals = 2 * N
+        eval_time = 0
+        while eval_time < 0.1 and N < 1e9 and max_evals > N:
+            t0 = time.time()
+            t_input = torch.tile(node_test, (N, 1))
+            mem_before = self._get_memory()
+            if (
+                self.ode_unit_mem_size is not None
+                and self.ode_unit_mem_size * N > mem_before[0]
+            ):
+                return
+            result = f(t_input, *ode_args)
+            mem_after = self._get_memory()
+            del result
+            self.ode_unit_mem_size = 2.1 * max(
+                0, (mem_before[0] - mem_after[0]) / float(N)
+            )
+            eval_time = time.time() - t0
+            N = 10 * N
+            max_evals = self._get_max_ode_evals(0.8)
+        logger.debug("Ending unit memory search")
+
+    def _get_usable_memory(self, total_mem_usage: float) -> float:
+        """
+        Compute how much memory (in GB) can be used for integrand evaluations.
+
+        Reserves a buffer of (1 - total_mem_usage) * total_memory to avoid
+        out-of-memory errors from other system/PyTorch allocations.
+
+        Args:
+            total_mem_usage: Fraction of total memory allowed (0 < value <= 1).
+
+        Returns:
+            Usable memory in GB (non-negative).
+        """
+        free, total = self._get_memory()
+        buffer = (1 - total_mem_usage) * total
+        return max(0, free - buffer)
+
+    def _get_max_ode_evals(self, total_mem_usage: float) -> int:
+        """
+        Compute the maximum number of integrand evaluations that fit in memory.
+
+        Divides usable memory by the per-evaluation memory cost (measured by
+        _setup_memory_checks). A small epsilon (1e-12) prevents division by zero.
+
+        Args:
+            total_mem_usage: Fraction of total memory allowed.
+
+        Returns:
+            Maximum number of evaluations (integer).
+        """
+        usable = self._get_usable_memory(total_mem_usage)
+        return int(usable // (1e-12 + self.ode_unit_mem_size))

@@ -86,7 +86,7 @@ class Trainer(CurriculumClass):
         assert hasattr(self, f"_{loss_fxn}")
         self.loss_fxn = getattr(self, f"_{loss_fxn}")
 
-        self.integrator = tpd.RKParallelUniformAdaptiveStepsizeSolver(
+        self.integrator = tpd.UniformAdaptiveQuadrature(
             **integrator_config, device=self.device
         )
 
@@ -359,9 +359,9 @@ class Trainer(CurriculumClass):
     def train_iteration(self):
         self.optimizer.zero_grad()
         self.integral_output = self.integrator.integrate(
-            ode_fxn=self._integrad, t=self.input_times, ode_args=(self.model,)
+            f=self._integrad, mesh=self.input_times, ode_args=(self.model,)
         )
-        # print(epoch_count, integral_output.t.shape)
+        # print(epoch_count, integral_output.nodes.shape)
         loss = self.integral_output.loss
         # print("BEFORE", self.model.layers[0].weight.data[:5])
         # print("OUTPUT", integral_output)
@@ -483,7 +483,7 @@ class Trainer(CurriculumClass):
         force_update = False
         last_save_t_pred = float(np.squeeze(self.t_pred))
         while train_criteria:
-            updated_curr = self.update_curriculum(epoch_count, loss, force_update)
+            updated_curr = self.integral_output is not None and self.update_curriculum(epoch_count, loss, force_update)
             curr_t_pred = float(np.squeeze(self.t_pred))
             time_to_eval = (curr_t_pred - last_save_t_pred) >= 0.1
             time_to_save = time_to_eval and (updated_curr and not force_update)
@@ -491,14 +491,14 @@ class Trainer(CurriculumClass):
 
             if epoch_count % 10 == 0 and self.integral_output is not None:
                 print(
-                    f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(self.integral_output.t)}"
+                    f"Epoch/Time {epoch_count}/{self.t_pred}: {loss.item()} | {self.config['cutoff']} | {len(self.integral_output.nodes)}"
                 )
             if time_to_eval:
                 # print("INIT", t_init, torch.squeeze(self.model(t_init_eval)).detach().numpy())
                 if self.integral_output is not None:
                     # self.loss_integrad(torch.arange(5, dtype=self.dtype).unsqueeze(-1)*5./4., self.model, verbose=True)
                     # if integral_output is not None:
-                    #    print(integral_output.t[:,0,0])
+                    #    print(integral_output.nodes[:,0,0])
                     integral_values = [loss.item()]
                     integral_limits = [self.t_pred]
                     eval_t_preds = np.concatenate(
@@ -515,8 +515,8 @@ class Trainer(CurriculumClass):
                         ).unsqueeze(-1)
                         with torch.no_grad():
                             eval_integral_output = self.integrator.integrate(
-                                ode_fxn=self._integrad,
-                                t=self.eval_input_times,
+                                f=self._integrad,
+                                mesh=self.eval_input_times,
                                 ode_args=(self.model,),
                             )
                         integral_values.append(eval_integral_output.loss.item())
@@ -596,14 +596,14 @@ class Trainer(CurriculumClass):
                     [t_init, self.t_pred], dtype=self.dtype, device=self.device
                 ).unsqueeze(-1)
             else:
-                self.input_times = self.integral_output.t_optimal
+                self.input_times = self.integral_output.mesh_optimal
             # self.input_times = torch.tensor([t_init, self.t_pred], dtype=self.dtype, device=self.device).unsqueeze(-1)
             # print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
             """
             integral_output = self.integrator.integrate(
-                ode_fxn=self._integrad, t=self.input_times, ode_args=(self.model,)
+                f=self._integrad, mesh=self.input_times, ode_args=(self.model,)
             )
-            #print(epoch_count, integral_output.t.shape)
+            #print(epoch_count, integral_output.nodes.shape)
             loss = integral_output.loss
             #print("BEFORE", self.model.layers[0].weight.data[:5])
             #print("OUTPUT", integral_output)
@@ -639,8 +639,8 @@ class Trainer(CurriculumClass):
                 )
                 # asdfasd
             # print("AFTER", self.model.layers[0].weight.data[:5])
-            # times = integral_output.t_optimal.clone()
-            # times = integral_output.t_optimal.detach()
+            # times = integral_output.mesh_optimal.clone()
+            # times = integral_output.mesh_optimal.detach()
             # times.requires_grad_(True)
 
             # # Update learning rate

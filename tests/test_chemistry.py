@@ -1,4 +1,15 @@
-"""Tests using the Wolf-Schlegel potential energy surface (multi-dimensional integrand)."""
+"""Tests using the Wolf-Schlegel potential energy surface.
+
+The Wolf-Schlegel 2D potential is integrated along a linear path between
+two minima as a 1D quadrature problem in t. The reference is
+``scipy.integrate.quad`` (QUADPACK), used here as ground truth.
+
+Phase 3 of the quadrature alignment plan: this test was previously
+``parallel-vs-serial`` (where serial used ``torchdiffeq.odeint``). With
+the serial path removed, the natural cross-validation is against
+scipy.integrate.quad — a more rigorous reference than another
+torch-based solver.
+"""
 
 from __future__ import annotations
 
@@ -13,49 +24,49 @@ from _helpers import (
     T_INIT,
     UNIFORM_METHOD_NAMES,
 )
+from scipy import integrate as scipy_integrate
 
 from torchpathdiffeq import (
-    SerialAdaptiveStepsizeSolver,
-    get_parallel_RK_solver,
+    adaptive_quadrature,
     steps,
     wolf_schlegel,
 )
 
-# Map variable method names to their serial equivalents
-_SERIAL_METHOD_MAP = {"generic3": "bosh3"}
+
+def _wolf_schlegel_scalar(t_value: float) -> float:
+    """scipy-friendly Wolf-Schlegel evaluator: scalar in, scalar out."""
+    t_tensor = torch.tensor([[t_value]], dtype=torch.float64)
+    return wolf_schlegel(t_tensor).item()
 
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
-def test_wolf_schlegel_parallel_vs_serial(method_name):
-    """Parallel integration of Wolf-Schlegel matches serial within tolerance."""
+def test_wolf_schlegel_parallel_vs_scipy(method_name):
+    """Parallel integration of Wolf-Schlegel matches scipy.integrate.quad."""
     torch.manual_seed(SEED)
-    parallel_solver = get_parallel_RK_solver(
+    parallel_solver = adaptive_quadrature(
         sampling_type=steps.ADAPTIVE_UNIFORM,
         method=method_name,
         atol=ATOL_LOOSE,
         rtol=RTOL_LOOSE,
         remove_cut=REMOVE_CUT,
-        ode_fxn=wolf_schlegel,
+        f=wolf_schlegel,
     )
 
-    serial_method = _SERIAL_METHOD_MAP.get(method_name, method_name)
-    serial_solver = SerialAdaptiveStepsizeSolver(
-        serial_method,
-        ATOL_LOOSE,
-        RTOL_LOOSE,
-        ode_fxn=wolf_schlegel,
+    parallel_output = parallel_solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+
+    scipy_value, scipy_err = scipy_integrate.quad(
+        _wolf_schlegel_scalar,
+        float(T_INIT.item()),
+        float(T_FINAL.item()),
+        epsabs=ATOL_LOOSE,
+        epsrel=RTOL_LOOSE,
     )
 
-    parallel_output = parallel_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
-    serial_output = serial_solver.integrate(t_init=T_INIT, t_final=T_FINAL)
-
-    error = torch.abs(parallel_output.integral - serial_output.integral)
-    # Scale tolerance by the number of steps (each step contributes up to atol + rtol*|y|)
-    error_tolerance = (
-        ATOL_LOOSE + RTOL_LOOSE * torch.abs(serial_output.integral)
-    ) * len(parallel_output.t)
-    assert error < error_tolerance, (
+    diff = abs(parallel_output.integral.item() - scipy_value)
+    # Generous bound — Wolf-Schlegel is wiggly, low-order methods at
+    # ATOL_LOOSE = 1e-5 deliver a few-decimal-place result.
+    bound = max(scipy_err, 1e-3 * abs(scipy_value))
+    assert diff < bound, (
         f"{method_name}: parallel={parallel_output.integral.item():.6f}, "
-        f"serial={serial_output.integral.item():.6f}, "
-        f"error={error.item():.2e}, tolerance={error_tolerance.item():.2e}"
+        f"scipy={scipy_value:.6f}, diff={diff:.2e}, bound={bound:.2e}"
     )

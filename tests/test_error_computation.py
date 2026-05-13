@@ -147,11 +147,11 @@ class TestComputeErrorRatiosAbsolute:
         """Error ratios correctly identify passing and failing steps."""
         solver = self._make_solver(atol=1e-3, rtol=1e-3)
         # error_tol = atol + rtol * |integral| = 1e-3 + 1e-3 * 1.0 = 2e-3
-        sum_step_errors = torch.tensor([[0.01], [0.001]])  # [2, 1]
+        mesh_quadrature_errors = torch.tensor([[0.01], [0.001]])  # [2, 1]
         integral = torch.tensor([1.0])
 
         error_ratio, _error_ratio_2steps = solver._compute_error_ratios_absolute(
-            sum_step_errors, integral
+            mesh_quadrature_errors, integral
         )
 
         # 0.01 / 2e-3 = 5.0 (failing), 0.001 / 2e-3 = 0.5 (passing)
@@ -161,11 +161,11 @@ class TestComputeErrorRatiosAbsolute:
     def test_zero_integral(self):
         """Zero integral: error_tol = atol only, no NaN."""
         solver = self._make_solver(atol=1e-3, rtol=1e-3)
-        sum_step_errors = torch.tensor([[1e-4]])
+        mesh_quadrature_errors = torch.tensor([[1e-4]])
         integral = torch.tensor([0.0])
 
         error_ratio, _ = solver._compute_error_ratios_absolute(
-            sum_step_errors, integral
+            mesh_quadrature_errors, integral
         )
 
         assert torch.isfinite(error_ratio).all()
@@ -175,11 +175,11 @@ class TestComputeErrorRatiosAbsolute:
     def test_2steps_shape(self):
         """N=3 steps: error_ratio has len 3, error_ratio_2steps has len 2."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001], [0.002], [0.003]])
+        mesh_quadrature_errors = torch.tensor([[0.001], [0.002], [0.003]])
         integral = torch.tensor([1.0])
 
         error_ratio, error_ratio_2steps = solver._compute_error_ratios_absolute(
-            sum_step_errors, integral
+            mesh_quadrature_errors, integral
         )
 
         assert len(error_ratio) == 3
@@ -188,11 +188,11 @@ class TestComputeErrorRatiosAbsolute:
     def test_single_step(self):
         """N=1: error_ratio has len 1, error_ratio_2steps has len 0."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001]])
+        mesh_quadrature_errors = torch.tensor([[0.001]])
         integral = torch.tensor([1.0])
 
         error_ratio, error_ratio_2steps = solver._compute_error_ratios_absolute(
-            sum_step_errors, integral
+            mesh_quadrature_errors, integral
         )
 
         assert len(error_ratio) == 1
@@ -201,11 +201,13 @@ class TestComputeErrorRatiosAbsolute:
     def test_multidim(self):
         """D=2: error is reduced to scalar per step via _error_norm."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001, 0.002], [0.003, 0.004]])  # [2, 2]
+        mesh_quadrature_errors = torch.tensor(
+            [[0.001, 0.002], [0.003, 0.004]]
+        )  # [2, 2]
         integral = torch.tensor([1.0, 1.0])
 
         error_ratio, error_ratio_2steps = solver._compute_error_ratios_absolute(
-            sum_step_errors, integral
+            mesh_quadrature_errors, integral
         )
 
         assert error_ratio.shape == (2,)
@@ -223,41 +225,41 @@ class TestComputeErrorRatiosCumulative:
     def _make_solver(self, atol=1e-3, rtol=1e-3):
         return make_solver_for_unit_test(atol=atol, rtol=rtol)
 
-    def test_basic_with_sum_steps(self):
-        """Cumulative error ratios computed from sum_steps."""
+    def test_basic_with_mesh_quadratures(self):
+        """Cumulative error ratios computed from mesh_quadratures."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001], [0.002]])
-        sum_steps = torch.tensor([[1.0], [2.0]])
+        mesh_quadrature_errors = torch.tensor([[0.001], [0.002]])
+        mesh_quadratures = torch.tensor([[1.0], [2.0]])
 
         error_ratio, error_ratio_2steps = solver._compute_error_ratios_cumulative(
-            sum_step_errors, sum_steps=sum_steps
+            mesh_quadrature_errors, mesh_quadratures=mesh_quadratures
         )
 
         assert len(error_ratio) == 2
         assert len(error_ratio_2steps) == 1
         assert torch.isfinite(error_ratio).all()
 
-    def test_with_cum_sum_steps(self):
-        """Passing cum_sum_steps directly gives the same result."""
+    def test_with_cum_mesh_quadratures(self):
+        """Passing cum_mesh_quadratures directly gives the same result."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001], [0.002]])
-        sum_steps = torch.tensor([[1.0], [2.0]])
-        cum_sum_steps = torch.cumsum(sum_steps, dim=0)
+        mesh_quadrature_errors = torch.tensor([[0.001], [0.002]])
+        mesh_quadratures = torch.tensor([[1.0], [2.0]])
+        cum_mesh_quadratures = torch.cumsum(mesh_quadratures, dim=0)
 
         r1, r2_1 = solver._compute_error_ratios_cumulative(
-            sum_step_errors, sum_steps=sum_steps
+            mesh_quadrature_errors, mesh_quadratures=mesh_quadratures
         )
         r3, r2_2 = solver._compute_error_ratios_cumulative(
-            sum_step_errors, cum_sum_steps=cum_sum_steps
+            mesh_quadrature_errors, cum_mesh_quadratures=cum_mesh_quadratures
         )
 
         assert torch.allclose(r1, r3)
         assert torch.allclose(r2_1, r2_2)
 
     def test_missing_args_raises(self):
-        """Neither sum_steps nor cum_sum_steps raises ValueError."""
+        """Neither mesh_quadratures nor cum_mesh_quadratures raises ValueError."""
         solver = self._make_solver()
-        sum_step_errors = torch.tensor([[0.001]])
+        mesh_quadrature_errors = torch.tensor([[0.001]])
 
         with pytest.raises(ValueError, match="Must give"):
-            solver._compute_error_ratios_cumulative(sum_step_errors)
+            solver._compute_error_ratios_cumulative(mesh_quadrature_errors)

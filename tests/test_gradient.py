@@ -49,40 +49,40 @@ class TestInferTraining:
     def test_explicit_true(self):
         """is_training=True overrides everything."""
         solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=True, ode_fxn=None)
+        solver._infer_training(is_training=True, f=None)
         assert solver.training is True
 
     def test_explicit_false(self):
         """is_training=False overrides a training Module."""
         solver = make_solver_for_unit_test()
         module = _DummyModule().train()
-        solver._infer_training(is_training=False, ode_fxn=module)
+        solver._infer_training(is_training=False, f=module)
         assert solver.training is False
 
     def test_module_training_mode(self):
         """Module in training mode → solver.training is True."""
         solver = make_solver_for_unit_test()
         module = _DummyModule().train()
-        solver._infer_training(is_training=None, ode_fxn=module)
+        solver._infer_training(is_training=None, f=module)
         assert solver.training is True
 
     def test_module_eval_mode(self):
         """Module in eval mode → solver.training is False."""
         solver = make_solver_for_unit_test()
         module = _DummyModule().eval()
-        solver._infer_training(is_training=None, ode_fxn=module)
+        solver._infer_training(is_training=None, f=module)
         assert solver.training is False
 
     def test_plain_function(self):
         """Plain callable → solver.training is False."""
         solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=None, ode_fxn=_plain_fxn)
+        solver._infer_training(is_training=None, f=_plain_fxn)
         assert solver.training is False
 
     def test_none_ode_fxn(self):
-        """ode_fxn=None → solver.training is False."""
+        """f=None → solver.training is False."""
         solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=None, ode_fxn=None)
+        solver._infer_training(is_training=None, f=None)
         assert solver.training is False
 
 
@@ -191,11 +191,11 @@ class TestGradientFlowThroughIntegrate:
         integrand = ScaledIntegrand(scale=2.0)
         integrand.eval()  # Prevent _infer_training from setting training=True
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
         )
 
         result.integral.sum().backward()
@@ -207,11 +207,11 @@ class TestGradientFlowThroughIntegrate:
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
             take_gradient=True,
         )
 
@@ -225,11 +225,11 @@ class TestGradientFlowThroughIntegrate:
         integrand = ScaledIntegrand(scale=2.0)
         integrand.eval()
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
         )
 
         assert result.gradient_taken is False
@@ -244,7 +244,7 @@ class TestErrorDetaching:
     """Tests for error estimate detaching in uniform vs variable solvers."""
 
     def test_uniform_error_detached(self):
-        """Uniform solver: integral_error and sum_step_errors are detached."""
+        """Uniform solver: integral_error and mesh_quadrature_errors are detached."""
         solver = make_solver_for_unit_test("bosh3")
         C = len(solver.method.tableau.c)
         t = torch.linspace(0, 1, C, dtype=torch.float64).unsqueeze(0).unsqueeze(-1)
@@ -254,7 +254,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral_error.grad_fn is None
-        assert method_output.sum_step_errors.grad_fn is None
+        assert method_output.mesh_quadrature_errors.grad_fn is None
 
     def test_uniform_integral_keeps_grad(self):
         """Uniform solver: primary integral is part of the computation graph."""
@@ -267,7 +267,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral.grad_fn is not None
-        assert method_output.sum_steps.grad_fn is not None
+        assert method_output.mesh_quadratures.grad_fn is not None
 
     def test_variable_error_keeps_grad(self):
         """Variable solver: error estimates are NOT detached."""
@@ -280,7 +280,7 @@ class TestErrorDetaching:
         method_output = solver._calculate_integral(t, y, y0)
 
         assert method_output.integral_error.grad_fn is not None
-        assert method_output.sum_step_errors.grad_fn is not None
+        assert method_output.mesh_quadrature_errors.grad_fn is not None
 
 
 # ---------------------------------------------------------------------------
@@ -297,11 +297,11 @@ class TestCustomLoss:
         integrand = ScaledIntegrand(scale=2.0)
         integrand.eval()
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
         )
 
         assert torch.allclose(result.loss, result.integral)
@@ -312,15 +312,15 @@ class TestCustomLoss:
         integrand = ScaledIntegrand(scale=2.0)
         integrand.eval()
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
 
         def double_loss(output):
             return output.integral * 2
 
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
             loss_fxn=double_loss,
         )
 
@@ -333,15 +333,15 @@ class TestCustomLoss:
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
         solver = make_uniform_solver(
-            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, ode_fxn=integrand
+            "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
 
         def square_loss(output):
             return (output.integral**2).sum()
 
         result = solver.integrate(
-            t_init=torch.tensor([0], dtype=torch.float64),
-            t_final=torch.tensor([1], dtype=torch.float64),
+            mesh_init=torch.tensor([0], dtype=torch.float64),
+            mesh_final=torch.tensor([1], dtype=torch.float64),
             take_gradient=True,
             loss_fxn=square_loss,
         )

@@ -183,7 +183,7 @@ def main():
     # Get Integrator
 
     # integral_output = parallel_integrator.integrate(
-    #    ode, t_init=t_init, t_final=t_final
+    #    ode, mesh_init=t_init, mesh_final=t_final
     # )
 
     # Setup Trainer

@@ -1,4 +1,11 @@
-"""Tests for numerical integral accuracy against known analytical solutions."""
+"""Integration accuracy tests for variable-sampling methods.
+
+Phase 4 restored the variable solver by implementing
+``_compute_nodes`` with uniformly-spaced initial node
+placement. The existing ``_evaluate_adaptive_nodes`` (which interleaves
+old and new nodes for split reuse) and ``_merge_excess_nodes`` (which
+subsamples merged panels back to C nodes) now run end-to-end.
+"""
 
 from __future__ import annotations
 
@@ -11,38 +18,53 @@ from _helpers import (
     SEED,
     T_FINAL,
     T_INIT,
-    UNIFORM_METHOD_NAMES,
+    VARIABLE_METHOD_NAMES,
     assert_optimal_mesh_ordering,
     assert_step_continuity,
     assert_time_ordering,
-    make_uniform_solver,
 )
 
-from torchpathdiffeq import ODE_dict
+from torchpathdiffeq import ODE_dict, adaptive_quadrature, steps
 
 
-@pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
+def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
+    """Construct a parallel variable-sampling solver."""
+    return adaptive_quadrature(
+        sampling_type=steps.ADAPTIVE_VARIABLE,
+        method=method_name,
+        atol=atol,
+        rtol=rtol,
+        remove_cut=0.1,
+    )
+
+
+@pytest.mark.parametrize("method_name", VARIABLE_METHOD_NAMES)
 @pytest.mark.parametrize("integrand_name", INTEGRAND_NAMES)
-class TestUniformIntegralAccuracy:
-    """Verify that each uniform RK method correctly integrates each test function."""
+class TestVariableIntegralAccuracy:
+    """Each variable method correctly integrates each ODE_dict integrand."""
 
     def _integrate(self, method_name, integrand_name):
-        """Run integration for the given method and integrand, return (output, correct, cutoff)."""
+        """Run integration; return (output, correct, cutoff)."""
         f, solution_fxn, cutoff = ODE_dict[integrand_name]
         correct = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         torch.manual_seed(SEED)
-        solver = make_uniform_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT)
+        solver = _make_variable_solver(method_name)
         output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
         return output, correct, cutoff
 
     def test_integral_value(self, method_name, integrand_name):
-        """Computed integral matches the analytical solution within the error cutoff."""
+        """Computed integral matches the analytical solution within cutoff."""
         output, correct, cutoff = self._integrate(method_name, integrand_name)
         rel_error = torch.abs((output.integral.cpu() - correct) / correct)
-        assert rel_error < cutoff, (
-            f"{method_name} failed on {integrand_name}: "
+        # Variable methods are 2nd or 3rd order so we relax the cutoff
+        # by 100x relative to the uniform-method cutoff in ODE_dict.
+        # The uniform cutoff was tuned for dopri5 (5th order); variable
+        # methods cannot match that on the same atol/rtol setting.
+        adjusted_cutoff = cutoff * 100.0
+        assert rel_error < adjusted_cutoff, (
+            f"{method_name} (variable) on {integrand_name}: "
             f"got {output.integral.item()}, expected {correct.item()}, "
-            f"rel_error={rel_error.item():.2e} >= cutoff={cutoff:.2e}"
+            f"rel_error={rel_error.item():.2e} >= adjusted_cutoff={adjusted_cutoff:.2e}"
         )
 
     def test_time_ordering(self, method_name, integrand_name):

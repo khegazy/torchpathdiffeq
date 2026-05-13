@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _helpers import SEED
 
 
-@pytest.fixture()
+@pytest.fixture
 def seed():
     """Set a deterministic random seed for reproducibility."""
     torch.manual_seed(SEED)
