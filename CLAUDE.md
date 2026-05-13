@@ -25,7 +25,7 @@ python -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pre-commit install
 
-# Run all tests (969 currently)
+# Run all tests (1020 currently)
 .venv/bin/pytest tests/ -v
 
 # Run all tests with coverage
@@ -84,10 +84,11 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 | `test_base_solver.py` | `SolverBase._set_dtype`, `set_dtype_by_input`, `_check_variables`, `_integral_loss` |
 | `test_methods_extra.py` | Variable subclass `tableau_b`, `to_device`, dtype conversion |
 | `test_rk_solver_methods.py` | `adaptive_quadrature` factory, `_get_tableau_b`, `_get_num_tableau_c` |
-| `test_adaptive_steps.py` | `_adaptively_add_steps`: pass/fail/mixed error ratios, midpoint placement |
+| `test_adaptive_steps.py` | `_adaptively_increase_mesh`: pass/fail/mixed error ratios, midpoint placement |
 | `test_record_and_sort.py` | `_record_results` and `_sort_record` |
-| `test_evaluate_and_merge.py` | `_evaluate_adaptive_y` + `_merge_excess_nodes` for both uniform and variable solvers |
-| `test_prune_and_optimal.py` | `prune_excess_t`, `_get_optimal_mesh` |
+| `test_evaluate_and_merge.py` | `_evaluate_adaptive_nodes` + `_merge_excess_nodes` for both uniform and variable solvers |
+| `test_prune_and_optimal.py` | `_prune_excess_mesh`, `_get_optimal_mesh` |
+| `test_y0_and_ode_args.py` | `y0` additive offset (`result.integral = y0 + ∫f`) and `ode_args` forwarding to `f(t, *ode_args)` |
 | `test_gradient.py` / `test_gradient_integration.py` | Per-batch backward, learnable integrand training loops |
 
 **Snapshot tests** are the regression net for internal refactors: the
@@ -177,7 +178,7 @@ as low-order baselines.
 - **T**: dimensionality of time (usually 1, but supports multi-D)
 - **D**: dimensionality of `f`'s output
 
-Key tensors: `t: [N, C, T]`, `y: [N, C, D]`, `tableau_b: [1, C, 1]` or
+Key tensors: `nodes: [N, C, T]`, `y: [N, C, D]`, `tableau_b: [1, C, 1]` or
 `[N, C, 1]`, `y0: [D]`, mesh barriers: `[M, T]`.
 
 ### Core algorithm (`AdaptiveQuadrature.integrate()` in `quadrature/base.py`)
@@ -200,7 +201,7 @@ is a boolean array where `True` means the panel still needs evaluation.
    - Compute integral + error via `_calculate_integral` (RK weighted
      sum using `b` and `b_error` tableaux).
    - Compute error ratios (absolute or cumulative mode).
-   - `_adaptively_add_steps`: panels with ratio `< 1` are accepted;
+   - `_adaptively_increase_mesh`: panels with ratio `< 1` are accepted;
      panels with ratio `>= 1` are split at midpoint into two
      sub-panels for re-evaluation.
    - Record accepted results into the running record.
@@ -263,6 +264,18 @@ merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
 - Results from each batch after backward are `.detach()`-ed before
   being added to the running record (so the graph for that batch can
   be released).
+
+### `y0` additive offset
+
+- `y0` is an optional initial value of the integral accumulator. The
+  returned `result.integral` is `y0 + ∫f(t)dt`. Default is zeros.
+- Per-batch `_calculate_integral` calls inside the loop use `y0=zeros`
+  so each batch returns only its step contributions. The user-supplied
+  `y0` is added once at the final `IntegrationResult`.
+- `result.y0` echoes the value that was used (after dtype/device
+  coercion) so callers can recover what offset was applied.
+- `ode_args` is a tuple forwarded positionally to the integrand:
+  `f(t, *ode_args)`. Used by `examples/pode/` for path parameters.
 
 ### Warm-starting (`reuse_mesh=True`)
 
