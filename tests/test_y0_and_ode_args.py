@@ -121,8 +121,8 @@ def test_y0_default_zero_gives_pure_integral():
         method="gk21",
         atol=1e-12,
         rtol=1e-12,
-        mesh_init=torch.tensor([0.0]),
-        mesh_final=torch.tensor([1.0]),
+        mesh_init=torch.tensor([0.0], dtype=torch.float64),
+        mesh_final=torch.tensor([1.0], dtype=torch.float64),
     )
     assert abs(result.integral.item() - 1.0) < 1e-9
 
@@ -134,8 +134,8 @@ def test_y0_offsets_the_result_per_documentation():
         method="gk21",
         atol=1e-12,
         rtol=1e-12,
-        mesh_init=torch.tensor([0.0]),
-        mesh_final=torch.tensor([1.0]),
+        mesh_init=torch.tensor([0.0], dtype=torch.float64),
+        mesh_final=torch.tensor([1.0], dtype=torch.float64),
         y0=torch.tensor([5.0], dtype=torch.float64),
     )
     # ∫_0^1 1 dt = 1. With y0=5, expected = 6.
