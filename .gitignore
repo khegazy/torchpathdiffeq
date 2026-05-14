@@ -67,3 +67,16 @@ env/
 ENV/
 env.bak/
 venv.bak/
+
+# Images
+*png
+*pdf
+
+# Results
+*h5
+
+# Checkpoints
+*pth
+
+# Misc
+*txt

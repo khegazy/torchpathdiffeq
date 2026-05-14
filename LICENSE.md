@@ -77,7 +77,7 @@ k. <ins>You</ins> means the individual or entity exercising the Licensed Rights
 ## Section 2 -- Scope.
 
 a. **License grant.**
-    
+
    1. Subject to the terms and conditions of this Public License,
       the Licensor hereby grants You a worldwide, royalty-free,
       non-sublicensable, non-exclusive, irrevocable license to
@@ -87,7 +87,7 @@ a. **License grant.**
              in part; and
 
       b. produce, reproduce, and Share Adapted Material.
-   
+
    2. **Exceptions and Limitations.** For the avoidance of doubt, where
         Exceptions and Limitations apply to Your use, this Public
         License does not apply, and You do not need to comply with

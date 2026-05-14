@@ -1,6 +1,12 @@
-from .path_integral import ode_path_integral
+from __future__ import annotations
+
+from .base import steps
+from .examples import ODE_dict, wolf_schlegel
+from .integrate import integrate
 from .methods import UNIFORM_METHODS, VARIABLE_METHODS
-from .base import steps, IntegralOutput
-from .serial_solver import SerialAdaptiveStepsizeSolver
-from .runge_kutta import get_parallel_RK_solver, RKParallelUniformAdaptiveStepsizeSolver, RKParallelVariableAdaptiveStepsizeSolver
-from .examples import ODE_dict 
+from .results import IntegrationResult
+from .runge_kutta import (
+    UniformAdaptiveQuadrature,
+    VariableAdaptiveQuadrature,
+    adaptive_quadrature,
+)

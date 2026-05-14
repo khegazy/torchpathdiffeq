@@ -1,0 +1,15 @@
+[default.extend-words]
+t0 = "t0"
+arange = "arange"
+ba = "ba"
+b0 = "b0"
+b1 = "b1"
+
+[files]
+extend-exclude = [
+  "*.csv",
+  "*.h5",
+  ".yml",
+  "experiments/**/*.yml",
+  "experiments/**/*.yaml",
+]
