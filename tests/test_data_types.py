@@ -15,7 +15,7 @@ from _helpers import (
     make_uniform_solver,
 )
 
-from torchpathdiffeq import ODE_dict
+from torchpathdiffeq import integrand_dict
 
 INTEGRAND_NAME = "damped_sine"
 
@@ -27,7 +27,7 @@ class TestDtypeHandling:
 
     def _integrate(self, method_name, dtype):
         """Run damped_sine integration at the given dtype."""
-        f, solution_fxn, _ = ODE_dict[INTEGRAND_NAME]
+        f, solution_fxn, _ = integrand_dict[INTEGRAND_NAME]
         correct = solution_fxn(
             mesh_init=torch.tensor([0], dtype=torch.float64),
             mesh_final=torch.tensor([1], dtype=torch.float64),

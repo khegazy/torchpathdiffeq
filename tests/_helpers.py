@@ -8,8 +8,8 @@ from torch import nn
 from torchpathdiffeq import (
     UNIFORM_METHODS,
     VARIABLE_METHODS,
-    ODE_dict,
     adaptive_quadrature,
+    integrand_dict,
     steps,
 )
 
@@ -42,7 +42,7 @@ REMOVE_CUT = 0.1
 
 UNIFORM_METHOD_NAMES = list(UNIFORM_METHODS.keys())
 VARIABLE_METHOD_NAMES = list(VARIABLE_METHODS.keys())
-INTEGRAND_NAMES = list(ODE_dict.keys())
+INTEGRAND_NAMES = list(integrand_dict.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ def make_variable_solver_for_unit_test(
     )
 
 
-def constant_ode_fxn(t, *args):
+def constant_integrand(t, *args):
     """f(t) = 1 for all t. Returns shape [N, 1]."""
     if len(t.shape) == 1:
         return torch.ones(1, dtype=t.dtype, device=t.device)

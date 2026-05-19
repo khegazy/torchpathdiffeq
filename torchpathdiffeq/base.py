@@ -90,7 +90,7 @@ class SolverBase(ABC, DistributedEnvironment):
     - Device management: inherited from DistributedEnvironment.
     - Default parameter storage: f, y0, mesh_init, mesh_final can be set at
       construction and reused across multiple integrate() calls.
-    - Warm-start caching: stores mesh_previous and previous_ode_fxn_id
+    - Warm-start caching: stores mesh_previous and previous_f_id
       so that repeated integration of the same function can reuse the optimized
       time mesh from the prior run.
 
@@ -109,7 +109,6 @@ class SolverBase(ABC, DistributedEnvironment):
         f: Callable | None = None,
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
-        is_training: bool | None = None,
         output_speed_info: bool = False,
         dtype: torch.dtype = torch.float64,
         device: str | None = None,
@@ -132,7 +131,6 @@ class SolverBase(ABC, DistributedEnvironment):
                 Can also be provided at integrate() call time.
             mesh_init: Lower bound of integration. Shape: [T].
             mesh_final: Upper bound of integration. Shape: [T].
-            is_training: If False, disables training mode (no gradient computation). If unspecified it will infer training mode by 'f'.
             output_speed_info: If True, logs timing information for each
                 sub-operation during integration to a dedicated file
                 ``torchpathdiffeq_speed.log``.
@@ -179,8 +177,6 @@ class SolverBase(ABC, DistributedEnvironment):
             if mesh_final is not None
             else torch.tensor([1], dtype=torch.float64, device=self.device)
         )
-        # Determine if in training or eval mode
-        self._infer_training(is_training, f)
         # Cached time barriers from last integration for warm-starting.
         # Used only when integrate(..., reuse_mesh=True) is passed; otherwise
         # ignored. The cached barriers are the *optimal* mesh from the
@@ -190,7 +186,7 @@ class SolverBase(ABC, DistributedEnvironment):
         # signal so that reuse_mesh=True can warn if the cached mesh was
         # tuned for a different integrand. Replaces the prior __name__
         # comparison which collided across all lambdas.
-        self.previous_ode_fxn_id = None
+        self.previous_f_id = None
 
         self._set_dtype(dtype)
 
@@ -245,8 +241,7 @@ class SolverBase(ABC, DistributedEnvironment):
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
         mesh: torch.Tensor | None = None,
-        ode_args: tuple = (),
-        is_training: bool | None = None,
+        f_args: tuple = (),
     ) -> IntegrationResult:
         """
         Perform numerical path integration of f from mesh_init to mesh_final.
@@ -268,10 +263,7 @@ class SolverBase(ABC, DistributedEnvironment):
             t: Optional initial time points. If provided, these serve as the
                 starting mesh for adaptive refinement. Shape depends on solver:
                 [N, T] for step barriers, [N, C, T] for full quadrature points.
-            ode_args: Extra arguments passed to f after the time tensor.
-            is_training: If True, enables training mode (gradient computation
-                via take_gradient). If False, disables it. If None, inferred
-                from whether f is an nn.Module in training mode.
+            f_args: Extra arguments passed to f after the time tensor.
 
         Returns:
             IntegrationResult containing the computed integral, error estimates,
@@ -376,7 +368,6 @@ class SolverBase(ABC, DistributedEnvironment):
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
         y0: torch.Tensor | None = None,
-        is_training: bool | None = None,
     ) -> tuple[
         Callable | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None
     ]:
@@ -406,36 +397,11 @@ class SolverBase(ABC, DistributedEnvironment):
         mesh_final = mesh_final.to(self.dtype).to(self.device)
         y0 = y0.to(self.dtype).to(self.device)
 
-        # Determine if in training mode
-        self._infer_training(is_training, f)
-
         return f, mesh_init, mesh_final, y0
 
     # -------------------------------------------------------------------------------- #
     #                         TRAINING AND EVALUATION TOGGLING                         #
     # -------------------------------------------------------------------------------- #
-
-    def _infer_training(
-        self, is_training: bool | None = None, f: Callable | None = None
-    ):
-        """Set solver training mode from explicit flag or f's module state.
-
-        Priority: explicit is_training > f.training (if nn.Module) > False.
-        """
-        if is_training is not None:
-            self.training = is_training
-        elif f is None or not isinstance(f, torch.nn.Module):
-            self.training = False
-        else:
-            self.training = f.training
-
-    def train(self) -> None:
-        """Enable training mode (gradients will be computed during integration)."""
-        self.training = True
-
-    def eval(self) -> None:
-        """Enable evaluation mode (no gradient computation during integration)."""
-        self.training = False
 
     def _integral_loss(
         self,

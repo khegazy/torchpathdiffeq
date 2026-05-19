@@ -61,12 +61,12 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 
 | File | What it tests |
 |---|---|
-| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand in `ODE_dict`, plus time ordering, mesh ordering, step continuity |
+| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand in `integrand_dict`, plus time ordering, mesh ordering, step continuity |
 | `test_variable_integration.py` | Same but for variable methods (`adaptive_heun`, `interpolatory3_variable`) |
 | `test_data_types.py` | float32 and float64 handling |
 | `test_adaptivity.py` | Step adding (coarse mesh grows) and removal (dense mesh shrinks), mesh convergence |
 | `test_tableau.py` | Tableau b weights sum to 1 (uniform and variable methods) |
-| `test_ode_path_integral.py` | `integrate()` wrapper matches direct solver construction |
+| `test_path_integral.py` | `integrate()` wrapper matches direct solver construction |
 | `test_chemistry.py` | Wolf-Schlegel 2D potential: parallel vs scipy.integrate.quad |
 | `test_exactness.py` | **Polynomial-exactness** for every method (each method is exact through its claimed degree, e.g. gk21 through degree 31) |
 | `test_scipy_agreement.py` | Cross-validation against `scipy.integrate.quad` on canonical smooth integrands |
@@ -88,7 +88,7 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 | `test_record_and_sort.py` | `_record_results` and `_sort_record` |
 | `test_evaluate_and_merge.py` | `_evaluate_adaptive_nodes` + `_merge_excess_nodes` for both uniform and variable solvers |
 | `test_prune_and_optimal.py` | `_prune_excess_mesh`, `_get_optimal_mesh` |
-| `test_y0_and_ode_args.py` | `y0` additive offset (`result.integral = y0 + ∫f`) and `ode_args` forwarding to `f(t, *ode_args)` |
+| `test_y0_and_f_args.py` | `y0` additive offset (`result.integral = y0 + ∫f`) and `f_args` forwarding to `f(t, *f_args)` |
 | `test_gradient.py` / `test_gradient_integration.py` | Per-batch backward, learnable integrand training loops |
 
 **Snapshot tests** are the regression net for internal refactors: the
@@ -118,7 +118,7 @@ torchpathdiffeq/
 ├── runge_kutta.py         # _RK_integral, UniformAdaptiveQuadrature,
 │                          # VariableAdaptiveQuadrature, adaptive_quadrature factory
 ├── integrate.py           # integrate() free function (one-shot wrapper)
-├── examples.py            # ODE_dict (test integrands) + wolf_schlegel
+├── examples.py            # integrand_dict (test integrands) + wolf_schlegel
 └── distributed.py         # multi-GPU / SLURM support (internal)
 ```
 
@@ -151,7 +151,7 @@ from torchpathdiffeq import (
     IntegrationResult,  # return-type dataclass
     UNIFORM_METHODS,  # registry of uniform method names
     VARIABLE_METHODS,  # registry of variable method names
-    ODE_dict,
+    integrand_dict,
     wolf_schlegel,  # test integrands with analytical solutions
     steps,  # sampling-mode enum
 )
@@ -245,7 +245,7 @@ merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
 
 - `_setup_memory_checks` benchmarks `f` with increasing `N`, measures
   per-evaluation memory cost (with a 2.1× safety factor).
-- `_get_max_ode_evals = usable_memory / per_eval_size`.
+- `_get_max_f_evals = usable_memory / per_eval_size`.
 - `_get_usable_memory = free - buffer`, where
   `buffer = (1 - total_mem_usage) * total_memory`.
 - Supports both CUDA (`torch.cuda.mem_get_info`) and CPU
@@ -274,8 +274,8 @@ merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
   `y0` is added once at the final `IntegrationResult`.
 - `result.y0` echoes the value that was used (after dtype/device
   coercion) so callers can recover what offset was applied.
-- `ode_args` is a tuple forwarded positionally to the integrand:
-  `f(t, *ode_args)`. Used by `examples/pode/` for path parameters.
+- `f_args` is a tuple forwarded positionally to the integrand:
+  `f(t, *f_args)`. Used by `examples/pode/` for path parameters.
 
 ### Warm-starting (`reuse_mesh=True`)
 

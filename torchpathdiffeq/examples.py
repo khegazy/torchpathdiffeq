@@ -5,7 +5,7 @@ Each function computes f(t) and has a corresponding ``*_solution`` function that
 returns the exact value of the integral from mesh_init to mesh_final. These are used
 by the test suite to verify numerical integration accuracy.
 
-The ``ODE_dict`` maps names to ``(integrand, solution, error_cutoff)`` tuples,
+The ``integrand_dict`` maps names to ``(integrand, solution, error_cutoff)`` tuples,
 where ``error_cutoff`` is the maximum acceptable relative error for tests.
 """
 
@@ -280,7 +280,7 @@ def wolf_schlegel(t: torch.Tensor, _y: torch.Tensor | None = None) -> torch.Tens
 
 # Registry of test integrands: maps name -> (integrand_fn, analytical_solution_fn, error_cutoff).
 # error_cutoff is the maximum acceptable relative error |computed - exact| / |exact|.
-ODE_dict = {
+integrand_dict = {
     "t": (t, t_solution, 1e-7),
     "t_squared": (t_squared, t_squared_solution, 1e-6),
     "sine_squared": (sine_squared, sine_squared_solution, 1e-6),

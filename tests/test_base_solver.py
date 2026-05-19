@@ -193,7 +193,7 @@ class TestCheckVariables:
     def test_fills_defaults(self):
         """All None args are replaced with stored defaults."""
         solver = make_solver_for_unit_test()
-        _ode_fxn, mesh_init, mesh_final, y0 = solver._check_variables()
+        _f, mesh_init, mesh_final, y0 = solver._check_variables()
         assert mesh_init is not None
         assert mesh_final is not None
         assert y0 is not None

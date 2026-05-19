@@ -160,12 +160,11 @@ class TestQuadratureWithGradients:
         integrand.eval()  # Prevent auto-backward; we do manual backward
         solver = _make_solver(method_name, integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
-        # Gradient should be nonzero and positive (integral of positive function)
-        # Note: only the first batch's gradient flows through (library design),
-        # so the exact value won't match the full analytical derivative.
         assert integrand.scale.grad is not None
         assert integrand.scale.grad.item() > 0, (
             f"Expected positive grad, got {integrand.scale.grad.item():.6f}"
@@ -187,7 +186,9 @@ class TestPathOptimization:
         path_integrand.eval()
         solver = _make_solver("bosh3", path_integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
         assert path_integrand.offsets.grad is not None
@@ -202,14 +203,18 @@ class TestPathOptimization:
 
         # Initial loss
         solver = _make_solver("bosh3", path_integrand)
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         initial_loss = result.integral.sum().item()
 
         # Optimization loop
         for _ in range(10):
             optimizer.zero_grad()
             solver = _make_solver("bosh3", path_integrand)
-            result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+            result = solver.integrate(
+                mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+            )
             loss = result.integral.sum()
             loss.backward()
             optimizer.step()
@@ -221,16 +226,16 @@ class TestPathOptimization:
 
 
 # ---------------------------------------------------------------------------
-# TestODESolvingViaQuadrature
+# TestQuadratureWithInitialValue
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method_name", GRADIENT_METHODS)
-class TestODESolvingViaQuadrature:
-    """Solve dy/dt = f(t) via quadrature: y(T) = y0 + integral(f(t)dt)."""
+class TestQuadratureWithInitialValue:
+    """Verify y0 + integral(f(t)dt) matches the analytical value."""
 
-    def test_ode_solution_accuracy(self, method_name):
-        """y0 + integral matches analytical y(T) for dy/dt = f(t)."""
+    def test_integral_with_y0_accuracy(self, method_name):
+        """y0 + integral matches the analytical value for the given integrand."""
         torch.manual_seed(SEED)
         integrand = _ExpIntegrand(scale=1.0)
         integrand.eval()
@@ -238,7 +243,7 @@ class TestODESolvingViaQuadrature:
 
         result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
 
-        # The solver computes ∫f(t)dt; add y0 externally for the ODE solution
+        # The solver computes ∫f(t)dt; add y0 externally
         y0 = torch.tensor([4.0], dtype=torch.float64)
         y_T = y0 + result.integral
         analytical = y0 + _exp_analytical_integral(0.0, 1.0)
@@ -246,7 +251,7 @@ class TestODESolvingViaQuadrature:
             f"Expected {analytical.item():.6f}, got {y_T.item():.6f}"
         )
 
-    def test_ode_with_neural_integrand(self, method_name):
+    def test_neural_integrand(self, method_name):
         """Train MLP to approximate f(t), integrate, verify accuracy."""
         torch.manual_seed(SEED)
 
@@ -294,13 +299,14 @@ class TestTrainingLoopPattern:
     """Tests for end-to-end training loop patterns."""
 
     def test_manual_backward(self, method_name):
-        """Module in eval mode, manual backward() → param grads exist."""
+        """take_gradient=False: manual backward() on result.integral → param grads exist."""
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
-        integrand.eval()
         solver = _make_solver(method_name, integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
         assert integrand.scale.grad is not None
@@ -324,6 +330,7 @@ class TestTrainingLoopPattern:
             result = solver.integrate(
                 mesh_init=T_INIT,
                 mesh_final=T_FINAL,
+                take_gradient=False,
                 loss_fxn=target_loss,
             )
             result.loss.backward()

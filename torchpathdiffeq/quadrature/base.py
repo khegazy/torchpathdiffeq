@@ -153,7 +153,7 @@ class AdaptiveQuadrature(SolverBase):
         idxs_add: torch.Tensor,
         y: torch.Tensor,
         nodes: torch.Tensor,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Evaluate the integrand at new points created by splitting failed steps.
@@ -169,7 +169,7 @@ class AdaptiveQuadrature(SolverBase):
             y: Current integrand evaluations for all steps. Shape: [N, C, D].
             nodes: Current quadrature point positions for all steps.
                 Shape: [N, C, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
 
         Returns:
             Tuple of (y_new, nodes_new): integrand evaluations and quadrature
@@ -205,15 +205,14 @@ class AdaptiveQuadrature(SolverBase):
         mesh: torch.Tensor | None = None,
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
+        reuse_mesh: bool = False,
+        random_initial_mesh: bool = True,
         N_init_steps: int = 13,
-        ode_args: tuple = (),
-        take_gradient: bool = False,
-        is_training: bool | None = None,
+        f_args: tuple = (),
+        take_gradient: bool = True,
         total_mem_usage: float | None = None,
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
-        reuse_mesh: bool = False,
-        random_initial_mesh: bool = True,
     ) -> IntegrationResult:
         """
         Perform parallel adaptive numerical integration of f.
@@ -245,13 +244,9 @@ class AdaptiveQuadrature(SolverBase):
             N_init_steps: Approximate number of initial steps when mesh is None.
                 The actual count is ~sqrt(N_init_steps) segments with
                 ~sqrt(N_init_steps)+1 random sub-barriers each.
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
             take_gradient: If True, calls loss.backward() after each batch
                 to compute gradients through the integration.
-            is_training: If True, enables training mode so that take_gradient
-                is activated. If False, disables gradient computation regardless
-                of take_gradient. If None, inferred from whether f is an
-                nn.Module in training mode.
             total_mem_usage: Fraction of memory to use for batching. Overrides
                 the value from construction if provided.
             loss_fxn: Custom loss function. Takes an IntegrationResult, returns a
@@ -304,7 +299,7 @@ class AdaptiveQuadrature(SolverBase):
 
         # Get variables or populate with default values, send to correct device
         f, mesh_init, mesh_final, y0 = self._check_variables(
-            f, mesh_init, mesh_final, y0, is_training
+            f, mesh_init, mesh_final, y0
         )
         total_mem_usage = (
             self.total_mem_usage if total_mem_usage is None else total_mem_usage
@@ -317,21 +312,24 @@ class AdaptiveQuadrature(SolverBase):
         # Using id() avoids the lambda-collision bug present in earlier
         # versions which compared f.__name__ (every lambda has
         # __name__ == "<lambda>").
-        same_ode_fxn = (
-            self.previous_ode_fxn_id is not None and id(f) == self.previous_ode_fxn_id
+        same_integrand_fxn = (
+            self.previous_f_id is not None and id(f) == self.previous_f_id
         )
         # Benchmark memory footprint on first call with a new integrand
-        if not same_ode_fxn and max_batch is None:
-            self._setup_memory_checks(f, mesh_init, ode_args=ode_args)
-        assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
-            "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
-        )
+        if not same_integrand_fxn and max_batch is None:
+            self._setup_memory_checks(
+                f, mesh_init, take_gradient=take_gradient, f_args=f_args
+            )
+        # From previous version
+        # assert self._get_max_f_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
+        #    "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        # )
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
 
         # Make sure f exists and provides the correct output
         assert f is not None, "Must specify f or pass it during class initialization."
         test_output = f(
-            torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *ode_args
+            torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *f_args
         )
         assert len(test_output.shape) >= 2
         del test_output
@@ -346,7 +344,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh_init,
             mesh_final,
             reuse_mesh,
-            same_ode_fxn,
+            same_integrand_fxn,
             random_initial_mesh,
             N_init_steps,
         )
@@ -361,7 +359,7 @@ class AdaptiveQuadrature(SolverBase):
             if max_batch is not None:
                 max_steps = max_batch // self.C
             else:
-                max_steps = int(self._get_max_ode_evals(total_mem_usage) // self.C)
+                max_steps = int(self._get_max_f_evals(total_mem_usage) // self.C)
 
             if y is not None:
                 assert max_steps >= len(y), f"{max_steps}  {len(y)}"
@@ -380,10 +378,10 @@ class AdaptiveQuadrature(SolverBase):
             # --- Step 2: Evaluate the integrand at all quadrature points ---
             # Flatten [N, C, T] -> [N*C, T] for batch evaluation, then reshape back
             N, C, _T = nodes.shape
-            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *ode_args)
+            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *f_args)
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
 
-            # --- Step 3: Compute integral contributions via RK formula ---
+            # --- Step 3: Compute integral contributions via qudrature formula ---
             t0 = time.time()
             method_output = self._calculate_integral(
                 nodes,
@@ -491,9 +489,9 @@ class AdaptiveQuadrature(SolverBase):
 
             # --- Step 6: Record accepted results and handle gradients ---
             if nodes.shape[0] > 0:
-                take_gradient = take_gradient or (
-                    self.training and (torch.any(mesh_trackers) or take_gradient)
-                )
+                # take_gradient = take_gradient or (
+                #    self.training and (torch.any(mesh_trackers) or take_gradient)
+                # )
                 intermediate_results = IntegrationResult(
                     integral=method_output.integral,
                     integral_error=method_output.integral_error,
@@ -533,7 +531,7 @@ class AdaptiveQuadrature(SolverBase):
         mesh_optimal = self._get_optimal_mesh(record, mesh)
         # Cache results for warm-starting subsequent calls with the same integrand
         self.mesh_previous = mesh_optimal
-        self.previous_ode_fxn_id = id(f)
+        self.previous_f_id = id(f)
 
         return IntegrationResult(
             integral=record["integral"] + y0,
@@ -855,7 +853,7 @@ class AdaptiveQuadrature(SolverBase):
         mesh_init,
         mesh_final,
         reuse_mesh,
-        same_ode_fxn,
+        same_integrand_fxn,
         random_initial_mesh,
         N_init_steps,
     ):
@@ -865,7 +863,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh_is_given = False
             # Warn if the cached mesh was produced for a different integrand;
             # the user has opted into reuse but we should flag the mismatch.
-            if not same_ode_fxn:
+            if not same_integrand_fxn:
                 warnings.warn(
                     "reuse_mesh=True but f id differs from the cached "
                     "integrand; warm-started mesh may be poorly tuned for "
@@ -1351,52 +1349,57 @@ class AdaptiveQuadrature(SolverBase):
             return self._get_cpu_memory()
 
     def _setup_memory_checks(
-        self, f: Callable, node_test: torch.Tensor, ode_args: tuple = ()
+        self,
+        f: Callable,
+        node_test: torch.Tensor,
+        take_gradient: bool,
+        f_args: tuple = (),
     ) -> None:
         """
         Benchmark the integrand's memory footprint to determine batch sizes.
 
         Runs the integrand with increasing batch sizes (10, 100, 1000, ...)
         and measures the memory consumed per evaluation. This per-evaluation
-        memory cost (ode_unit_mem_size) is then used throughout integration
+        memory cost (f_unit_mem_size) is then used throughout integration
         to dynamically compute how many steps can fit in one batch.
 
-        A 2.1x safety factor is applied to the measured memory to account
+        When take_gradient=True, a 2.1x safety factor is applied to the measured memory to account
         for intermediate allocations during integration (RK computation,
         error estimation, etc.).
 
         Args:
             f: The integrand function to benchmark.
             node_test: A sample node point for benchmarking. Shape: [T] or [1, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
         """
         assert len(node_test.shape) <= 2
         if len(node_test.shape) == 2:
             node_test = node_test[0]
         node_test = node_test.unsqueeze(0)
-        self.ode_unit_mem_size = None
+        self.f_unit_mem_size = None
 
         N = 10
         max_evals = 2 * N
         eval_time = 0
+        mem_scale = 2.1 if take_gradient else 1.0
         while eval_time < 0.1 and N < 1e9 and max_evals > N:
             t0 = time.time()
             t_input = torch.tile(node_test, (N, 1))
             mem_before = self._get_memory()
             if (
-                self.ode_unit_mem_size is not None
-                and self.ode_unit_mem_size * N > mem_before[0]
+                self.f_unit_mem_size is not None
+                and self.f_unit_mem_size * N > mem_before[0]
             ):
                 return
-            result = f(t_input, *ode_args)
+            result = f(t_input, *f_args)
             mem_after = self._get_memory()
             del result
-            self.ode_unit_mem_size = 2.1 * max(
+            self.f_unit_mem_size = mem_scale * max(
                 0, (mem_before[0] - mem_after[0]) / float(N)
             )
             eval_time = time.time() - t0
             N = 10 * N
-            max_evals = self._get_max_ode_evals(0.8)
+            max_evals = self._get_max_f_evals(0.8)
         logger.debug("Ending unit memory search")
 
     def _get_usable_memory(self, total_mem_usage: float) -> float:
@@ -1416,7 +1419,7 @@ class AdaptiveQuadrature(SolverBase):
         buffer = (1 - total_mem_usage) * total
         return max(0, free - buffer)
 
-    def _get_max_ode_evals(self, total_mem_usage: float) -> int:
+    def _get_max_f_evals(self, total_mem_usage: float) -> int:
         """
         Compute the maximum number of integrand evaluations that fit in memory.
 
@@ -1430,4 +1433,4 @@ class AdaptiveQuadrature(SolverBase):
             Maximum number of evaluations (integer).
         """
         usable = self._get_usable_memory(total_mem_usage)
-        return int(usable // (1e-12 + self.ode_unit_mem_size))
+        return int(usable // (1e-12 + self.f_unit_mem_size))

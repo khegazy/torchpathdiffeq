@@ -118,7 +118,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         idxs_add: torch.Tensor,
         y: torch.Tensor,
         nodes: torch.Tensor,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Split failed steps and reuse existing evaluations where possible.
@@ -139,7 +139,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
             idxs_add: Indices of steps that need splitting. Shape: [R].
             y: Current integrand evaluations, reused in sub-steps. Shape: [N, C, D].
             nodes: Current quadrature point positions. Shape: [N, C, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
 
         Returns:
             Tuple of (y_add_combined, nodes_new) where:
@@ -151,7 +151,7 @@ class _VariableAdaptiveQuadratureBase(AdaptiveQuadrature):
         # Compute midpoints between each pair of consecutive quadrature points
         nodes_mid = (nodes[idxs_add, 1:] + nodes[idxs_add, :-1]) / 2  # [n_add, C-1, 1]
         # Evaluate the integrand at the new midpoints
-        y_add = f(nodes_mid.view(-1, nodes.shape[-1]), *ode_args)
+        y_add = f(nodes_mid.view(-1, nodes.shape[-1]), *f_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", N=len(idxs_add))
         D = y_add.shape[-1]
 

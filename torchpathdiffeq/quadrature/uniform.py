@@ -117,7 +117,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         idxs_add: torch.Tensor,
         _y: torch.Tensor,
         nodes: torch.Tensor,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Split failed steps at their midpoints and evaluate the integrand.
@@ -133,7 +133,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
             _y: Current integrand evaluations (unused here, present for
                 interface compatibility with the variable solver). Shape: [N, C, D].
             nodes: Current quadrature point positions. Shape: [N, C, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
 
         Returns:
             Tuple of (y_add, nodes_new) where:
@@ -154,7 +154,7 @@ class _UniformAdaptiveQuadratureBase(AdaptiveQuadrature):
         )
         # Place quadrature points in each sub-step and evaluate
         nodes_new = self._compute_nodes(mesh_left.view(-1, T), mesh_right.view(-1, T))
-        y_add = f(nodes_new.view(-1, T), *ode_args)
+        y_add = f(nodes_new.view(-1, T), *f_args)
         y_add = rearrange(y_add, "(N C) D -> N C D", C=self.C)
         return y_add, nodes_new
 

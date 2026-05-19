@@ -1,12 +1,12 @@
-"""Tests for the ``y0`` and ``ode_args`` parameters.
+"""Tests for the ``y0`` and ``f_args`` parameters.
 
 Both are documented public parameters of every solver call but were
 not exercised by the existing test suite as integration-level
 behaviors. This file pins their behavior end-to-end so any regression
 shows up immediately.
 
-  * ``ode_args``: extra arguments forwarded to the integrand callable.
-    The integrand is invoked as ``f(t, *ode_args)``. This is the
+  * ``f_args``: extra arguments forwarded to the integrand callable.
+    The integrand is invoked as ``f(t, *f_args)``. This is the
     contract `examples/pode/` relies on — verified here directly.
 
   * ``y0``: documented as "Initial value of the integral accumulator".
@@ -32,12 +32,12 @@ import torch
 from torchpathdiffeq import adaptive_quadrature, integrate, steps
 
 # -----------------------------------------------------------------------------
-# ode_args — extra args forwarded to the integrand.
+# f_args — extra args forwarded to the integrand.
 # -----------------------------------------------------------------------------
 
 
-def test_ode_args_forwards_to_integrand():
-    """``f(t, *ode_args)`` is what the solver calls; verify directly."""
+def test_f_forwards_to_integrand():
+    """``f(t, *f_args)`` is what the solver calls; verify directly."""
 
     def f(t: torch.Tensor, scale: float, offset: float) -> torch.Tensor:
         return scale * torch.sin(t) + offset
@@ -53,7 +53,7 @@ def test_ode_args_forwards_to_integrand():
         f=f,
         mesh_init=torch.tensor([a], dtype=torch.float64),
         mesh_final=torch.tensor([b], dtype=torch.float64),
-        ode_args=(3.0, 0.5),
+        f_args=(3.0, 0.5),
     )
     # ∫ (3 sin t + 0.5) dt over [0, π] = 3*2 + 0.5*π = 6 + π/2.
     expected = 6.0 + 0.5 * math.pi
@@ -62,8 +62,8 @@ def test_ode_args_forwards_to_integrand():
     )
 
 
-def test_ode_args_default_empty_tuple_works_with_zero_arg_integrand():
-    """Default ``ode_args=()`` calls f with just t. Make sure that path
+def test_f_default_empty_tuple_works_with_zero_arg_integrand():
+    """Default ``f_args=()`` calls f with just t. Make sure that path
     is exercised: ``f(t)`` succeeds when no extras are passed.
 
     Bounds are float64 because the 1e-7 tolerance below requires it —
@@ -82,8 +82,8 @@ def test_ode_args_default_empty_tuple_works_with_zero_arg_integrand():
     assert abs(result.integral.item() - 2.0) < 1e-7
 
 
-def test_ode_args_with_tensor_value():
-    """``ode_args`` can be tensors too — the solver doesn't unpack them
+def test_f_with_tensor_value():
+    """``f_args`` can be tensors too — the solver doesn't unpack them
     or care about types beyond positional forwarding to f.
     """
 
@@ -101,7 +101,7 @@ def test_ode_args_with_tensor_value():
         f=f,
         mesh_init=torch.tensor([0.0], dtype=torch.float64),
         mesh_final=torch.tensor([math.pi], dtype=torch.float64),
-        ode_args=(scale,),
+        f_args=(scale,),
     )
     assert abs(result.integral.item() - 4.0) < 1e-7
 

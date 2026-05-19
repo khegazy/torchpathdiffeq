@@ -72,7 +72,7 @@ def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
     mesh_final = torch.tensor([b], dtype=torch.float64)
     method = "dopri5"
 
-    # --- Path A: solver class directly so we can pass take_gradient/is_training. ---
+    # --- Path A: solver class directly so we can pass take_gradient=True. ---
     theta = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
 
     def f_theta(t):
@@ -84,12 +84,8 @@ def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
         mesh_init=mesh_init,
         mesh_final=mesh_final,
         take_gradient=True,
-        is_training=True,
     )
-    assert theta.grad is not None, (
-        "take_gradient=True did not populate theta.grad — "
-        "is_training may not have been honored."
-    )
+    assert theta.grad is not None, "take_gradient=True did not populate theta.grad"
     grad_a = theta.grad.item()
 
     # --- Path B: directly integrate g(t) = df_theta / dtheta. ---
@@ -111,12 +107,11 @@ def test_grad_of_integral_matches_integral_of_grad(name, g, interval):
 
 
 def test_single_batch_autograd_grad_works():
-    """For small integrals that fit in one memory-batch, calling
-    ``torch.autograd.grad(out.integral, theta)`` works correctly
-    because no per-batch detachment ever fires.
+    """With ``take_gradient=False``, the full computation graph is preserved
+    and ``torch.autograd.grad(out.integral, theta)`` works correctly.
 
-    Multi-batch integrals require ``take_gradient=True`` (see
-    ``test_grad_of_integral_matches_integral_of_grad``).
+    Use ``take_gradient=True`` instead when GPU memory prevents holding the
+    full graph (see ``test_grad_of_integral_matches_integral_of_grad``).
     """
     theta = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
     out = integrate(
@@ -126,6 +121,7 @@ def test_single_batch_autograd_grad_works():
         rtol=RTOL,
         mesh_init=torch.tensor([0.0], dtype=torch.float64),
         mesh_final=torch.tensor([1.0], dtype=torch.float64),
+        take_gradient=False,
     )
     grad_a = torch.autograd.grad(out.integral.sum(), theta)[0].item()
     # int_0^1 t^2 dt = 1/3
@@ -158,7 +154,6 @@ def test_take_gradient_does_not_corrupt_integral_value():
         mesh_init=mesh_init,
         mesh_final=mesh_final,
         take_gradient=True,
-        is_training=True,
     )
 
     assert (

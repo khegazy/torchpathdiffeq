@@ -12,7 +12,7 @@ from _helpers import (
     VARIABLE_METHOD_NAMES,
 )
 
-from torchpathdiffeq import UNIFORM_METHODS, ODE_dict
+from torchpathdiffeq import UNIFORM_METHODS, integrand_dict
 from torchpathdiffeq.base import get_sampling_type, steps
 from torchpathdiffeq.examples import (
     damped_sine,
@@ -250,9 +250,9 @@ class TestExampleSolutions:
         assert torch.allclose(result, torch.tensor([4.0]))
 
     @pytest.mark.parametrize("integrand_name", INTEGRAND_NAMES)
-    def test_solution_consistency_with_ode_dict(self, integrand_name):
-        """Each ODE_dict solution function gives a finite result on [0, 1]."""
-        _, solution_fxn, _ = ODE_dict[integrand_name]
+    def test_solution_consistency(self, integrand_name):
+        """Each integrand_dict solution function gives a finite result on [0, 1]."""
+        _, solution_fxn, _ = integrand_dict[integrand_name]
         result = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         assert torch.isfinite(result).all(), f"{integrand_name} solution is not finite"
         assert result.numel() > 0, f"{integrand_name} solution is empty"
