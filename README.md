@@ -130,7 +130,6 @@ solver.integrate(
     mesh_init=mesh_init,
     mesh_final=mesh_final,
     take_gradient=True,  # per-batch backward; accumulates into theta.grad
-    is_training=True,
 )
 print(theta.grad)  # 2.0
 
@@ -173,7 +172,6 @@ for epoch in range(N_epochs):
         mesh_final=mesh_final,
         reuse_mesh=(epoch > 0),
         take_gradient=True,
-        is_training=True,
     )
     optimizer.step()
 ```
