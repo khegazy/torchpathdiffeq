@@ -242,7 +242,7 @@ class SolverBase(ABC, DistributedEnvironment):
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
         mesh: torch.Tensor | None = None,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> IntegrationResult:
         """
         Perform numerical path integration of f from mesh_init to mesh_final.
@@ -264,7 +264,7 @@ class SolverBase(ABC, DistributedEnvironment):
             t: Optional initial time points. If provided, these serve as the
                 starting mesh for adaptive refinement. Shape depends on solver:
                 [N, T] for step barriers, [N, C, T] for full quadrature points.
-            ode_args: Extra arguments passed to f after the time tensor.
+            f_args: Extra arguments passed to f after the time tensor.
 
         Returns:
             IntegrationResult containing the computed integral, error estimates,

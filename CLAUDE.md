@@ -88,7 +88,7 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 | `test_record_and_sort.py` | `_record_results` and `_sort_record` |
 | `test_evaluate_and_merge.py` | `_evaluate_adaptive_nodes` + `_merge_excess_nodes` for both uniform and variable solvers |
 | `test_prune_and_optimal.py` | `_prune_excess_mesh`, `_get_optimal_mesh` |
-| `test_y0_and_f_args.py` | `y0` additive offset (`result.integral = y0 + ∫f`) and `ode_args` forwarding to `f(t, *ode_args)` |
+| `test_y0_and_f_args.py` | `y0` additive offset (`result.integral = y0 + ∫f`) and `f_args` forwarding to `f(t, *f_args)` |
 | `test_gradient.py` / `test_gradient_integration.py` | Per-batch backward, learnable integrand training loops |
 
 **Snapshot tests** are the regression net for internal refactors: the
@@ -274,8 +274,8 @@ merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
   `y0` is added once at the final `IntegrationResult`.
 - `result.y0` echoes the value that was used (after dtype/device
   coercion) so callers can recover what offset was applied.
-- `ode_args` is a tuple forwarded positionally to the integrand:
-  `f(t, *ode_args)`. Used by `examples/pode/` for path parameters.
+- `f_args` is a tuple forwarded positionally to the integrand:
+  `f(t, *f_args)`. Used by `examples/pode/` for path parameters.
 
 ### Warm-starting (`reuse_mesh=True`)
 

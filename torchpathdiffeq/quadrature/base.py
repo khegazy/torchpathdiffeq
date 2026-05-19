@@ -153,7 +153,7 @@ class AdaptiveQuadrature(SolverBase):
         idxs_add: torch.Tensor,
         y: torch.Tensor,
         nodes: torch.Tensor,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Evaluate the integrand at new points created by splitting failed steps.
@@ -169,7 +169,7 @@ class AdaptiveQuadrature(SolverBase):
             y: Current integrand evaluations for all steps. Shape: [N, C, D].
             nodes: Current quadrature point positions for all steps.
                 Shape: [N, C, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
 
         Returns:
             Tuple of (y_new, nodes_new): integrand evaluations and quadrature
@@ -208,7 +208,7 @@ class AdaptiveQuadrature(SolverBase):
         reuse_mesh: bool = False,
         random_initial_mesh: bool = True,
         N_init_steps: int = 13,
-        ode_args: tuple = (),
+        f_args: tuple = (),
         take_gradient: bool = True,
         total_mem_usage: float | None = None,
         loss_fxn: Callable | None = None,
@@ -244,7 +244,7 @@ class AdaptiveQuadrature(SolverBase):
             N_init_steps: Approximate number of initial steps when mesh is None.
                 The actual count is ~sqrt(N_init_steps) segments with
                 ~sqrt(N_init_steps)+1 random sub-barriers each.
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
             take_gradient: If True, calls loss.backward() after each batch
                 to compute gradients through the integration.
             total_mem_usage: Fraction of memory to use for batching. Overrides
@@ -318,7 +318,7 @@ class AdaptiveQuadrature(SolverBase):
         # Benchmark memory footprint on first call with a new integrand
         if not same_integrand_fxn and max_batch is None:
             self._setup_memory_checks(
-                f, mesh_init, take_gradient=take_gradient, ode_args=ode_args
+                f, mesh_init, take_gradient=take_gradient, f_args=f_args
             )
         # From previous version
         # assert self._get_max_f_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
@@ -329,7 +329,7 @@ class AdaptiveQuadrature(SolverBase):
         # Make sure f exists and provides the correct output
         assert f is not None, "Must specify f or pass it during class initialization."
         test_output = f(
-            torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *ode_args
+            torch.tensor([[mesh_init]], dtype=self.dtype, device=self.device), *f_args
         )
         assert len(test_output.shape) >= 2
         del test_output
@@ -378,7 +378,7 @@ class AdaptiveQuadrature(SolverBase):
             # --- Step 2: Evaluate the integrand at all quadrature points ---
             # Flatten [N, C, T] -> [N*C, T] for batch evaluation, then reshape back
             N, C, _T = nodes.shape
-            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *ode_args)
+            y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *f_args)
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
 
             # --- Step 3: Compute integral contributions via qudrature formula ---
@@ -1353,7 +1353,7 @@ class AdaptiveQuadrature(SolverBase):
         f: Callable,
         node_test: torch.Tensor,
         take_gradient: bool,
-        ode_args: tuple = (),
+        f_args: tuple = (),
     ) -> None:
         """
         Benchmark the integrand's memory footprint to determine batch sizes.
@@ -1370,7 +1370,7 @@ class AdaptiveQuadrature(SolverBase):
         Args:
             f: The integrand function to benchmark.
             node_test: A sample node point for benchmarking. Shape: [T] or [1, T].
-            ode_args: Extra arguments passed to f.
+            f_args: Extra arguments passed to f.
         """
         assert len(node_test.shape) <= 2
         if len(node_test.shape) == 2:
@@ -1391,7 +1391,7 @@ class AdaptiveQuadrature(SolverBase):
                 and self.ode_unit_mem_size * N > mem_before[0]
             ):
                 return
-            result = f(t_input, *ode_args)
+            result = f(t_input, *f_args)
             mem_after = self._get_memory()
             del result
             self.ode_unit_mem_size = mem_scale * max(

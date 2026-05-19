@@ -359,7 +359,7 @@ class Trainer(CurriculumClass):
     def train_iteration(self):
         self.optimizer.zero_grad()
         self.integral_output = self.integrator.integrate(
-            f=self._integrad, mesh=self.input_times, ode_args=(self.model,)
+            f=self._integrad, mesh=self.input_times, f_args=(self.model,)
         )
         # print(epoch_count, integral_output.nodes.shape)
         loss = self.integral_output.loss
@@ -517,7 +517,7 @@ class Trainer(CurriculumClass):
                             eval_integral_output = self.integrator.integrate(
                                 f=self._integrad,
                                 mesh=self.eval_input_times,
-                                ode_args=(self.model,),
+                                f_args=(self.model,),
                             )
                         integral_values.append(eval_integral_output.loss.item())
                         integral_limits.append(eval_t)
@@ -601,7 +601,7 @@ class Trainer(CurriculumClass):
             # print("TIMES", times.shape, loss, torch.std(self.loss_history), self.loss_history, times)
             """
             integral_output = self.integrator.integrate(
-                f=self._integrad, mesh=self.input_times, ode_args=(self.model,)
+                f=self._integrad, mesh=self.input_times, f_args=(self.model,)
             )
             #print(epoch_count, integral_output.nodes.shape)
             loss = integral_output.loss
