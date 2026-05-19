@@ -205,15 +205,15 @@ class AdaptiveQuadrature(SolverBase):
         mesh: torch.Tensor | None = None,
         mesh_init: torch.Tensor | None = None,
         mesh_final: torch.Tensor | None = None,
+        reuse_mesh: bool = False,
+        random_initial_mesh: bool = True,
         N_init_steps: int = 13,
         ode_args: tuple = (),
-        take_gradient: bool = False,
-        is_training: bool | None = None,
+        take_gradient: bool = True,
+        # is_training: bool | None = None,
         total_mem_usage: float | None = None,
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
-        reuse_mesh: bool = False,
-        random_initial_mesh: bool = True,
     ) -> IntegrationResult:
         """
         Perform parallel adaptive numerical integration of f.
@@ -323,9 +323,10 @@ class AdaptiveQuadrature(SolverBase):
         # Benchmark memory footprint on first call with a new integrand
         if not same_ode_fxn and max_batch is None:
             self._setup_memory_checks(f, mesh_init, ode_args=ode_args)
-        assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
-            "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
-        )
+        # From previous version
+        # assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
+        #    "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
+        # )
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
 
         # Make sure f exists and provides the correct output
@@ -383,7 +384,7 @@ class AdaptiveQuadrature(SolverBase):
             y_step_eval = f(torch.flatten(nodes, start_dim=0, end_dim=-2), *ode_args)
             y_step_eval = torch.reshape(y_step_eval, (N, C, -1))
 
-            # --- Step 3: Compute integral contributions via RK formula ---
+            # --- Step 3: Compute integral contributions via qudrature formula ---
             t0 = time.time()
             method_output = self._calculate_integral(
                 nodes,
@@ -491,9 +492,9 @@ class AdaptiveQuadrature(SolverBase):
 
             # --- Step 6: Record accepted results and handle gradients ---
             if nodes.shape[0] > 0:
-                take_gradient = take_gradient or (
-                    self.training and (torch.any(mesh_trackers) or take_gradient)
-                )
+                # take_gradient = take_gradient or (
+                #    self.training and (torch.any(mesh_trackers) or take_gradient)
+                # )
                 intermediate_results = IntegrationResult(
                     integral=method_output.integral,
                     integral_error=method_output.integral_error,
@@ -523,7 +524,11 @@ class AdaptiveQuadrature(SolverBase):
                 )
 
                 # Backpropagate gradients through the integration if requested
-                if take_gradient and loss.requires_grad:
+                if take_gradient:
+                    if loss.requires_grad:
+                        raise RuntimeError(
+                            "Loss does not require grad so gradient can't be taken although take_gradient is true"
+                        )
                     loss.backward()
             del y_step_eval
 
