@@ -21,36 +21,6 @@ from torchpathdiffeq.runge_kutta import _RK_integral
 
 
 # ---------------------------------------------------------------------------
-# TestTrainEvalMethods
-# ---------------------------------------------------------------------------
-
-
-class TestTrainEvalMethods:
-    """Tests for solver.train() and solver.eval()."""
-
-    def test_train_sets_true(self):
-        """solver.train() sets training to True."""
-        solver = make_solver_for_unit_test()
-        solver.train()
-        assert solver.training is True
-
-    def test_eval_sets_false(self):
-        """solver.eval() sets training to False."""
-        solver = make_solver_for_unit_test()
-        solver.train()
-        solver.eval()
-        assert solver.training is False
-
-    def test_toggle(self):
-        """eval() then train() toggles correctly."""
-        solver = make_solver_for_unit_test()
-        solver.eval()
-        assert solver.training is False
-        solver.train()
-        assert solver.training is True
-
-
-# ---------------------------------------------------------------------------
 # TestGradientFlowRKIntegral
 # ---------------------------------------------------------------------------
 

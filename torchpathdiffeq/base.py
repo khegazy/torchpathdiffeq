@@ -177,7 +177,6 @@ class SolverBase(ABC, DistributedEnvironment):
             if mesh_final is not None
             else torch.tensor([1], dtype=torch.float64, device=self.device)
         )
-        self.training = False
         # Cached time barriers from last integration for warm-starting.
         # Used only when integrate(..., reuse_mesh=True) is passed; otherwise
         # ignored. The cached barriers are the *optimal* mesh from the
@@ -403,14 +402,6 @@ class SolverBase(ABC, DistributedEnvironment):
     # -------------------------------------------------------------------------------- #
     #                         TRAINING AND EVALUATION TOGGLING                         #
     # -------------------------------------------------------------------------------- #
-
-    def train(self) -> None:
-        """Enable training mode (gradients will be computed during integration)."""
-        self.training = True
-
-    def eval(self) -> None:
-        """Enable evaluation mode (no gradient computation during integration)."""
-        self.training = False
 
     def _integral_loss(
         self,
