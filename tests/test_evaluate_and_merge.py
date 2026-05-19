@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 from _helpers import (
-    constant_ode_fxn,
+    constant_integrand,
     make_solver_for_unit_test,
     make_variable_solver_for_unit_test,
 )
@@ -34,7 +34,7 @@ class TestUniformEvaluateAdaptiveY:
         y = torch.ones(1, C, 1, dtype=torch.float64)
 
         y_add, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         assert y_add.shape == (2, C, 1)
@@ -48,7 +48,7 @@ class TestUniformEvaluateAdaptiveY:
         y = torch.ones(3, C, 1, dtype=torch.float64)
 
         y_add, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0, 2]), y, t
+            constant_integrand, torch.tensor([0, 2]), y, t
         )
 
         assert y_add.shape == (4, C, 1)
@@ -62,7 +62,7 @@ class TestUniformEvaluateAdaptiveY:
         y = torch.ones(1, C, 1, dtype=torch.float64)
 
         _, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         # First sub-step ends at 0.5, second starts at 0.5
@@ -77,7 +77,7 @@ class TestUniformEvaluateAdaptiveY:
         y = torch.ones(1, solver.C, 1, dtype=torch.float64)
 
         _, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         # First sub-step [0, 0.5]: points = 0 + c * 0.5
@@ -88,13 +88,13 @@ class TestUniformEvaluateAdaptiveY:
         assert torch.allclose(t_add[1, :, 0], expected_second)
 
     def test_ode_fxn_values(self):
-        """constant_ode_fxn returns all ones."""
+        """constant_integrand returns all ones."""
         solver = make_solver_for_unit_test("bosh3")
         t = self._make_t(solver, 0.0, 1.0, 1)
         y = torch.ones(1, solver.C, 1, dtype=torch.float64)
 
         y_add, _ = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         assert torch.allclose(y_add, torch.ones_like(y_add))
@@ -221,7 +221,7 @@ class TestVariableEvaluateAdaptiveY:
         y = torch.tensor([[[10.0], [20.0]]], dtype=torch.float64)
 
         y_add, _ = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         # Old values 10.0 and 20.0 should appear in the output
@@ -236,7 +236,7 @@ class TestVariableEvaluateAdaptiveY:
         y = torch.ones(1, 2, 1, dtype=torch.float64)
 
         _, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         # Midpoint 0.5 should appear in t_add
@@ -258,7 +258,7 @@ class TestVariableEvaluateAdaptiveY:
         y = torch.ones(3, C, 1, dtype=torch.float64)
 
         y_add, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0, 2]), y, t
+            constant_integrand, torch.tensor([0, 2]), y, t
         )
 
         assert y_add.shape == (4, C, 1)
@@ -271,7 +271,7 @@ class TestVariableEvaluateAdaptiveY:
         y = torch.ones(1, 2, 1, dtype=torch.float64)
 
         _, t_add = solver._evaluate_adaptive_nodes(
-            constant_ode_fxn, torch.tensor([0]), y, t
+            constant_integrand, torch.tensor([0]), y, t
         )
 
         # Last point of first sub-step == first point of second sub-step

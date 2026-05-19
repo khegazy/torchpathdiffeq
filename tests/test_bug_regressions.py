@@ -6,7 +6,7 @@ Phase 1 fixes don't regress correctness elsewhere.
 
 Important: investigation found that bug B1 and most of B2 currently
 sit behind dead code. parallel_solver.py:1119-1133 reloads cached
-barriers when ``t is None and same_ode_fxn``, but the unconditional
+barriers when ``t is None and same_integrand_fxn``, but the unconditional
 ``if t is None`` block at line 1135 immediately overwrites the
 result with a fresh random mesh. So the user never sees the bad
 concatenation in the integral value. The bugs ARE real in the

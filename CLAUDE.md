@@ -66,7 +66,7 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 | `test_data_types.py` | float32 and float64 handling |
 | `test_adaptivity.py` | Step adding (coarse mesh grows) and removal (dense mesh shrinks), mesh convergence |
 | `test_tableau.py` | Tableau b weights sum to 1 (uniform and variable methods) |
-| `test_ode_path_integral.py` | `integrate()` wrapper matches direct solver construction |
+| `test_path_integral.py` | `integrate()` wrapper matches direct solver construction |
 | `test_chemistry.py` | Wolf-Schlegel 2D potential: parallel vs scipy.integrate.quad |
 | `test_exactness.py` | **Polynomial-exactness** for every method (each method is exact through its claimed degree, e.g. gk21 through degree 31) |
 | `test_scipy_agreement.py` | Cross-validation against `scipy.integrate.quad` on canonical smooth integrands |
@@ -245,7 +245,7 @@ merged. `_rec_remove` ensures no two adjacent pairs are both flagged.
 
 - `_setup_memory_checks` benchmarks `f` with increasing `N`, measures
   per-evaluation memory cost (with a 2.1× safety factor).
-- `_get_max_ode_evals = usable_memory / per_eval_size`.
+- `_get_max_f_evals = usable_memory / per_eval_size`.
 - `_get_usable_memory = free - buffer`, where
   `buffer = (1 - total_mem_usage) * total_memory`.
 - Supports both CUDA (`torch.cuda.mem_get_info`) and CPU

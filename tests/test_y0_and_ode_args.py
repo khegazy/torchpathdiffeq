@@ -36,7 +36,7 @@ from torchpathdiffeq import adaptive_quadrature, integrate, steps
 # -----------------------------------------------------------------------------
 
 
-def test_ode_args_forwards_to_integrand():
+def test_f_forwards_to_integrand():
     """``f(t, *ode_args)`` is what the solver calls; verify directly."""
 
     def f(t: torch.Tensor, scale: float, offset: float) -> torch.Tensor:
@@ -62,7 +62,7 @@ def test_ode_args_forwards_to_integrand():
     )
 
 
-def test_ode_args_default_empty_tuple_works_with_zero_arg_integrand():
+def test_f_default_empty_tuple_works_with_zero_arg_integrand():
     """Default ``ode_args=()`` calls f with just t. Make sure that path
     is exercised: ``f(t)`` succeeds when no extras are passed.
 
@@ -82,7 +82,7 @@ def test_ode_args_default_empty_tuple_works_with_zero_arg_integrand():
     assert abs(result.integral.item() - 2.0) < 1e-7
 
 
-def test_ode_args_with_tensor_value():
+def test_f_with_tensor_value():
     """``ode_args`` can be tensors too — the solver doesn't unpack them
     or care about types beyond positional forwarding to f.
     """

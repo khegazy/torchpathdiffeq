@@ -226,16 +226,16 @@ class TestPathOptimization:
 
 
 # ---------------------------------------------------------------------------
-# TestODESolvingViaQuadrature
+# TestQuadratureWithInitialValue
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method_name", GRADIENT_METHODS)
-class TestODESolvingViaQuadrature:
-    """Solve dy/dt = f(t) via quadrature: y(T) = y0 + integral(f(t)dt)."""
+class TestQuadratureWithInitialValue:
+    """Verify y0 + integral(f(t)dt) matches the analytical value."""
 
-    def test_ode_solution_accuracy(self, method_name):
-        """y0 + integral matches analytical y(T) for dy/dt = f(t)."""
+    def test_integral_with_y0_accuracy(self, method_name):
+        """y0 + integral matches the analytical value for the given integrand."""
         torch.manual_seed(SEED)
         integrand = _ExpIntegrand(scale=1.0)
         integrand.eval()
@@ -243,7 +243,7 @@ class TestODESolvingViaQuadrature:
 
         result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
 
-        # The solver computes ∫f(t)dt; add y0 externally for the ODE solution
+        # The solver computes ∫f(t)dt; add y0 externally
         y0 = torch.tensor([4.0], dtype=torch.float64)
         y_T = y0 + result.integral
         analytical = y0 + _exp_analytical_integral(0.0, 1.0)
@@ -251,7 +251,7 @@ class TestODESolvingViaQuadrature:
             f"Expected {analytical.item():.6f}, got {y_T.item():.6f}"
         )
 
-    def test_ode_with_neural_integrand(self, method_name):
+    def test_neural_integrand(self, method_name):
         """Train MLP to approximate f(t), integrate, verify accuracy."""
         torch.manual_seed(SEED)
 

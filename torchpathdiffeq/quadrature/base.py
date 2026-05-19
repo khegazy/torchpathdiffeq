@@ -312,14 +312,16 @@ class AdaptiveQuadrature(SolverBase):
         # Using id() avoids the lambda-collision bug present in earlier
         # versions which compared f.__name__ (every lambda has
         # __name__ == "<lambda>").
-        same_ode_fxn = (
+        same_integrand_fxn = (
             self.previous_ode_fxn_id is not None and id(f) == self.previous_ode_fxn_id
         )
         # Benchmark memory footprint on first call with a new integrand
-        if not same_ode_fxn and max_batch is None:
-            self._setup_memory_checks(f, mesh_init, ode_args=ode_args)
+        if not same_integrand_fxn and max_batch is None:
+            self._setup_memory_checks(
+                f, mesh_init, take_gradient=take_gradient, ode_args=ode_args
+            )
         # From previous version
-        # assert self._get_max_ode_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
+        # assert self._get_max_f_evals(total_mem_usage) > (2 * self.Cm1 + 1), (
         #    "Not enough free memory to run 2 integration steps, consider increasing total_mem_usage"
         # )
         loss_fxn = loss_fxn if loss_fxn is not None else self._integral_loss
@@ -342,7 +344,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh_init,
             mesh_final,
             reuse_mesh,
-            same_ode_fxn,
+            same_integrand_fxn,
             random_initial_mesh,
             N_init_steps,
         )
@@ -357,7 +359,7 @@ class AdaptiveQuadrature(SolverBase):
             if max_batch is not None:
                 max_steps = max_batch // self.C
             else:
-                max_steps = int(self._get_max_ode_evals(total_mem_usage) // self.C)
+                max_steps = int(self._get_max_f_evals(total_mem_usage) // self.C)
 
             if y is not None:
                 assert max_steps >= len(y), f"{max_steps}  {len(y)}"
@@ -851,7 +853,7 @@ class AdaptiveQuadrature(SolverBase):
         mesh_init,
         mesh_final,
         reuse_mesh,
-        same_ode_fxn,
+        same_integrand_fxn,
         random_initial_mesh,
         N_init_steps,
     ):
@@ -861,7 +863,7 @@ class AdaptiveQuadrature(SolverBase):
             mesh_is_given = False
             # Warn if the cached mesh was produced for a different integrand;
             # the user has opted into reuse but we should flag the mismatch.
-            if not same_ode_fxn:
+            if not same_integrand_fxn:
                 warnings.warn(
                     "reuse_mesh=True but f id differs from the cached "
                     "integrand; warm-started mesh may be poorly tuned for "
@@ -1347,7 +1349,11 @@ class AdaptiveQuadrature(SolverBase):
             return self._get_cpu_memory()
 
     def _setup_memory_checks(
-        self, f: Callable, node_test: torch.Tensor, ode_args: tuple = ()
+        self,
+        f: Callable,
+        node_test: torch.Tensor,
+        take_gradient: bool,
+        ode_args: tuple = (),
     ) -> None:
         """
         Benchmark the integrand's memory footprint to determine batch sizes.
@@ -1357,7 +1363,7 @@ class AdaptiveQuadrature(SolverBase):
         memory cost (ode_unit_mem_size) is then used throughout integration
         to dynamically compute how many steps can fit in one batch.
 
-        A 2.1x safety factor is applied to the measured memory to account
+        When take_gradient=True, a 2.1x safety factor is applied to the measured memory to account
         for intermediate allocations during integration (RK computation,
         error estimation, etc.).
 
@@ -1375,6 +1381,7 @@ class AdaptiveQuadrature(SolverBase):
         N = 10
         max_evals = 2 * N
         eval_time = 0
+        mem_scale = 2.1 if take_gradient else 1.0
         while eval_time < 0.1 and N < 1e9 and max_evals > N:
             t0 = time.time()
             t_input = torch.tile(node_test, (N, 1))
@@ -1387,12 +1394,12 @@ class AdaptiveQuadrature(SolverBase):
             result = f(t_input, *ode_args)
             mem_after = self._get_memory()
             del result
-            self.ode_unit_mem_size = 2.1 * max(
+            self.ode_unit_mem_size = mem_scale * max(
                 0, (mem_before[0] - mem_after[0]) / float(N)
             )
             eval_time = time.time() - t0
             N = 10 * N
-            max_evals = self._get_max_ode_evals(0.8)
+            max_evals = self._get_max_f_evals(0.8)
         logger.debug("Ending unit memory search")
 
     def _get_usable_memory(self, total_mem_usage: float) -> float:
@@ -1412,7 +1419,7 @@ class AdaptiveQuadrature(SolverBase):
         buffer = (1 - total_mem_usage) * total
         return max(0, free - buffer)
 
-    def _get_max_ode_evals(self, total_mem_usage: float) -> int:
+    def _get_max_f_evals(self, total_mem_usage: float) -> int:
         """
         Compute the maximum number of integrand evaluations that fit in memory.
 

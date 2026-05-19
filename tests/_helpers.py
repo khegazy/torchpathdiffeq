@@ -86,7 +86,7 @@ def make_variable_solver_for_unit_test(
     )
 
 
-def constant_ode_fxn(t, *args):
+def constant_integrand(t, *args):
     """f(t) = 1 for all t. Returns shape [N, 1]."""
     if len(t.shape) == 1:
         return torch.ones(1, dtype=t.dtype, device=t.device)
