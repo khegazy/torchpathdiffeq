@@ -40,7 +40,7 @@ from _helpers import (
     make_uniform_solver,
 )
 
-from torchpathdiffeq import ODE_dict
+from torchpathdiffeq import integrand_dict
 
 DATA_FILE = Path(__file__).parent / "test_snapshots_data.json"
 SNAPSHOT_TOL = 1e-12
@@ -78,7 +78,7 @@ def _run_case(method: str, integrand: str, atol: float, rtol: float) -> dict:
     torch.set_default_dtype(torch.float64)
     try:
         torch.manual_seed(SEED)
-        f, _solution_fxn, _cutoff = ODE_dict[integrand]
+        f, _solution_fxn, _cutoff = integrand_dict[integrand]
         solver = make_uniform_solver(method, atol=atol, rtol=rtol)
         output = solver.integrate(f, mesh_init=T_INIT, mesh_final=T_FINAL)
         return {

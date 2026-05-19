@@ -18,7 +18,7 @@ from _helpers import (
     make_uniform_solver,
 )
 
-from torchpathdiffeq import ODE_dict
+from torchpathdiffeq import integrand_dict
 
 
 @pytest.mark.parametrize("method_name", UNIFORM_METHOD_NAMES)
@@ -28,7 +28,7 @@ class TestUniformIntegralAccuracy:
 
     def _integrate(self, method_name, integrand_name):
         """Run integration for the given method and integrand, return (output, correct, cutoff)."""
-        f, solution_fxn, cutoff = ODE_dict[integrand_name]
+        f, solution_fxn, cutoff = integrand_dict[integrand_name]
         correct = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         torch.manual_seed(SEED)
         solver = make_uniform_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT)

@@ -61,7 +61,7 @@ solver) and **unit** (one function at a time with hand-crafted inputs):
 
 | File | What it tests |
 |---|---|
-| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand in `ODE_dict`, plus time ordering, mesh ordering, step continuity |
+| `test_integrals.py` | Numerical accuracy: each uniform method × each integrand in `integrand_dict`, plus time ordering, mesh ordering, step continuity |
 | `test_variable_integration.py` | Same but for variable methods (`adaptive_heun`, `interpolatory3_variable`) |
 | `test_data_types.py` | float32 and float64 handling |
 | `test_adaptivity.py` | Step adding (coarse mesh grows) and removal (dense mesh shrinks), mesh convergence |
@@ -118,7 +118,7 @@ torchpathdiffeq/
 ├── runge_kutta.py         # _RK_integral, UniformAdaptiveQuadrature,
 │                          # VariableAdaptiveQuadrature, adaptive_quadrature factory
 ├── integrate.py           # integrate() free function (one-shot wrapper)
-├── examples.py            # ODE_dict (test integrands) + wolf_schlegel
+├── examples.py            # integrand_dict (test integrands) + wolf_schlegel
 └── distributed.py         # multi-GPU / SLURM support (internal)
 ```
 
@@ -151,7 +151,7 @@ from torchpathdiffeq import (
     IntegrationResult,  # return-type dataclass
     UNIFORM_METHODS,  # registry of uniform method names
     VARIABLE_METHODS,  # registry of variable method names
-    ODE_dict,
+    integrand_dict,
     wolf_schlegel,  # test integrands with analytical solutions
     steps,  # sampling-mode enum
 )

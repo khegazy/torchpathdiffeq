@@ -24,7 +24,7 @@ from _helpers import (
     assert_time_ordering,
 )
 
-from torchpathdiffeq import ODE_dict, adaptive_quadrature, steps
+from torchpathdiffeq import adaptive_quadrature, integrand_dict, steps
 
 
 def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
@@ -41,11 +41,11 @@ def _make_variable_solver(method_name, atol=ATOL_TIGHT, rtol=RTOL_TIGHT):
 @pytest.mark.parametrize("method_name", VARIABLE_METHOD_NAMES)
 @pytest.mark.parametrize("integrand_name", INTEGRAND_NAMES)
 class TestVariableIntegralAccuracy:
-    """Each variable method correctly integrates each ODE_dict integrand."""
+    """Each variable method correctly integrates each integrand_dict integrand."""
 
     def _integrate(self, method_name, integrand_name):
         """Run integration; return (output, correct, cutoff)."""
-        f, solution_fxn, cutoff = ODE_dict[integrand_name]
+        f, solution_fxn, cutoff = integrand_dict[integrand_name]
         correct = solution_fxn(mesh_init=T_INIT, mesh_final=T_FINAL)
         torch.manual_seed(SEED)
         solver = _make_variable_solver(method_name)
@@ -57,7 +57,7 @@ class TestVariableIntegralAccuracy:
         output, correct, cutoff = self._integrate(method_name, integrand_name)
         rel_error = torch.abs((output.integral.cpu() - correct) / correct)
         # Variable methods are 2nd or 3rd order so we relax the cutoff
-        # by 100x relative to the uniform-method cutoff in ODE_dict.
+        # by 100x relative to the uniform-method cutoff in integrand_dict.
         # The uniform cutoff was tuned for dopri5 (5th order); variable
         # methods cannot match that on the same atol/rtol setting.
         adjusted_cutoff = cutoff * 100.0

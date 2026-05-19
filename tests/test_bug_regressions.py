@@ -98,10 +98,10 @@ def test_lambda_cache_key_distinguishes_different_lambdas():
     mesh_final = torch.tensor([math.pi], dtype=torch.float64)
 
     solver.integrate(f=f1, mesh_init=mesh_init, mesh_final=mesh_final)
-    key_after_f1 = solver.previous_ode_fxn_id
+    key_after_f1 = solver.previous_f_id
 
     solver.integrate(f=f2, mesh_init=mesh_init, mesh_final=mesh_final)
-    key_after_f2 = solver.previous_ode_fxn_id
+    key_after_f2 = solver.previous_f_id
 
     assert key_after_f1 != key_after_f2, (
         f"Solver cannot distinguish lambda1 from lambda2: "

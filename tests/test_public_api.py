@@ -22,10 +22,10 @@ from torchpathdiffeq import (
     UNIFORM_METHODS,
     VARIABLE_METHODS,
     IntegrationResult,
-    ODE_dict,
     UniformAdaptiveQuadrature,
     VariableAdaptiveQuadrature,
     adaptive_quadrature,
+    integrand_dict,
     integrate,
     steps,
     wolf_schlegel,
@@ -49,8 +49,8 @@ class TestPublicExports:
         assert len(UNIFORM_METHODS) > 0
         assert isinstance(VARIABLE_METHODS, dict)
         assert len(VARIABLE_METHODS) > 0
-        assert isinstance(ODE_dict, dict)
-        assert len(ODE_dict) > 0
+        assert isinstance(integrand_dict, dict)
+        assert len(integrand_dict) > 0
         assert callable(wolf_schlegel)
 
     def test_steps_enum(self):

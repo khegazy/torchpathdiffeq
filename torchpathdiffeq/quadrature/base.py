@@ -313,7 +313,7 @@ class AdaptiveQuadrature(SolverBase):
         # versions which compared f.__name__ (every lambda has
         # __name__ == "<lambda>").
         same_integrand_fxn = (
-            self.previous_ode_fxn_id is not None and id(f) == self.previous_ode_fxn_id
+            self.previous_f_id is not None and id(f) == self.previous_f_id
         )
         # Benchmark memory footprint on first call with a new integrand
         if not same_integrand_fxn and max_batch is None:
@@ -531,7 +531,7 @@ class AdaptiveQuadrature(SolverBase):
         mesh_optimal = self._get_optimal_mesh(record, mesh)
         # Cache results for warm-starting subsequent calls with the same integrand
         self.mesh_previous = mesh_optimal
-        self.previous_ode_fxn_id = id(f)
+        self.previous_f_id = id(f)
 
         return IntegrationResult(
             integral=record["integral"] + y0,
@@ -1360,7 +1360,7 @@ class AdaptiveQuadrature(SolverBase):
 
         Runs the integrand with increasing batch sizes (10, 100, 1000, ...)
         and measures the memory consumed per evaluation. This per-evaluation
-        memory cost (ode_unit_mem_size) is then used throughout integration
+        memory cost (f_unit_mem_size) is then used throughout integration
         to dynamically compute how many steps can fit in one batch.
 
         When take_gradient=True, a 2.1x safety factor is applied to the measured memory to account
@@ -1376,7 +1376,7 @@ class AdaptiveQuadrature(SolverBase):
         if len(node_test.shape) == 2:
             node_test = node_test[0]
         node_test = node_test.unsqueeze(0)
-        self.ode_unit_mem_size = None
+        self.f_unit_mem_size = None
 
         N = 10
         max_evals = 2 * N
@@ -1387,14 +1387,14 @@ class AdaptiveQuadrature(SolverBase):
             t_input = torch.tile(node_test, (N, 1))
             mem_before = self._get_memory()
             if (
-                self.ode_unit_mem_size is not None
-                and self.ode_unit_mem_size * N > mem_before[0]
+                self.f_unit_mem_size is not None
+                and self.f_unit_mem_size * N > mem_before[0]
             ):
                 return
             result = f(t_input, *f_args)
             mem_after = self._get_memory()
             del result
-            self.ode_unit_mem_size = mem_scale * max(
+            self.f_unit_mem_size = mem_scale * max(
                 0, (mem_before[0] - mem_after[0]) / float(N)
             )
             eval_time = time.time() - t0
@@ -1433,4 +1433,4 @@ class AdaptiveQuadrature(SolverBase):
             Maximum number of evaluations (integer).
         """
         usable = self._get_usable_memory(total_mem_usage)
-        return int(usable // (1e-12 + self.ode_unit_mem_size))
+        return int(usable // (1e-12 + self.f_unit_mem_size))

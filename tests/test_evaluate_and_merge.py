@@ -87,7 +87,7 @@ class TestUniformEvaluateAdaptiveY:
         expected_second = 0.5 + c * 0.5
         assert torch.allclose(t_add[1, :, 0], expected_second)
 
-    def test_ode_fxn_values(self):
+    def test_fxn_values(self):
         """constant_integrand returns all ones."""
         solver = make_solver_for_unit_test("bosh3")
         t = self._make_t(solver, 0.0, 1.0, 1)

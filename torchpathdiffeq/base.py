@@ -90,7 +90,7 @@ class SolverBase(ABC, DistributedEnvironment):
     - Device management: inherited from DistributedEnvironment.
     - Default parameter storage: f, y0, mesh_init, mesh_final can be set at
       construction and reused across multiple integrate() calls.
-    - Warm-start caching: stores mesh_previous and previous_ode_fxn_id
+    - Warm-start caching: stores mesh_previous and previous_f_id
       so that repeated integration of the same function can reuse the optimized
       time mesh from the prior run.
 
@@ -187,7 +187,7 @@ class SolverBase(ABC, DistributedEnvironment):
         # signal so that reuse_mesh=True can warn if the cached mesh was
         # tuned for a different integrand. Replaces the prior __name__
         # comparison which collided across all lambdas.
-        self.previous_ode_fxn_id = None
+        self.previous_f_id = None
 
         self._set_dtype(dtype)
 
