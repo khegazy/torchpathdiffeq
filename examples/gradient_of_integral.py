@@ -69,7 +69,6 @@ def path_a_backprop_through_integral(theta: torch.Tensor) -> float:
         mesh_init=MESH_INIT,
         mesh_final=MESH_FINAL,
         take_gradient=True,
-        is_training=True,
     )
     return theta.grad.item()
 

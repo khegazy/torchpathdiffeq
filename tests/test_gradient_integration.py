@@ -160,12 +160,11 @@ class TestQuadratureWithGradients:
         integrand.eval()  # Prevent auto-backward; we do manual backward
         solver = _make_solver(method_name, integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
-        # Gradient should be nonzero and positive (integral of positive function)
-        # Note: only the first batch's gradient flows through (library design),
-        # so the exact value won't match the full analytical derivative.
         assert integrand.scale.grad is not None
         assert integrand.scale.grad.item() > 0, (
             f"Expected positive grad, got {integrand.scale.grad.item():.6f}"
@@ -187,7 +186,9 @@ class TestPathOptimization:
         path_integrand.eval()
         solver = _make_solver("bosh3", path_integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
         assert path_integrand.offsets.grad is not None
@@ -202,14 +203,18 @@ class TestPathOptimization:
 
         # Initial loss
         solver = _make_solver("bosh3", path_integrand)
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         initial_loss = result.integral.sum().item()
 
         # Optimization loop
         for _ in range(10):
             optimizer.zero_grad()
             solver = _make_solver("bosh3", path_integrand)
-            result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+            result = solver.integrate(
+                mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+            )
             loss = result.integral.sum()
             loss.backward()
             optimizer.step()
@@ -294,13 +299,14 @@ class TestTrainingLoopPattern:
     """Tests for end-to-end training loop patterns."""
 
     def test_manual_backward(self, method_name):
-        """Module in eval mode, manual backward() → param grads exist."""
+        """take_gradient=False: manual backward() on result.integral → param grads exist."""
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
-        integrand.eval()
         solver = _make_solver(method_name, integrand)
 
-        result = solver.integrate(mesh_init=T_INIT, mesh_final=T_FINAL)
+        result = solver.integrate(
+            mesh_init=T_INIT, mesh_final=T_FINAL, take_gradient=False
+        )
         result.integral.sum().backward()
 
         assert integrand.scale.grad is not None
@@ -324,6 +330,7 @@ class TestTrainingLoopPattern:
             result = solver.integrate(
                 mesh_init=T_INIT,
                 mesh_final=T_FINAL,
+                take_gradient=False,
                 loss_fxn=target_loss,
             )
             result.loss.backward()

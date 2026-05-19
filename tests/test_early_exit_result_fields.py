@@ -55,7 +55,7 @@ def _trigger_early_exit() -> IntegrationResult:
     """
     solver = make_uniform_solver("dopri5", atol=1e-12, rtol=1e-12, max_path_change=0.1)
     mesh = torch.linspace(0.0, 4.0, 4, dtype=torch.float64).unsqueeze(-1)
-    return solver.integrate(f=_wiggly(), mesh=mesh)
+    return solver.integrate(f=_wiggly(), mesh=mesh, take_gradient=False)
 
 
 def test_early_exit_integral_field_populated():

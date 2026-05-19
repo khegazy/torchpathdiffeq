@@ -35,6 +35,7 @@ def integrate(
     remove_cut: float = 0.1,
     total_mem_usage: float = 0.9,
     use_absolute_error_ratio: bool = True,
+    take_gradient: bool = True,
     device: str | None = None,
     **kwargs,
 ) -> IntegrationResult:
@@ -139,4 +140,5 @@ def integrate(
         mesh_init=mesh_init,
         mesh_final=mesh_final,
         total_mem_usage=total_mem_usage,
+        take_gradient=take_gradient,
     )

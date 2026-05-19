@@ -210,7 +210,6 @@ class AdaptiveQuadrature(SolverBase):
         N_init_steps: int = 13,
         ode_args: tuple = (),
         take_gradient: bool = True,
-        # is_training: bool | None = None,
         total_mem_usage: float | None = None,
         loss_fxn: Callable | None = None,
         max_batch: int | None = None,
@@ -248,10 +247,6 @@ class AdaptiveQuadrature(SolverBase):
             ode_args: Extra arguments passed to f.
             take_gradient: If True, calls loss.backward() after each batch
                 to compute gradients through the integration.
-            is_training: If True, enables training mode so that take_gradient
-                is activated. If False, disables gradient computation regardless
-                of take_gradient. If None, inferred from whether f is an
-                nn.Module in training mode.
             total_mem_usage: Fraction of memory to use for batching. Overrides
                 the value from construction if provided.
             loss_fxn: Custom loss function. Takes an IntegrationResult, returns a
@@ -304,7 +299,7 @@ class AdaptiveQuadrature(SolverBase):
 
         # Get variables or populate with default values, send to correct device
         f, mesh_init, mesh_final, y0 = self._check_variables(
-            f, mesh_init, mesh_final, y0, is_training
+            f, mesh_init, mesh_final, y0
         )
         total_mem_usage = (
             self.total_mem_usage if total_mem_usage is None else total_mem_usage
@@ -524,11 +519,7 @@ class AdaptiveQuadrature(SolverBase):
                 )
 
                 # Backpropagate gradients through the integration if requested
-                if take_gradient:
-                    if loss.requires_grad:
-                        raise RuntimeError(
-                            "Loss does not require grad so gradient can't be taken although take_gradient is true"
-                        )
+                if take_gradient and loss.requires_grad:
                     loss.backward()
             del y_step_eval
 

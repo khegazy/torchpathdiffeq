@@ -12,78 +12,12 @@ from _helpers import (
     make_uniform_solver,
     make_variable_solver_for_unit_test,
 )
-from torch import nn
 
 from torchpathdiffeq.runge_kutta import _RK_integral
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _plain_fxn(t, *args):
-    """Plain (non-Module) integrand for testing."""
-    while len(t.shape) < 2:
-        t = t.unsqueeze(0)
-    return t**2
-
-
-class _DummyModule(nn.Module):
-    """Minimal nn.Module for _infer_training tests."""
-
-    def forward(self, t, *args):
-        """Return t unchanged, ensuring at least 2D output."""
-        while len(t.shape) < 2:
-            t = t.unsqueeze(0)
-        return t
-
-
-# ---------------------------------------------------------------------------
-# TestInferTraining
-# ---------------------------------------------------------------------------
-
-
-class TestInferTraining:
-    """Tests for SolverBase._infer_training() priority logic."""
-
-    def test_explicit_true(self):
-        """is_training=True overrides everything."""
-        solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=True, f=None)
-        assert solver.training is True
-
-    def test_explicit_false(self):
-        """is_training=False overrides a training Module."""
-        solver = make_solver_for_unit_test()
-        module = _DummyModule().train()
-        solver._infer_training(is_training=False, f=module)
-        assert solver.training is False
-
-    def test_module_training_mode(self):
-        """Module in training mode → solver.training is True."""
-        solver = make_solver_for_unit_test()
-        module = _DummyModule().train()
-        solver._infer_training(is_training=None, f=module)
-        assert solver.training is True
-
-    def test_module_eval_mode(self):
-        """Module in eval mode → solver.training is False."""
-        solver = make_solver_for_unit_test()
-        module = _DummyModule().eval()
-        solver._infer_training(is_training=None, f=module)
-        assert solver.training is False
-
-    def test_plain_function(self):
-        """Plain callable → solver.training is False."""
-        solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=None, f=_plain_fxn)
-        assert solver.training is False
-
-    def test_none_ode_fxn(self):
-        """f=None → solver.training is False."""
-        solver = make_solver_for_unit_test()
-        solver._infer_training(is_training=None, f=None)
-        assert solver.training is False
 
 
 # ---------------------------------------------------------------------------
@@ -189,13 +123,13 @@ class TestGradientFlowThroughIntegrate:
         """take_gradient=False, manual backward() → param grad nonzero."""
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
-        integrand.eval()  # Prevent _infer_training from setting training=True
         solver = make_uniform_solver(
             "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
             mesh_init=torch.tensor([0], dtype=torch.float64),
             mesh_final=torch.tensor([1], dtype=torch.float64),
+            take_gradient=False,
         )
 
         result.integral.sum().backward()
@@ -220,16 +154,16 @@ class TestGradientFlowThroughIntegrate:
         assert integrand.scale.grad is not None
 
     def test_gradient_taken_false(self):
-        """take_gradient=False with eval-mode Module → gradient_taken is False."""
+        """take_gradient=False → gradient_taken is False."""
         torch.manual_seed(SEED)
         integrand = ScaledIntegrand(scale=2.0)
-        integrand.eval()
         solver = make_uniform_solver(
             "bosh3", atol=ATOL_LOOSE, rtol=RTOL_LOOSE, f=integrand
         )
         result = solver.integrate(
             mesh_init=torch.tensor([0], dtype=torch.float64),
             mesh_final=torch.tensor([1], dtype=torch.float64),
+            take_gradient=False,
         )
 
         assert result.gradient_taken is False
